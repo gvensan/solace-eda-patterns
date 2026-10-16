@@ -297,3 +297,21 @@ its `flowOn.client`.
 - After a consumer is killed, the survivor received the crashed consumer's
   keys part way through their sequence within the rebalance delay (5 s) plus
   handoff time (3 s), still in order per key.
+
+**Dead message queue details (10.26.0).**
+- The Go API v1.10.0 has no queue browser and does not expose a message's
+  delivery count or its DMQ-eligible flag on receipt. The scenario's DMQ
+  watcher reads without acknowledging, so parked messages stay put, and the
+  intake counts attempts itself.
+- A message parked on a DMQ is listed under the DMQ's `msgs` in the monitor
+  tree with `dmqEligibleAsPublished` (the publisher's flag) and
+  `dmqEligible` (false once it is on the DMQ). The source queue counts what
+  it moved in `maxRedeliveryExceededToDmqMsgCount`.
+- Settling FAILED with `max_redelivery_count` 2 gave three deliveries, then
+  the move to the DMQ, as in section 6.
+- `max_redelivery_count` 0 means no limit, not zero redeliveries: a message
+  settled FAILED on such a queue was redelivered 9,938 times in 4 seconds.
+  With 1 it was delivered twice.
+- A queue's default `dead_msg_queue` is `#DEAD_MSG_QUEUE`, which does not
+  exist on a fresh broker. A message that reached its redelivery limit on such
+  a queue was removed and counted in `maxRedeliveryExceededToDmqFailedMsgCount`.

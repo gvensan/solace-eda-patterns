@@ -679,6 +679,9 @@ const Diagram = (() => {
       return on;
     };
     const flowLive = (f, seen = new Set()) => {
+      // A flow that only carries the odd message (to a dead message queue,
+      // say) is drawn but never animated, so it never looks busy.
+      if (f.animate === false) return false;
       if (f.from !== brokerId) return publishing(f.from, seen);
       if (!running(f.to)) return false;
       // Bound but not delivered to: a standby on an exclusive queue. A

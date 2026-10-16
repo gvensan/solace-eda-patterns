@@ -1,0 +1,335 @@
+id: dead-letter-queue
+# Category 6 of the pattern guide (Error Handling Patterns), first pattern.
+order: 610
+eyebrow: Error Handling Patterns
+title: Dead Letter Queue
+summary: >
+  Now and then an order arrives that can never be processed: this one has no
+  delivery address. Retrying it forever would waste the order intake's time
+  and hold up the orders behind it. The queue gives it three attempts, then
+  moves it to a dead message queue, where it waits for someone to look at
+  it, and the orders behind it keep flowing. This page describes broker
+  10.26.0, the version this workshop pins.
+
+objectives:
+  - See an order that keeps failing retried a fixed number of times, then parked
+  - See good orders keep flowing past the one that failed
+  - Find the parked order on the dead message queue, kept rather than lost
+  - "Learn what decides whether a message is parked or dropped: on 10.26.0 the queue, on 10.8.1 the sender"
+
+run:
+  - apply
+  - build
+  - dmq-watch
+  - intake
+  - shop
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The shop places orders on q.dlq.orders and the intake checks them. An
+    order the intake cannot process is handed back for another attempt;
+    after three, the broker moves it to q.dlq.orders.dmq, where operations
+    can see it. The line to operations is drawn without packets: it only
+    carries the odd parked order.
+  duration: 2.4
+  liveWhen: shop
+  nodes:
+    - id: shop
+      label: Shop
+      sublabel: two orders a second
+      kind: app
+      col: 0
+      action: shop
+      requires:
+        - label: svc-dlq-shop
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dlq-shop
+    - id: broker
+      label: Solace Broker
+      sublabel: three attempts, then park
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: orders
+          label: q.dlq.orders
+        - id: dmq
+          label: q.dlq.orders.dmq
+      provides:
+        - label: q.dlq.orders
+          group: orders
+          semp: /msgVpns/{vpn}/queues/q.dlq.orders
+        - label: q.dlq.orders.dmq
+          group: dmq
+          semp: /msgVpns/{vpn}/queues/q.dlq.orders.dmq
+        - label: cp-dlq
+          semp: /msgVpns/{vpn}/clientProfiles/cp-dlq
+        - label: acl-dlq
+          semp: /msgVpns/{vpn}/aclProfiles/acl-dlq
+    - id: intake
+      label: Order Intake
+      sublabel: checks each order
+      kind: app
+      col: 2
+      action: intake
+      flowOn:
+        queue: q.dlq.orders
+        client: dlq-intake
+      requires:
+        - label: svc-dlq-intake
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dlq-intake
+    - id: ops
+      label: Operations
+      sublabel: watches the DMQ
+      kind: app
+      col: 2
+      action: dmq-watch
+      requires:
+        - label: svc-dlq-ops
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dlq-ops
+  flows:
+    - { from: shop, to: broker, label: orders, delay: 0 }
+    - { from: broker, to: intake, via: orders, delay: 0.8 }
+    - { from: broker, to: ops, via: dmq, label: parked, animate: false }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.dlq.orders (three attempts, then the DMQ), its dead message
+      queue q.dlq.orders.dmq, and the client profile, ACL profile and
+      usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: dmq-watch
+    label: Watch the DMQ
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, watch]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Shows every order that lands on q.dlq.orders.dmq, without removing it.
+
+  - id: intake
+    label: Start the order intake
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, intake, --client-name, dlq-intake]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.dlq.orders. A good order is accepted; an order with no
+      delivery address is settled FAILED, which hands it back to the queue
+      for another attempt.
+
+  - id: shop
+    label: Place orders
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, shop]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Places a good order every half second.
+
+  - id: send-bad-order
+    label: Place a bad order
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, poison]
+    cwd: .
+    variant: secondary
+    description: >
+      Places one order with no delivery address, leaving its DMQ-eligible
+      flag unset (the Go API sends that as eligible).
+
+  - id: send-ineligible-order
+    label: Place a bad order marked not DMQ-eligible
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, poison, --eligible, "false"]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Places one order with no delivery address, marked not eligible for a
+      dead message queue.
+
+  - id: respect-on
+    label: Make the queue respect the DMQ-eligible flag
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/queues/q.dlq.orders", '{"respectDmqEligibleEnabled":true}']
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Turns on respect_dmq_eligible_enabled on q.dlq.orders, over SEMP. The
+      next Apply sets it back to false.
+
+  - id: respect-off
+    label: Make the queue ignore the DMQ-eligible flag
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/queues/q.dlq.orders", '{"respectDmqEligibleEnabled":false}']
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Turns respect_dmq_eligible_enabled back off: the 10.26.0 default, and
+      what tf/queues.tf says.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, dead-letter-queue]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes both queues and the access control for this scenario. Any
+      parked order goes with them.
+
+failure_modes:
+  - id: poison-order
+    title: An order that can never succeed
+    breaks: >
+      The shop places one order with no delivery address. The intake cannot
+      process it.
+    watch: >
+      Open the intake's log from its node: the bad order (P-...) fails on
+      attempt 1, 2 and 3, and good orders keep being accepted around it.
+      The card shows Operations: after the third attempt the order appears
+      there as parked. Under On the broker, Parked orders lists
+      it on q.dlq.orders.dmq, where it stays. Nothing needs resetting: the
+      order is kept for someone to look at.
+    why: >
+      Settling a message FAILED hands it back to the queue for another
+      attempt. q.dlq.orders allows 2 redeliveries (max_redelivery_count), so
+      the third failure is the last: the broker removes the message and,
+      because the queue names a dead message queue, moves it there instead
+      of dropping it.
+    real_world: >
+      A malformed payload, an order for a product that no longer exists, a
+      message from a newer schema. Without a limit it is retried forever;
+      without a DMQ it is lost when the limit is reached. A growing DMQ is
+      usually the first sign of a bad producer, so watch its depth.
+    docs:
+      - label: "Go API: consuming persistent messages and settlement outcomes"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: dead message queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
+    node: {role: active}
+    logs: dmq-watch
+    trigger:
+      - run: send-bad-order
+    reset:
+      - start: intake
+    expect:
+      break:
+        within: 30
+        logs:
+          - log: {role: active}
+            has: ["FAILED P-.*attempt 3", "accepted \\d+ orders"]
+          - log: dmq-watch
+            has: ["parked P-.*eligible=default"]
+
+  - id: not-eligible
+    title: The sender says not to keep it (broker 10.26.0)
+    breaks: >
+      The queue is set to respect the DMQ-eligible flag, and the shop places
+      a bad order marked not eligible for a dead message queue.
+    watch: >
+      This describes broker 10.26.0. The intake fails the order three times,
+      as before (its log says eligible=false), but this time Operations sees
+      nothing: the queue respected the flag and dropped the order. Reset
+      turns the setting back off and places the same kind of order again.
+      This time it is parked, even though it says not eligible: with the
+      setting off, which is the 10.26.0 default, the queue parks everything
+      it removes. On 10.8.1 there is no such setting: the flag alone
+      decides, so the order would be dropped both times.
+    why: >
+      A publisher can mark a message eligible for a dead message queue or
+      not (the Go API sends eligible unless told otherwise). From 10.25.10
+      the queue decides whether that flag counts: with
+      respect_dmq_eligible_enabled off, every removed message goes to the
+      DMQ; with it on, only eligible ones do and the rest are dropped.
+      Before that, the flag always counted.
+    real_world: >
+      An upgrade from an older broker changes where messages end up unless
+      the queues are configured for it. Decide per queue whose choice it is,
+      the publisher's or the queue's, and test it on the version you run.
+    docs:
+      - label: "Go API: publishing persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: dead message queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
+    node: {role: active}
+    logs: dmq-watch
+    trigger:
+      - run: respect-on
+      - run: send-ineligible-order
+    reset:
+      - run: respect-off
+      - run: send-ineligible-order
+    expect:
+      break:
+        within: 25
+        logs:
+          - log: {role: active}
+            has: ["FAILED P-.*attempt 3 \\(eligible=false\\)"]
+          - log: dmq-watch
+            lacks: ["parked P-"]
+      reset:
+        within: 25
+        logs:
+          - log: dmq-watch
+            has: ["parked P-.*eligible=false"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.dlq.*
+    # maxRedeliveryExceededToDmqMsgCount counts the orders moved to the DMQ.
+    # ...ToDmqFailedMsgCount counts orders that had nowhere to go: no DMQ.
+    columns: [queueName, msgSpoolUsage, redeliveredMsgCount, maxRedeliveryExceededToDmqMsgCount, maxRedeliveryExceededToDmqFailedMsgCount]
+    ui_hint: Manager → Queues
+    empty: The queues are not on the broker. Press Play, or run Apply configuration.
+  - label: Retry settings on q.dlq.orders
+    kind: semp
+    path: /msgVpns/{vpn}/queues?where=queueName==q.dlq.orders
+    columns: [queueName, maxRedeliveryCount, deadMsgQueue, respectDmqEligibleEnabled]
+    ui_hint: Manager → Queues → q.dlq.orders → Settings
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: Parked orders on q.dlq.orders.dmq
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.dlq.orders.dmq/msgs?count=50
+    # dmqEligibleAsPublished is the sender's flag; dmqEligible is cleared
+    # once a message is on the DMQ.
+    columns: [msgId, spooledTime, dmqEligibleAsPublished]
+    # spooledTime is when it was parked, shown as a local time.
+    ui_hint: Manager → Queues → q.dlq.orders.dmq → Messages
+    empty: Nothing is parked on the dead message queue. Place a bad order to see one arrive.

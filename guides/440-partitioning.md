@@ -66,4 +66,4 @@ where you would meet it in production.
   consumer would get nothing: a partition belongs to one consumer at a time,
   so there is no point running more consumers than partitions.
 
-Next: [Cleanup](999-cleanup.md).
+Next: [Dead Letter Queue](610-dead-letter-queue.md).

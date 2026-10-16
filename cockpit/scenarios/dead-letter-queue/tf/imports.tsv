@@ -1,0 +1,16 @@
+# What the dead-letter-queue scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.dlq	{vpn}/cp-dlq
+solacebroker_msg_vpn_acl_profile.dlq	{vpn}/acl-dlq
+
+# The dead message queue has no subscription: messages reach it only when
+# q.dlq.orders gives up on them.
+solacebroker_msg_vpn_queue.orders	{vpn}/q.dlq.orders
+solacebroker_msg_vpn_queue_subscription.orders	{vpn}/q.dlq.orders/dlq%2Fshop%2Forder%2Fplaced%2Fv1%2F%3E
+solacebroker_msg_vpn_queue.dmq	{vpn}/q.dlq.orders.dmq
+
+# Client usernames
+solacebroker_msg_vpn_client_username.dlq["shop"]	{vpn}/svc-dlq-shop
+solacebroker_msg_vpn_client_username.dlq["intake"]	{vpn}/svc-dlq-intake
+solacebroker_msg_vpn_client_username.dlq["ops"]	{vpn}/svc-dlq-ops

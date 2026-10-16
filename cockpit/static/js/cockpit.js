@@ -84,7 +84,12 @@
       .trim();
   }
 
-  function formatCell(value) {
+  function formatCell(value, column = "") {
+    // SEMP reports times (spooledTime, uptime is a duration and is left
+    // alone) as Unix seconds, which read as a meaningless large number.
+    if (typeof value === "number" && /Time$/.test(column) && value > 1e9) {
+      return { text: new Date(value * 1000).toLocaleTimeString([], { hour12: false }), cls: "is-mono" };
+    }
     if (value === true) return { text: "Yes", cls: "is-true" };
     if (value === false) return { text: "No", cls: "is-false" };
     if (value === null || value === undefined || value === "") return { text: "none", cls: "is-false" };
@@ -781,7 +786,7 @@
                 "tr",
                 {},
                 columns.map((c) => {
-                  const { text, cls } = formatCell(row[c]);
+                  const { text, cls } = formatCell(row[c], c);
                   return h("td", { class: cls, text });
                 })
               )

@@ -276,6 +276,10 @@ A node with `flowOn` is labelled "active, not acking" when it is the active
 consumer, holds unacknowledged messages, and its acked count on the broker
 has not moved for 5 seconds (`STALL_SECONDS` in `cockpit/app/main.py`).
 
+A flow that carries only the odd message (from a queue to its dead message
+queue's reader, say) can set `animate: false`. It is drawn, but never shows
+packets, so the picture does not suggest a steady stream that is not there.
+
 Rules the checker enforces, because they are what the workshop teaches:
 
 - Exactly **one** `kind: broker` node per diagram.

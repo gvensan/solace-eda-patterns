@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"solace-workshop/apps/scenarios/compete"
+	"solace-workshop/apps/scenarios/dlq"
 	"solace-workshop/apps/scenarios/exclusive"
 	"solace-workshop/apps/scenarios/p2p"
 	"solace-workshop/apps/scenarios/partition"
@@ -24,6 +25,10 @@ import (
 var roles = map[string]func([]string){
 	"compete checkout":  compete.Checkout,
 	"compete worker":    compete.Worker,
+	"dlq shop":          dlq.Shop,
+	"dlq poison":        dlq.Poison,
+	"dlq intake":        dlq.Intake,
+	"dlq watch":         dlq.Watch,
 	"exclusive publish": exclusive.Publish,
 	"exclusive ledger":  exclusive.Ledger,
 	"p2p send":          p2p.Send,
