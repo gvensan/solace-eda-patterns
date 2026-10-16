@@ -91,4 +91,4 @@ stops making progress.
   `cockpit/scenarios/exclusive-consumer/tf/queues.tf`, press **Play**, and run
   the second card again. A stalled ledger holds exactly that many postings.
 
-Next: [Cleanup](999-cleanup.md).
+Next: [Competing Consumers](410-competing-consumers.md).

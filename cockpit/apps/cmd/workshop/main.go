@@ -13,6 +13,7 @@ import (
 	"os"
 	"sort"
 
+	"solace-workshop/apps/scenarios/compete"
 	"solace-workshop/apps/scenarios/exclusive"
 	"solace-workshop/apps/scenarios/p2p"
 )
@@ -20,6 +21,8 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"compete checkout":  compete.Checkout,
+	"compete worker":    compete.Worker,
 	"exclusive publish": exclusive.Publish,
 	"exclusive ledger":  exclusive.Ledger,
 	"p2p send":          p2p.Send,

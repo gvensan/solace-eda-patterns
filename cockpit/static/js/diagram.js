@@ -760,7 +760,7 @@ const Diagram = (() => {
         tip(sub, flow === "active"
           ? "The broker is delivering this queue's messages to this app"
           : flow === "stalled"
-          ? "The broker still treats this app as the active consumer, but it is holding messages and has acknowledged none for several seconds. The broker sends it nothing more, and no other consumer gets them"
+          ? "The broker still treats this app as an active consumer, but it is holding messages and has acknowledged none for several seconds. The broker sends it nothing more, and the messages it holds wait until it disconnects"
           : flow === "standby"
           ? "Bound to the queue, but the broker is delivering to another consumer. This app gets nothing until that one goes away"
           : null);

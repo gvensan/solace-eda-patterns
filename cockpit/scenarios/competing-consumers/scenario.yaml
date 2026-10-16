@@ -1,0 +1,348 @@
+id: competing-consumers
+# Category 4 of the pattern guide (Consumer Scalability Patterns), first pattern.
+order: 410
+eyebrow: Consumer Scalability Patterns
+title: Competing Consumers
+summary: >
+  Every order the shop takes needs a confirmation email, and at busy times
+  one worker cannot send them fast enough. The jobs go on one shared queue,
+  and several identical workers take from it. The broker gives each job to
+  exactly one worker, so adding a worker adds capacity, and losing one only
+  slows things down.
+
+objectives:
+  - See several identical workers share one queue, each job going to exactly one of them
+  - Add a worker and watch the backlog shrink, with no change to the publisher or the others
+  - Crash a worker and see its unfinished jobs handed to another
+  - See that a worker that hangs holds up only its own jobs, not everyone's
+
+# Two workers, then checkout. Checkout confirms six orders a second and two
+# workers send five, so a small backlog builds: the reason to start worker 3.
+run:
+  - apply
+  - build
+  - worker-1
+  - worker-2
+  - checkout
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Checkout publishes one job per order. They all land on one shared queue,
+    and the broker hands each job to one of the workers bound to it. Every
+    worker runs the same code; start Worker 3 to add capacity.
+  duration: 2.4
+  liveWhen: checkout
+  nodes:
+    - id: checkout
+      label: Checkout
+      sublabel: six orders a second
+      kind: app
+      col: 0
+      action: checkout
+      requires:
+        - label: svc-cc-checkout
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cc-checkout
+    - id: broker
+      label: Solace Broker
+      sublabel: one job, one worker
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: emails
+          label: q.cc.emails
+      provides:
+        - label: q.cc.emails
+          group: emails
+          semp: /msgVpns/{vpn}/queues/q.cc.emails
+        - label: cp-cc
+          semp: /msgVpns/{vpn}/clientProfiles/cp-cc
+        - label: acl-cc
+          semp: /msgVpns/{vpn}/aclProfiles/acl-cc
+    - id: worker1
+      label: Worker 1
+      sublabel: email sender
+      kind: app
+      col: 2
+      action: worker-1
+      flowOn:
+        queue: q.cc.emails
+        client: cc-worker-1
+      requires:
+        - label: svc-cc-worker
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cc-worker
+    - id: worker2
+      label: Worker 2
+      sublabel: email sender
+      kind: app
+      col: 2
+      action: worker-2
+      flowOn:
+        queue: q.cc.emails
+        client: cc-worker-2
+      requires:
+        - label: svc-cc-worker
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cc-worker
+    - id: worker3
+      label: Worker 3
+      sublabel: start me to keep up
+      kind: app
+      col: 2
+      action: worker-3
+      flowOn:
+        queue: q.cc.emails
+        client: cc-worker-3
+      requires:
+        - label: svc-cc-worker
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cc-worker
+  flows:
+    - { from: checkout, to: broker, label: jobs, delay: 0 }
+    - { from: checkout, to: broker, delay: 0.3 }
+    - { from: broker, to: worker1, via: emails, delay: 0.8 }
+    - { from: broker, to: worker2, via: emails, delay: 1.0 }
+    - { from: broker, to: worker3, via: emails, delay: 1.2 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the shared queue q.cc.emails, its topic subscription, and the
+      client profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: worker-1
+    label: Start worker 1
+    kind: process
+    cmd: [bash, ../../apps/run.sh, compete, worker, --role, worker-1, --client-name, cc-worker-1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Binds the shared queue and sends one email at a time, about 400ms
+      each.
+
+  - id: worker-2
+    label: Start worker 2
+    kind: process
+    cmd: [bash, ../../apps/run.sh, compete, worker, --role, worker-2, --client-name, cc-worker-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same worker again. It binds the same queue and the broker shares
+      the jobs between the two.
+
+  - id: worker-3
+    label: Start worker 3
+    kind: process
+    cmd: [bash, ../../apps/run.sh, compete, worker, --role, worker-3, --client-name, cc-worker-3]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A third worker. With it, the workers send more emails a second than
+      checkout confirms orders, and the backlog drains. Nothing else changes.
+
+  - id: checkout
+    label: Confirm orders
+    kind: process
+    cmd: [bash, ../../apps/run.sh, compete, checkout]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes an "order confirmed" event six times a second, to
+      cc/shop/order/confirmed/v1/<order>.
+
+  # The failure helpers act on a worker by role: the active worker with the
+  # lowest client name, which is the one the page marks.
+  - id: kill-worker
+    label: Crash a worker
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.cc.emails, active, KILL]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills one worker outright, with no chance to finish the jobs it holds.
+
+  - id: stall-worker
+    label: Freeze a worker
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.cc.emails, active, USR1]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Tells one worker to stop working without disconnecting, as a process
+      stuck on a lock or a long pause would.
+
+  - id: stop-worker
+    label: Stop the frozen worker
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.cc.emails, active, TERM]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Stops the worker that was frozen, as a health check would.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, competing-consumers]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any job
+      still on the queue goes with it.
+
+# Both cards act on roles: a worker is hit (the active worker with the lowest
+# client name, which the page marks) and another worker is watched.
+failure_modes:
+  - id: worker-crashes
+    title: A worker crashes
+    breaks: >
+      One of the workers is killed while it holds jobs it has taken but not
+      finished.
+    watch: >
+      The card shows another worker's log. Within a moment it sends the
+      jobs the crashed worker was holding, marked (redelivered): at most 5,
+      the queue's limit per worker. Nothing is lost, and every other job
+      keeps flowing, only more slowly. Reset starts the crashed worker
+      again, and it takes a share straight away: on a shared queue there is
+      no standby.
+    why: >
+      The broker deletes a job only once a worker acknowledges it. When a
+      worker's session ends, every job it held but had not acknowledged
+      goes back on the queue, marked redelivered, and the broker gives it to
+      a worker that is still there.
+    real_world: >
+      A worker crashes, runs out of memory or is scaled down mid-job. The
+      others pick up its unfinished work. Because a job can be delivered
+      twice, a worker should be safe to run on a job it may already have
+      done, for example by checking whether that email was already sent.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: queues and access types"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+    node: {role: active}
+    logs: {role: other}
+    trigger:
+      - run: kill-worker
+    reset:
+      - start: worker-1
+      - start: worker-2
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: {role: active}
+            has: ["exited with code -9"]
+          - log: {role: other}
+            has: ["sent confirmation .*\\(redelivered\\)"]
+      reset:
+        within: 15
+        logs:
+          # The restarted worker shares the work at once, no standby.
+          - log: {role: active}
+            has: ["sent confirmation"]
+
+  - id: worker-hangs
+    title: A worker hangs, and the others carry on
+    breaks: >
+      One worker freezes. It stays connected but stops sending emails and
+      stops acknowledging.
+    watch: >
+      The card shows another worker's log: it keeps sending. Only the
+      frozen worker's own jobs are stuck, the 5 it took before it froze. In
+      the diagram the frozen worker turns to "active, not acking" and gets
+      no more packets, while the others still do. Under On the broker,
+      Workers on q.cc.emails shows it holding 5 unacknowledged jobs.
+      Compare the exclusive consumer, where a hung consumer stops
+      everything. Reset stops the frozen worker (after 5 seconds it is
+      killed, as a health check would), its 5 jobs go to another worker
+      marked (redelivered), and it is started again.
+    why: >
+      On a shared queue every bound worker is active. The broker sends each
+      one jobs until it holds 5 it has not acknowledged (the queue's
+      max_delivered_unacked_msgs_per_flow), then skips it and gives the next
+      job to a worker with room. A frozen worker fills up and is passed
+      over; the jobs it already holds wait until its session ends.
+    real_world: >
+      A worker stuck on a slow downstream call, a deadlock, a long pause.
+      Competing consumers contain the damage to that worker's few jobs. Keep
+      the per-worker limit small so a stuck worker holds little, and run a
+      health check that restarts a worker that stops making progress.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: configuring queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: {role: active}
+    logs: {role: other}
+    trigger:
+      - run: stall-worker
+    reset:
+      - run: stop-worker
+      - start: worker-1
+      - start: worker-2
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: {role: active}
+            has: ["STALLED"]
+          - log: {role: other}
+            has: ["sent confirmation"]
+      reset:
+        within: 25
+        logs:
+          - log: {role: other}
+            has: ["sent confirmation .*\\(redelivered\\)"]
+          - log: {role: active}
+            has: ["sent confirmation"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.cc.*
+    # lastSpooledMsgId minus highestAckedMsgId is roughly the backlog.
+    columns: [queueName, accessType, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId, redeliveredMsgCount]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: Workers on q.cc.emails
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.cc.emails/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount, redeliveredMsgCount]
+    ui_hint: Manager → Queues → q.cc.emails → Consumers
+    empty: No worker is bound to q.cc.emails right now. Press Play, or start a worker.
