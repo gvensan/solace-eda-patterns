@@ -35,6 +35,7 @@ The sidebar follows the eight categories of the pattern guide.
 | # | Scenario | Category | What it shows |
 | --- | --- | --- | --- |
 | 000 | [Reading the dashboard](guides/000-reading-the-dashboard.md) | | What every dot, count and label on the page means |
+| 220 | [Point-to-Point](guides/220-point-to-point.md) | Communication Patterns | One sender, one named queue, one receiver; what the queue holds while the receiver is away |
 | 350 | [Exclusive Consumer](guides/350-exclusive-consumer.md) | Consumption Patterns | One active consumer and a standby on an exclusive queue, failover, and the hang it cannot detect |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 

@@ -508,18 +508,26 @@
      a role changes as apps stop and start, so it is resolved from the live
      diagram state when Break it is pressed, and kept with the failure so its
      border and log stay on the same app through Reset. */
-  function roleNode(scenario, ref) {
+  /* Roles: "active" and "standby" are what the broker reports for a
+     consumer's flow; "other" is an active consumer that is not the one the
+     card's `node:` names, which is how a card on a shared queue says "the
+     worker that was not hit". Several nodes can hold a role on a shared
+     queue, so the one with the lowest client name is taken, the same rule
+     signal_consumer.sh uses, so the page marks the app the trigger hits. */
+  function roleNode(scenario, ref, exclude = null) {
     if (!ref || typeof ref === "string") return ref || null;
     const want = ref.role === "standby" ? ["standby"] : ["active", "stalled"];
-    return (scenario.diagram?.nodes || []).find((n) =>
-      n.flowOn && (!ref.queue || n.flowOn.queue === ref.queue)
-      && want.includes(state.diagramState?.nodes?.[n.id]?.flow))?.id || null;
+    const skip = ref.role === "other" ? exclude : null;
+    return (scenario.diagram?.nodes || [])
+      .filter((n) => n.flowOn && (!ref.queue || n.flowOn.queue === ref.queue)
+        && n.id !== skip && want.includes(state.diagramState?.nodes?.[n.id]?.flow))
+      .sort((a, b) => a.flowOn.client.localeCompare(b.flowOn.client))[0]?.id || null;
   }
 
   function bindMode(scenario, mode) {
     const node = roleNode(scenario, mode.node);
     if (mode.logs && typeof mode.logs === "object") {
-      const id = roleNode(scenario, mode.logs);
+      const id = roleNode(scenario, mode.logs, node);
       const logs = (scenario.diagram?.nodes || []).find((n) => n.id === id)?.action || null;
       return { node, logs };
     }

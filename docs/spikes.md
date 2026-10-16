@@ -249,3 +249,33 @@ the broker's host.
 - **The Go API builds and runs on macOS** (darwin arm64 with cgo). The
   dashboard runs on the host against a broker in Docker with only the
   `SOLACE_*` variables changed.
+
+## 9. Found while building batch 1
+
+Tested on 10.26.0 with the Go API v1.10.0, while building the batch 1
+scenarios.
+
+**Addressing a queue by name.** The Go API publishes to topics only
+(`Publish(msg, *resource.Topic, ...)`), but every queue has a network topic,
+`#P2P/QUE/<queue>`. Publishing a guaranteed message to it delivers to that
+queue, which needs no topic subscription. Point-to-Point uses this.
+
+**A message that reaches no queue.** Published to `#P2P/QUE/` of a queue that
+does not exist, or to a topic nothing subscribes to, a guaranteed message is
+acknowledged and dropped without an error. With the client profile's
+`reject_msg_to_sender_on_no_subscription_match_enabled`, the publisher gets
+`No Subscription Match - Topic '<topic>'` instead.
+
+**A full queue.** With `max_msg_spool_usage` 1 (MB) and 100 KB messages, 11
+were accepted and the next 3 refused to the publisher with `Spool Over Quota.
+Queue or Topic endpoint limit exceeded - Topic '<topic>'`; the queue counted
+them in `maxMsgSpoolUsageExceededDiscardedMsgCount`. This is the default
+`reject_msg_to_sender_on_discard_behavior`, `when-queue-enabled`. A quota of
+0 behaved differently (one message accepted, the next dropped with no error),
+so scenarios use 1 or more.
+
+**Signalling an app by role.** `signal_consumer.sh` finds an app by
+`--client-name <name>` on its command line. An app that sets its client name
+internally cannot be found, and the Break it step silently does nothing. The
+checker now requires any node with `flowOn` to pass `--client-name` matching
+its `flowOn.client`.

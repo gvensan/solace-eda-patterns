@@ -161,18 +161,23 @@ async def roles_now(client, scenario):
     nodes = scenario.get("diagram", {}).get("nodes", [])
     live = (await client.get(f"/api/scenarios/{scenario['id']}/state")).json()["nodes"]
 
-    def node_for(ref):
+    def node_for(ref, exclude=None):
+        # Same rule as the page: on a shared queue the lowest client name in
+        # the role wins, and "other" is an active node other than `exclude`.
         if not isinstance(ref, dict):
             return ref
         want = ("standby",) if ref.get("role") == "standby" else ("active", "stalled")
-        return next((n["id"] for n in nodes if n.get("flowOn")
-                     and (not ref.get("queue") or n["flowOn"]["queue"] == ref["queue"])
-                     and live.get(n["id"], {}).get("flow") in want), None)
+        skip = exclude if ref.get("role") == "other" else None
+        found = sorted((n for n in nodes if n.get("flowOn") and n["id"] != skip
+                        and (not ref.get("queue") or n["flowOn"]["queue"] == ref["queue"])
+                        and live.get(n["id"], {}).get("flow") in want),
+                       key=lambda n: n["flowOn"]["client"])
+        return found[0]["id"] if found else None
 
-    def action_for(ref):
+    def action_for(ref, exclude=None):
         if not isinstance(ref, dict):
             return ref
-        node = node_for(ref)
+        node = node_for(ref, exclude)
         return next((n.get("action") for n in nodes if n["id"] == node), None)
 
     return node_for, action_for
@@ -262,19 +267,21 @@ async def smoke(client, scenario) -> None:
         # Roles are frozen here, as the page freezes them at Break it, and
         # used for the card and for every expect: entry through Reset.
         node_for, action_for = await roles_now(client, scenario)
-        bound = {"node": node_for(mode.get("node")), "logs": action_for(mode.get("logs"))}
+        card_node = node_for(mode.get("node"))
+        resolve = lambda ref: action_for(ref, card_node)
+        bound = {"node": card_node, "logs": resolve(mode.get("logs"))}
         if (mode.get("node") and not bound["node"]) or (mode.get("logs") and not bound["logs"]):
             fail(f"{sid}: {mode['id']}: no app holds the role it names ({bound})")
             continue
         say(f"     (marks {bound['node']}, shows the log of {bound['logs']})")
         expect = mode.get("expect") or {}
-        watched = {action_for(e["log"]) for part in expect.values()
+        watched = {resolve(e["log"]) for part in expect.values()
                    for e in part.get("logs", [])} - {None}
 
         snap = await snapshot(client, sid, watched)
         await run_steps(client, sid, mode.get("trigger"))
         if "break" in expect:
-            await check_expect(client, sid, mode["id"], "after Break it", expect["break"], action_for, snap)
+            await check_expect(client, sid, mode["id"], "after Break it", expect["break"], resolve, snap)
         else:
             await asyncio.sleep(BREAK_SECONDS)
         await show_logs(sid, scenario, bound)
@@ -283,7 +290,7 @@ async def smoke(client, scenario) -> None:
         snap = await snapshot(client, sid, watched)
         await run_steps(client, sid, mode.get("reset"))
         if "reset" in expect:
-            await check_expect(client, sid, mode["id"], "after Reset", expect["reset"], action_for, snap)
+            await check_expect(client, sid, mode["id"], "after Reset", expect["reset"], resolve, snap)
         else:
             await asyncio.sleep(RESET_SECONDS)
         await show_logs(sid, scenario, bound)

@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"solace-workshop/apps/scenarios/exclusive"
+	"solace-workshop/apps/scenarios/p2p"
 )
 
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
@@ -21,6 +22,8 @@ import (
 var roles = map[string]func([]string){
 	"exclusive publish": exclusive.Publish,
 	"exclusive ledger":  exclusive.Ledger,
+	"p2p send":          p2p.Send,
+	"p2p print":         p2p.Print,
 }
 
 func main() {

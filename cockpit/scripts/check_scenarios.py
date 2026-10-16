@@ -94,8 +94,10 @@ def check(path: pathlib.Path) -> list[str]:
         for key in ("node", "logs"):
             ref = mode.get(key)
             if isinstance(ref, dict):
-                if ref.get("role") not in ("active", "standby"):
-                    bad.append(f"failure mode {mid!r} {key} role must be active or standby")
+                if ref.get("role") not in ("active", "standby", "other"):
+                    bad.append(f"failure mode {mid!r} {key} role must be active, standby or other")
+                if ref.get("role") == "other" and key == "node":
+                    bad.append(f"failure mode {mid!r} node cannot be role other; it is what other is measured against")
                 candidates = [n for n in spec.get("diagram", {}).get("nodes", [])
                               if n.get("flowOn") and (not ref.get("queue")
                                                       or n["flowOn"].get("queue") == ref["queue"])]
@@ -128,6 +130,14 @@ def check(path: pathlib.Path) -> list[str]:
         if flow_on is not None and not (isinstance(flow_on, dict)
                                         and flow_on.get("queue") and flow_on.get("client")):
             bad.append(f"diagram node {node['id']!r} flowOn needs queue: and client:")
+        elif flow_on:
+            # signal_consumer.sh finds the app by --client-name on its command
+            # line, so the node's action has to pass the same name.
+            cmd = actions.get(node.get("action"), {}).get("cmd", [])
+            want = ["--client-name", flow_on["client"]]
+            if not any(cmd[i:i + 2] == want for i in range(len(cmd))):
+                bad.append(f"diagram node {node['id']!r} has flowOn client {flow_on['client']!r}, "
+                           f"but its action does not pass --client-name {flow_on['client']}")
 
     live = spec.get("diagram", {}).get("liveWhen")
     if live and live not in node_ids:
@@ -193,8 +203,8 @@ def check_expect(mid, expect, actions, spec) -> list:
                 if ref not in actions:
                     bad.append(f"{at} log names missing action {ref!r}")
             elif isinstance(ref, dict):
-                if ref.get("role") not in ("active", "standby"):
-                    bad.append(f"{at} log role must be active or standby")
+                if ref.get("role") not in ("active", "standby", "other"):
+                    bad.append(f"{at} log role must be active, standby or other")
                 if not [n for n in flow_nodes
                         if not ref.get("queue") or n["flowOn"].get("queue") == ref["queue"]]:
                     bad.append(f"{at} log names a role, but no diagram node has a matching flowOn")

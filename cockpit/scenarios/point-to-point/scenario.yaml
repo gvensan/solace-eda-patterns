@@ -1,0 +1,291 @@
+id: point-to-point
+# Category 2 of the pattern guide (Communication Patterns), second pattern.
+order: 220
+eyebrow: Communication Patterns
+title: Point-to-Point
+summary: >
+  The shop's order service needs a shipping label printed for every order.
+  It sends each print job to one named queue, and one label printer reads
+  it. The sender knows exactly where its message goes, only that receiver
+  gets it, and if the printer is away the queue keeps the jobs until it is
+  back.
+
+objectives:
+  - See a sender address one queue by name, not a topic
+  - See jobs wait on the queue while the receiver is away, and arrive in order when it returns
+  - Find the queue's limit, and the error the sender gets when it is reached
+  - See what the broker tells a sender that names a queue that does not exist
+
+# The printer first, so the first job already has somewhere to go. The
+# queue would keep it anyway: that is what makes this point-to-point.
+run:
+  - apply
+  - build
+  - printer
+  - sender
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The order service sends each label job to the queue q.p2p.labels by
+    name. The broker keeps it there until the label printer, the queue's
+    one reader, takes it. No other app sees the jobs.
+  duration: 2.4
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Order Service
+      sublabel: a job every half second
+      kind: app
+      col: 0
+      action: sender
+      requires:
+        - label: svc-p2p-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-p2p-orders
+    - id: broker
+      label: Solace Broker
+      sublabel: holds jobs for one reader
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: labels
+          label: q.p2p.labels
+      provides:
+        - label: q.p2p.labels
+          group: labels
+          semp: /msgVpns/{vpn}/queues/q.p2p.labels
+        - label: cp-p2p
+          semp: /msgVpns/{vpn}/clientProfiles/cp-p2p
+        - label: acl-p2p
+          semp: /msgVpns/{vpn}/aclProfiles/acl-p2p
+    - id: printer
+      label: Label Printer
+      sublabel: prints one at a time
+      kind: app
+      col: 2
+      action: printer
+      flowOn:
+        queue: q.p2p.labels
+        client: p2p-printer
+      requires:
+        - label: svc-p2p-printer
+          semp: /msgVpns/{vpn}/clientUsernames/svc-p2p-printer
+  flows:
+    - from: orders
+      to: broker
+      label: "#P2P/QUE/q.p2p.labels"
+      delay: 0
+    - from: broker
+      to: printer
+      via: labels
+      delay: 0.8
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the queue q.p2p.labels (1 MB, no topic subscriptions), and the
+      client profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: printer
+    label: Start the label printer
+    kind: process
+    cmd: [bash, ../../apps/run.sh, p2p, print, --client-name, p2p-printer]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Binds q.p2p.labels and prints one label at a time, checking that the
+      job numbers follow on. A job that never arrives shows as a GAP.
+
+  - id: sender
+    label: Send label jobs
+    kind: process
+    cmd: [bash, ../../apps/run.sh, p2p, send]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Sends a 25 KB label job every half second to the queue q.p2p.labels,
+      by its network topic #P2P/QUE/q.p2p.labels, and waits for the broker
+      to accept each one.
+
+  - id: sender-typo
+    label: Send to a misspelt queue
+    kind: process
+    cmd: [bash, ../../apps/run.sh, p2p, send, --queue, q.p2p.lables]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same order service, configured with the queue name misspelt as
+      q.p2p.lables.
+
+  - id: stop-printer
+    label: Take the printer offline
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.p2p.labels, active, TERM]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Stops whichever app is reading q.p2p.labels: the label printer.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, point-to-point]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any job
+      still on the queue goes with it.
+
+failure_modes:
+  - id: receiver-offline
+    title: The printer goes offline
+    breaks: >
+      The queue's reader, the label printer, stops. The order service keeps
+      sending.
+    watch: >
+      At first nothing goes wrong: the order service keeps sending, and the
+      jobs wait on q.p2p.labels (Queue, under On the broker: msgSpoolUsage
+      climbs). After about 20 seconds the queue reaches its 1 MB limit, and
+      the order service's log shows jobs refused with "Spool Over Quota".
+      Reset starts the printer. It prints every job that waited, in order,
+      then reports a GAP: the jobs the broker refused were never stored, so
+      they can never be printed.
+    why: >
+      A queue keeps every message for its reader, so a receiver that is
+      away loses nothing, up to the queue's limit (max_msg_spool_usage, 1 MB
+      here). Past the limit the broker refuses new messages and, because
+      the queue is set to tell the sender, returns the refusal with the
+      publish acknowledgement. The sender learns the job was not taken; the
+      queue does not keep it.
+    real_world: >
+      A receiver down for maintenance, a deploy that takes longer than
+      planned, a consumer stuck in a crash loop. Size a queue for how long
+      its reader can be away, watch its depth, and make the sender handle a
+      refused message (retry later, or alert) rather than assume it was
+      delivered.
+    docs:
+      - label: "Go API: publishing persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: configuring queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: {role: active}
+    logs: sender
+    trigger:
+      - run: stop-printer
+    reset:
+      - start: printer
+    expect:
+      break:
+        within: 60
+        logs:
+          - log: sender
+            has: ["refused: .*Spool Over Quota"]
+      reset:
+        within: 30
+        logs:
+          - log: printer
+            has: ["printed label job", "GAP: jobs"]
+
+  - id: wrong-queue
+    title: The sender names the wrong queue
+    breaks: >
+      The order service restarts with the queue name misspelt, q.p2p.lables,
+      and sends every job there.
+    watch: >
+      Every job is refused at once with "No Subscription Match": there is no
+      queue by that name, so nothing would take the job. The printer prints
+      what was already waiting, then nothing more. Reset restarts the order
+      service with the right name and jobs flow again.
+    why: >
+      In point-to-point the sender names the one destination. A guaranteed
+      message that reaches no queue is normally dropped without a word. This
+      scenario's client profile sets
+      reject_msg_to_sender_on_no_subscription_match_enabled, so the broker
+      refuses it back to the sender instead.
+    real_world: >
+      A typo in configuration, a queue renamed on one side only, an
+      environment where the queue was never created. The sender is coupled
+      to the queue's name, which is the price of knowing exactly where a
+      message goes. Turn on the rejection so the mistake is loud.
+    docs:
+      - label: "Go API: publishing persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: client profiles"
+        url: https://docs.solace.com/Configuring-and-Managing/Configuring-Client-Profiles.htm
+    node: orders
+    logs: sender-typo
+    trigger:
+      - stop: sender
+      - start: sender-typo
+    reset:
+      - stop: sender-typo
+      - start: sender
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: sender-typo
+            has: ["refused: .*No Subscription Match"]
+            lacks: ["sent label job"]
+      reset:
+        within: 15
+        logs:
+          - log: sender
+            has: ["sent label job"]
+            lacks: ["refused"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.p2p.*
+    # msgSpoolUsage is in bytes, maxMsgSpoolUsage in MB.
+    columns: [queueName, msgSpoolUsage, maxMsgSpoolUsage, maxMsgSpoolUsageExceededDiscardedMsgCount, lastSpooledMsgId, highestAckedMsgId]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: Reader of q.p2p.labels
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.p2p.labels/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount]
+    ui_hint: Manager → Queues → q.p2p.labels → Consumers
+    empty: Nothing is reading q.p2p.labels right now. Press Play, or start the label printer.
+  - label: Client profile
+    kind: semp
+    path: /msgVpns/{vpn}/clientProfiles?where=clientProfileName==cp-p2p
+    columns: [clientProfileName, rejectMsgToSenderOnNoSubscriptionMatchEnabled, allowGuaranteedMsgSendEnabled]
+    ui_hint: Manager → Access Control → Client Profiles
+    empty: The client profile is not on the broker. Press Play, or run Apply configuration.

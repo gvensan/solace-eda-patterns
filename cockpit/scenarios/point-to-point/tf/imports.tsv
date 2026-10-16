@@ -1,0 +1,12 @@
+# What the point-to-point scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.p2p	{vpn}/cp-p2p
+solacebroker_msg_vpn_acl_profile.p2p	{vpn}/acl-p2p
+
+# The queue has no subscriptions: jobs reach it by name.
+solacebroker_msg_vpn_queue.labels	{vpn}/q.p2p.labels
+
+# Client usernames
+solacebroker_msg_vpn_client_username.p2p["orders"]	{vpn}/svc-p2p-orders
+solacebroker_msg_vpn_client_username.p2p["printer"]	{vpn}/svc-p2p-printer

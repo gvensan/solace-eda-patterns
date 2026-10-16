@@ -25,7 +25,7 @@ structural change. This file is the short version plus the rules to follow.
 | `cockpit/scenarios/<id>/tf/` | Terraform for the broker objects that scenario owns, plus `imports.tsv` |
 | `cockpit/apps/scenarios/<pkg>/` | Go roles for that scenario's apps |
 | `cockpit/apps/cmd/workshop/main.go` | Registers every role as `"<pkg> <role>"` in one binary |
-| `cockpit/apps/internal/solace/` | Shared Go helpers: connect, publish, subscribe, bind queue, logging |
+| `cockpit/apps/internal/solace/` | Shared Go helpers: connect, publish, subscribe, bind queue, logging, freeze on SIGUSR1, payload fields |
 | `cockpit/app/` | FastAPI dashboard backend (registry, process manager, SEMP proxy) |
 | `cockpit/static/` | Dashboard UI, plain JS and CSS, no build step |
 | `cockpit/scripts/` | `check_scenarios.py`, `smoke.py`, `reconcile.sh`, failure mode helpers |
@@ -127,8 +127,12 @@ of them.
   role, never on a named instance: "the active ledger crashes", not "Ledger A
   crashes". Its trigger targets whoever holds the role now, through
   `cockpit/scripts/signal_consumer.sh <queue> <active|standby> <SIGNAL>`, and
-  its `node:` and `logs:` are `{role: active}` or `{role: standby}`, which
-  the page resolves from the broker when Break it is pressed. The card text,
+  its `node:` and `logs:` are `{role: active}`, `{role: standby}` or, for the
+  log, `{role: other}` (another active consumer, on a shared queue), which
+  the page resolves from the broker when Break it is pressed. Where several
+  apps hold a role, the lowest client name is the one hit and marked. Every
+  app that takes part passes `--client-name` matching its node's `flowOn`
+  (the checker enforces it); `signal_consumer.sh` finds it that way. The card text,
   the guide and the Reset steps use the same role words. Never rearrange the
   apps behind the attendee's back to make a fixed name true: what they see in
   the diagram before pressing Break it is what the card acts on. Reset brings

@@ -316,6 +316,14 @@ does what, a card acts on the role, not a named instance. `node:` and `logs:`
 then name a role, resolved from the broker when Break it is pressed among the
 nodes with `flowOn`, and kept for that failure through Reset:
 
+Three roles exist. `active` and `standby` are what the broker reports for a
+consumer's flow on the queue. `other` is an active consumer other than the
+one the card's `node:` names, for a card on a shared queue that hits one
+worker and watches another (`other` cannot be the `node:` itself). On a
+shared queue several consumers are active at once; the one with the lowest
+client name is taken, by the page, by `smoke.py` and by
+`signal_consumer.sh` alike, so the box that is marked is the app that is hit.
+
 ```yaml
     node: {role: active}      # or standby; add queue: when there are several
     logs: {role: standby}     # the log of the app that holds that role

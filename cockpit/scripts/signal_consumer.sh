@@ -10,6 +10,8 @@
 # holds that role (SEMP monitor, the queue's txFlows), then signals the
 # workshop process connected under that client name. Apps that take part
 # connect with a fixed name (solace.ConnectAs) and pass it as --client-name.
+# Where several consumers hold the role (all of them are active on a shared
+# queue), the one with the lowest client name is signalled.
 #
 # KILL is a crash, TERM a clean stop, USR1 whatever the app treats as a stall.
 
@@ -27,11 +29,12 @@ URL="${SOLACE_SEMP_URL:-http://localhost:8080}/SEMP/v2/monitor/msgVpns/${SOLACE_
 CLIENT="$(curl -sf -u "${SOLACE_SEMP_USER:-admin}:${SOLACE_SEMP_PASSWORD:-admin}" "$URL" | python3 -c '
 import json, sys
 want = sys.argv[1]
-for flow in json.load(sys.stdin).get("data", []):
-    active = flow.get("activityState", "").startswith("active")
-    if active == (want == "active"):
-        print(flow["clientName"])
-        break
+# On a shared queue several consumers are active at once. The lowest client
+# name is taken, the same rule the dashboard uses to mark the node.
+names = sorted(flow["clientName"] for flow in json.load(sys.stdin).get("data", [])
+               if flow.get("activityState", "").startswith("active") == (want == "active"))
+if names:
+    print(names[0])
 ' "$ROLE")" || true
 
 if [ -z "$CLIENT" ]; then

@@ -15,10 +15,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/signal"
-	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"solace-workshop/apps/internal/solace"
@@ -95,10 +91,7 @@ func Ledger(args []string) {
 		os.Exit(2)
 	}
 
-	// Registered before connecting, so a stall request that arrives early is
-	// caught rather than taking the default action for SIGUSR1, which is exit.
-	stallSignal := make(chan os.Signal, 1)
-	signal.Notify(stallSignal, syscall.SIGUSR1)
+	stalled := solace.StallOnSignal(*role)
 
 	svc := solace.ConnectAs(*role, *user, *clientName)
 	defer svc.Disconnect()
@@ -122,36 +115,23 @@ func Ledger(args []string) {
 	// the last it prints until it is made active.
 	solace.Logf(*role, "STANDBY until the broker makes this instance active")
 
-	var mu sync.Mutex
-	stalled := false
-	go func() {
-		<-stallSignal
-		mu.Lock()
-		stalled = true
-		mu.Unlock()
-		solace.Logf(*role, "STALLED: still connected and still bound, but no longer processing or acknowledging")
-	}()
-
 	applied, redelivered := 0, 0
 	lastRun, lastSeq := 0, 0
 
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
-		mu.Lock()
-		if stalled {
-			mu.Unlock()
+		if stalled() {
 			// Hold the delivery thread, as a stuck process would. Nothing
 			// is acknowledged from here on.
-			select {}
+			solace.Freeze()
 		}
-		mu.Unlock()
 
 		time.Sleep(*work)
 
 		payload := solace.PayloadOf(msg)
-		run, _ := numberOf(payload, "run")
-		seq, _ := numberOf(payload, "seq")
-		account := stringOf(payload, "account")
-		amount := stringOf(payload, "amount")
+		run, _ := solace.FieldInt(payload, "run")
+		seq, _ := solace.FieldInt(payload, "seq")
+		account := solace.FieldString(payload, "account")
+		amount := solace.FieldString(payload, "amount")
 
 		note := ""
 		switch {
@@ -185,36 +165,4 @@ func Ledger(args []string) {
 	solace.WaitForStop()
 	fmt.Println()
 	solace.Logf(*role, "stopped after applying %d posting(s), %d of them redelivered.", applied, redelivered)
-}
-
-// numberOf pulls a numeric field out of a posting without a full JSON parse.
-func numberOf(payload, field string) (int, bool) {
-	key := `"` + field + `":`
-	i := strings.Index(payload, key)
-	if i < 0 {
-		return 0, false
-	}
-	n, found := 0, false
-	for _, c := range payload[i+len(key):] {
-		if c < '0' || c > '9' {
-			break
-		}
-		n = n*10 + int(c-'0')
-		found = true
-	}
-	return n, found
-}
-
-// stringOf pulls a string field out of a posting.
-func stringOf(payload, field string) string {
-	key := `"` + field + `":"`
-	i := strings.Index(payload, key)
-	if i < 0 {
-		return ""
-	}
-	rest := payload[i+len(key):]
-	if j := strings.IndexByte(rest, '"'); j >= 0 {
-		return rest[:j]
-	}
-	return rest
 }
