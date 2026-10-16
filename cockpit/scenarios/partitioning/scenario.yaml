@@ -1,0 +1,315 @@
+id: partitioning
+# Category 4 of the pattern guide (Consumer Scalability Patterns), fourth pattern.
+order: 440
+eyebrow: Consumer Scalability Patterns
+title: Partitioning
+summary: >
+  Each order moves through created, paid, packed, shipped and delivered, and
+  fulfilment must see one order's updates in that order. Many orders are in
+  flight at once, so two consumers share the work. The order id travels as
+  the partition key: every update for one order goes to the same consumer,
+  in order, while different orders are handled in parallel.
+
+objectives:
+  - See every update for one order reach the same consumer, in order
+  - See different orders handled by different consumers at the same time
+  - Crash a consumer and watch its orders move to the other one, still in order
+  - Publish without a partition key and see one order's updates split between consumers
+
+run:
+  - apply
+  - build
+  - fulfilment-1
+  - fulfilment-2
+  - orders
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The order service publishes each update with the order id as its
+    partition key. The queue has four partitions; the key picks one, and
+    each partition belongs to one consumer. So one order always reaches the
+    same consumer, and the two consumers work on different orders at once.
+  duration: 2.4
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Order Service
+      sublabel: keyed by order id
+      kind: app
+      col: 0
+      action: orders
+      requires:
+        - label: svc-part-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-part-orders
+    - id: broker
+      label: Solace Broker
+      sublabel: one key, one consumer
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: partitioned
+          label: q.part.orders (4 partitions)
+      provides:
+        - label: q.part.orders
+          group: partitioned
+          semp: /msgVpns/{vpn}/queues/q.part.orders
+        - label: cp-part
+          semp: /msgVpns/{vpn}/clientProfiles/cp-part
+        - label: acl-part
+          semp: /msgVpns/{vpn}/aclProfiles/acl-part
+    - id: fulfil1
+      label: Fulfilment 1
+      sublabel: its own orders
+      kind: app
+      col: 2
+      action: fulfilment-1
+      flowOn:
+        queue: q.part.orders
+        client: part-fulfilment-1
+      requires:
+        - label: svc-part-fulfilment
+          semp: /msgVpns/{vpn}/clientUsernames/svc-part-fulfilment
+    - id: fulfil2
+      label: Fulfilment 2
+      sublabel: its own orders
+      kind: app
+      col: 2
+      action: fulfilment-2
+      flowOn:
+        queue: q.part.orders
+        client: part-fulfilment-2
+      requires:
+        - label: svc-part-fulfilment
+          semp: /msgVpns/{vpn}/clientUsernames/svc-part-fulfilment
+  flows:
+    - { from: orders, to: broker, label: order updates, delay: 0 }
+    - { from: broker, to: fulfil1, via: partitioned, delay: 0.8 }
+    - { from: broker, to: fulfil2, via: partitioned, delay: 1.0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the partitioned queue q.part.orders (four partitions), its
+      topic subscription, and the client profile, ACL profile and usernames
+      for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: fulfilment-1
+    label: Start fulfilment 1
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, fulfil, --role, fulfilment-1, --client-name, part-fulfilment-1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Binds the partitioned queue and handles order updates, checking that
+      each order moves one step at a time.
+
+  - id: fulfilment-2
+    label: Start fulfilment 2
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, fulfil, --role, fulfilment-2, --client-name, part-fulfilment-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same consumer again. The broker gives it partitions of its own, so
+      it handles different orders.
+
+  - id: orders
+    label: Publish order updates
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, orders]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes status updates for eight orders at a time, five a second,
+      each with its order id as the partition key.
+
+  - id: orders-no-key
+    label: Publish without a key
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, orders, --no-key]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same order service, but publishing every update without a
+      partition key.
+
+  - id: kill-consumer
+    label: Crash a consumer
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.part.orders, active, KILL]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills one fulfilment consumer outright: the active one with the lowest
+      client name, which the page marks.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, partitioning]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any update
+      still on the queue goes with it.
+
+failure_modes:
+  - id: consumer-crashes
+    title: A consumer crashes, and its orders move
+    breaks: >
+      One fulfilment consumer is killed while it handles its orders.
+    watch: >
+      The card shows the other consumer's log. A few seconds later it
+      starts receiving orders it has never seen, part way through their
+      lives: "picked up O-... at paid". Those are the crashed consumer's
+      partitions, handed over. Every order still moves one step at a time:
+      no SPLIT and no OUT OF ORDER. Reset starts the crashed consumer again,
+      and after the rebalance delay the partitions are shared out again.
+    why: >
+      Each partition belongs to one consumer at a time. When a consumer
+      goes, the broker waits the rebalance delay (5 seconds here) and gives
+      its partitions to the consumers that are left. Updates it had taken
+      but not acknowledged come back first, in their original order, so
+      each order stays in sequence across the move.
+    real_world: >
+      A consumer crashes, or is scaled down or redeployed. Partitioning
+      keeps per-key order through that, at the cost of a short pause for
+      the moved keys while the broker rebalances.
+    docs:
+      - label: "Go API: publishing persistent messages (partition keys)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: queues and partitioned queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+    node: {role: active}
+    logs: {role: other}
+    trigger:
+      - run: kill-consumer
+    reset:
+      - start: fulfilment-1
+      - start: fulfilment-2
+    expect:
+      break:
+        within: 25
+        logs:
+          - log: {role: active}
+            has: ["exited with code -9"]
+          - log: {role: other}
+            has: ["picked up O-"]
+            lacks: ["SPLIT", "OUT OF ORDER"]
+      reset:
+        within: 25
+        logs:
+          - log: {role: active}
+            has: ["(created|paid|packed|shipped|delivered) \\(key O-"]
+            lacks: ["SPLIT", "OUT OF ORDER"]
+
+  - id: no-key
+    title: The publisher forgets the partition key
+    breaks: >
+      The order service restarts without setting the partition key on its
+      updates.
+    watch: >
+      Within seconds both consumers print SPLIT: one order's updates now
+      arrive at both, so each sees gaps, for example "went created to
+      packed; paid was handled by another consumer". The log lines say "no
+      key". Reset restarts the order service with the key and the SPLIT
+      lines stop.
+    why: >
+      The partition key is what ties an order to one partition. A message
+      without one is placed on a partition with no relation to its order,
+      so successive updates for the same order land on different
+      partitions, and so on different consumers, which handle them in
+      parallel, in no particular order.
+    real_world: >
+      A new publisher, a library upgrade or a refactor that drops the key
+      property. Nothing fails: messages still flow and every consumer stays
+      busy, so the first sign is out-of-order processing downstream. Make
+      the key part of the message contract, and check for it.
+    docs:
+      - label: "Go API: publishing persistent messages (partition keys)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: queues and partitioned queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+    node: orders
+    logs: {role: active}
+    trigger:
+      - stop: orders
+      - start: orders-no-key
+    reset:
+      - stop: orders-no-key
+      - start: orders
+    expect:
+      break:
+        within: 30
+        logs:
+          - log: {role: active}
+            has: ["SPLIT: ", "no key"]
+      reset:
+        # Updates already on the queue without a key still arrive for a
+        # moment after the reset.
+        settle: 8
+        within: 20
+        logs:
+          - log: {role: active}
+            has: ["\\(key O-"]
+            lacks: ["SPLIT", "OUT OF ORDER"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.part.*
+    # partitionRebalanceStatus leaves "ready" while partitions are moving.
+    columns: [queueName, accessType, partitionCount, partitionRebalanceStatus, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  # The broker keeps each partition as an internal queue of its own.
+  - label: Partitions of q.part.orders
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=partitionQueueName==q.part.orders
+    columns: [partitionNumber, queueName, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
+    ui_hint: Manager → Queues → q.part.orders → Partitions
+    empty: The queue is not on the broker, so it has no partitions yet. Press Play.
+  - label: Consumers on q.part.orders
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.part.orders/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount, redeliveredMsgCount]
+    ui_hint: Manager → Queues → q.part.orders → Consumers
+    empty: No consumer is bound to q.part.orders right now. Press Play, or start a fulfilment consumer.

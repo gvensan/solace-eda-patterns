@@ -171,6 +171,7 @@ def check_expect(mid, expect, actions, spec) -> list:
         expect:
           break:                 # after the trigger; reset: after the reset
             within: 15           # seconds, optional
+            settle: 5            # seconds of output to ignore first, optional
             logs:
               - log: <action id> | {role: active|standby, queue: optional}
                 has: [regex, ...]     # must appear within the window
@@ -193,6 +194,9 @@ def check_expect(mid, expect, actions, spec) -> list:
         within = part.get("within", 15)
         if not isinstance(within, (int, float)) or within <= 0:
             bad.append(f"{where} {phase} within must be a positive number of seconds")
+        settle = part.get("settle", 0)
+        if not isinstance(settle, (int, float)) or settle < 0:
+            bad.append(f"{where} {phase} settle must be a number of seconds")
         for i, entry in enumerate(part["logs"], 1):
             at = f"{where} {phase} entry {i}"
             if not isinstance(entry, dict):

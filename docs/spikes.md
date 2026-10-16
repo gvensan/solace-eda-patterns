@@ -279,3 +279,21 @@ so scenarios use 1 or more.
 internally cannot be found, and the Break it step silently does nothing. The
 checker now requires any node with `flowOn` to pass `--client-name` matching
 its `flowOn.client`.
+
+**Partitioned queues.**
+- Messages with a partition key (`JMSXGroupID`, the Go API's
+  `config.QueuePartitionKey`) stay with one consumer: with two consumers and
+  keys K0 to K2, each key went to one consumer only. Messages without a key
+  alternated between the partitions, so one key's messages would split.
+- With 2 partitions and 3 consumers bound, two consumers received 15
+  messages each and the third received none: a partition belongs to one
+  consumer, so consumers beyond the partition count sit idle.
+- Every consumer on a partitioned queue reports `activityState`
+  `active-consumer`, so the dashboard's roles treat them all as active.
+- The broker keeps each partition as an internal queue, `#pq/<id>/0000N`,
+  listed in the monitor tree with `partitionNumber` and `partitionQueueName`.
+  Its `txFlows` are empty, so which consumer owns a partition is not
+  visible that way. The queue reports `partitionRebalanceStatus`.
+- After a consumer is killed, the survivor received the crashed consumer's
+  keys part way through their sequence within the rebalance delay (5 s) plus
+  handoff time (3 s), still in order per key.

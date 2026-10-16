@@ -373,6 +373,9 @@ block.
 - Roles are frozen at Break it, together with the card's own `node:` and
   `logs:`, and stay the same for the reset checks. So after a crash, `{role:
   active}` in `reset:` still means the app that crashed.
+- `settle: <seconds>` (optional) ignores output written in the first seconds
+  after the steps, for something that legitimately lingers: messages already
+  on the queue when a reset puts the cause right. The window starts after it.
 - With any `lacks:` the check always waits the full window, since absence
   can only be shown by waiting. Without, it ends as soon as every `has:`
   pattern has been seen.

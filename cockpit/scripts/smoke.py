@@ -205,6 +205,17 @@ async def lines_since(client, sid: str, aid: str, snap) -> list:
     return [l["text"] for l in lines if l["seq"] > last]
 
 
+async def settle(client, sid: str, part, watched, snap):
+    """An expect: phase may say `settle: <seconds>`: lines written in that
+    time after the steps ran do not count, for output that legitimately
+    lingers (messages already in flight when a reset puts things right).
+    Returns the snapshot the checks should read from."""
+    if not part or not part.get("settle"):
+        return snap
+    await asyncio.sleep(float(part["settle"]))
+    return await snapshot(client, sid, watched)
+
+
 async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_for, snap) -> None:
     """One phase of a failure mode's expect: block. Every has: pattern must
     appear in its log within the window, and no lacks: pattern may appear in
@@ -280,6 +291,7 @@ async def smoke(client, scenario) -> None:
 
         snap = await snapshot(client, sid, watched)
         await run_steps(client, sid, mode.get("trigger"))
+        snap = await settle(client, sid, expect.get("break"), watched, snap)
         if "break" in expect:
             await check_expect(client, sid, mode["id"], "after Break it", expect["break"], resolve, snap)
         else:
@@ -289,6 +301,7 @@ async def smoke(client, scenario) -> None:
         say(f"  -- Reset: {mode['title']}")
         snap = await snapshot(client, sid, watched)
         await run_steps(client, sid, mode.get("reset"))
+        snap = await settle(client, sid, expect.get("reset"), watched, snap)
         if "reset" in expect:
             await check_expect(client, sid, mode["id"], "after Reset", expect["reset"], resolve, snap)
         else:
