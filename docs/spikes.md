@@ -1,0 +1,251 @@
+# Phase 0 spikes
+
+Date: 2026-10-16
+
+Short hands-on tests of the items in section 7 of `requirements.md`. Each
+section says what was run and what the broker or API returned. Nothing here
+is taken from the pattern guide.
+
+## Test environment
+
+This is a developer laptop, not a Codespace. Results that depend on the host
+(memory, CPU) need repeating in a Codespace before they are relied on.
+
+| Thing | Version |
+| --- | --- |
+| Host | macOS, Apple silicon, Docker Desktop (16 CPUs, 7.65 GiB for the Docker VM) |
+| Broker, main | `solace/solace-pubsub-standard:10.26.0` (SEMP reports `10.26.0.9054`). On Docker Hub, `lts` and `latest` point at this image. |
+| Broker, comparison | `solace/solace-pubsub-standard:10.8.1` (the core workshop's pin, SEMP API `2.41`) |
+| Terraform | 1.16.6 |
+| Solace terraform provider | `solaceproducts/solacebroker` 1.3.1 (latest, `~> 1.3`) |
+| Solace Go API | `solace.dev/go/messaging` v1.10.0 (the core workshop's pin). v1.10.1 tried where noted. |
+
+Tags available on Docker Hub on the test date: `10.8.1` (`10.8.1.594`),
+`10.25.0` (`10.25.0.391`), `10.26.0` (`10.26.0.9054`, also `lts` and
+`latest`), `10.26.8` (`10.26.8.13158`, also `rolling` and `edge`). There is
+no `10.25.10` tag.
+
+Probes used a throwaway Go tool built on the same Go API, a small SEMP
+helper, and `curl`. None of it is in the repo.
+
+## 1. Terraform provider resources
+
+**Ran:** `terraform providers schema -json` against provider 1.3.1, then
+`terraform apply` of each resource family on the 10.26.0 broker.
+
+**Schema:** 78 resources, 81 data sources. The relevant ones exist:
+
+| Need | Resources |
+| --- | --- |
+| Replay log | `solacebroker_msg_vpn_replay_log`, `solacebroker_msg_vpn_replay_log_topic_filter_subscription` |
+| VPN bridge | `solacebroker_msg_vpn_bridge`, `_bridge_remote_msg_vpn`, `_bridge_remote_subscription` |
+| DMR | `solacebroker_dmr_cluster`, `_dmr_cluster_link`, `_dmr_cluster_link_remote_address`, `_dmr_cluster_link_attribute`, `_dmr_cluster_cert_matching_rule*`, `solacebroker_msg_vpn_dmr_bridge` |
+| Message VPN | `solacebroker_msg_vpn` |
+| Event Gateway | `solacebroker_msg_vpn_rest_delivery_point` (+ `_queue_binding`, `_rest_consumer`), `solacebroker_msg_vpn_mqtt_session` |
+| Queue features | `solacebroker_msg_vpn_queue` has `redelivery_delay_*`, `delivery_delay`, `respect_dmq_eligible_enabled`, `partition_count`, `dead_msg_queue`, `max_redelivery_count` |
+
+There is no resource for system scaling (max connections). That is not a
+message VPN setting, and it needs a broker reload (section 3).
+
+**Apply results on 10.26.0, default scale (100 connections):**
+
+- Replay log: created, `egressEnabled` and `ingressEnabled` true in the
+  monitor tree. Client-initiated replay was not tested.
+- Second message VPN: created. A third also worked. A fourth failed:
+  `Message VPN limit reached., MAX_NUM_EXCEEDED`. So the limit is three VPNs
+  in total including `default`, which matches the community thread and not
+  "default plus one" in section 5.3.
+- Loopback bridge from `default` to a second VPN on the same broker
+  (`remote_msg_vpn_location = "127.0.0.1:55555"`): created. It first failed
+  with `Login Response: Bridging Not Allowed`. Setting
+  `allowBridgeConnectionsEnabled` on the remote VPN's client profile fixed
+  it, and the bridge went to `ready-in-sync`. Three messages published in the
+  second VPN reached a subscriber in `default`. The bridge shows as a client
+  (`#bridge/remote/br-spike/...`) on the remote VPN, so it uses a connection.
+  The provider requires `remote_authentication_basic_password` whenever a
+  bridge username is set.
+- DMR cluster: refused, `dynamic-message-routing is not supported when the
+  configured system limit for connections is 100, FAIL`. At 1,000 connections
+  the same call succeeded (section 3).
+- `show system` reports `max-bridges 25` at both 100 and 1,000 connections,
+  not the 500 in section 5.3.
+
+**Lost state:** after deleting the pilot scenario's terraform state with its
+objects still on the broker, `apply` failed, but afterwards five of the six
+objects were already in the new state, and Reconcile only had to import the
+queue subscription. The provider's error text shows it creates objects with a
+SEMP PUT, which would explain the adoption. This differs from what the core
+workshop's guide says (apply fails with `ALREADY_EXISTS` for everything).
+Reconcile still works either way.
+
+## 2. Go message selectors on a queue
+
+**Ran:** published nine guaranteed messages with a user property
+`region` = 1, 2, 0, 1, 2, 0, ... to an exclusive queue. Bound with
+`WithMessageSelector("region = '1'")` and client acknowledgement.
+
+**Saw:**
+
+- The selector worked: 3 of 9 delivered (`msg-1`, `msg-4`, `msg-7`).
+- The other 6 stayed on the queue (`msgSpoolUsage` 312 bytes). A second
+  consumer bound with no selector received exactly those 6.
+- A bad selector (`region = = '1'`) fails at bind:
+  `error while creating receiver flow: Invalid Selector`.
+- On a partitioned queue: `error while creating receiver flow: Selectors Not
+  Supported on Partitioned Queue`.
+
+**Implication for Event Filtering:** selectors work from Go, but messages a
+selector does not match stay on the queue and fill its quota unless something
+else consumes them. That is the "cost" to show next to topic wildcards.
+
+## 3. Raising the connection scale in Docker
+
+`system_scaling_maxconnectioncount` is the container variable used here. The
+docs page for scaling a standalone broker gives only the CLI route.
+
+| Route | Ran | Result |
+| --- | --- | --- |
+| A. Variable on a new container | `docker run ... -e system_scaling_maxconnectioncount=1000` | `show system`: `max-connections 1000` |
+| B. Variable on a recreated container that reuses the storage volume | First boot with `-v vol:/var/lib/solace` and no variable, `docker rm`, then `docker run` with the same volume and the variable | Still `max-connections 100`. The variable is ignored once the volume has a configuration, as the community thread reported. |
+| C. CLI on a running broker | Script in `/usr/sw/jail/cliscripts/` with `enable / configure / system / scaling / scale max-connections 1000`, run with `cli -A -s` | The broker reloaded, Docker's restart policy restarted it (`RestartCount` 1), and it came back with `max-connections 1000`. The script needs no `y`: scripts do not prompt. |
+
+At 1,000 connections a DMR cluster could be created. The message VPN limit
+was unchanged: a fourth VPN still failed with `MAX_NUM_EXCEEDED`.
+
+**For the startup hooks:** `setup_broker.sh` only creates the container on
+first start, and the Codespace's broker keeps its configuration inside the
+container (no volume). So the variable works when the container is created.
+For an existing container, use route C, which needs `--restart unless-stopped`
+(already set) and a wait for SEMP after the reload.
+
+## 4. Resource use at 1,000 connections
+
+`docker stats` on the 10.26.0 broker, after it settled.
+
+| State | Memory | CPU |
+| --- | --- | --- |
+| Default scale (100), idle | 1.27 to 1.31 GiB | about 8% |
+| Scale 1,000, idle | 4.15 GiB | about 7 to 9% |
+| Scale 1,000, 995 client connections held for 90 s | 4.15 GiB | 6.6 to 10% |
+
+- The memory cost comes from the scale setting, not from connections. 995
+  idle connections added nothing measurable.
+- Connection 996 was refused with `Too Many Clients`. A few of the 1,000 are
+  held by the broker's own clients.
+- Two brokers at 1,000 connections would need about 8.3 GiB, and three about
+  12.5 GiB, before the devcontainer, Go builds and the dashboard. The Docker
+  VM here (7.65 GiB) could not run two, so this was not tested. In a 16 GB
+  Codespace, two look feasible and three look tight. This needs a Codespace
+  test, and possibly the 32 GB machine type, before the Event Mesh scenario is
+  scoped.
+- The connections were idle. Load at the 10,000 msg/s ingress limit was not
+  tested.
+
+## 5. Delayed redelivery on queues
+
+**Ran:** a queue with `redeliveryDelayEnabled` true, initial 1,000 ms,
+multiplier 200 (2.0), max 4,000 ms, `maxRedeliveryCount` 4. A Go consumer
+bound with client acknowledgement and settled every message FAILED.
+
+**Saw:** both brokers (10.26.0 and 10.8.1) accepted the queue attributes.
+The Go bind was refused on both:
+`error while creating receiver flow: Redelivery delay support required`.
+Same result with Go API v1.10.1. The Go API source has no mention of
+redelivery delay and no local transactions.
+
+**Docs:** the JCSMP delayed redelivery page says it is "a Controlled
+Availability (CA) feature" and is "triggered by a client-initiated
+transaction rollback", for clients consuming with local transactions. Search
+results for the general API page say C, JavaScript and Node.js do not
+support it.
+
+**Conclusion:** broker-side delayed redelivery cannot be shown from the Go
+apps. Settling FAILED redelivers at once.
+
+**What does work from Go:** the queue attribute `delivery_delay` (seconds a
+message waits on the queue before it can be delivered). With
+`deliveryDelay: 5`, two messages published at :43 were delivered at :48, on
+both 10.26.0 and 10.8.1. Discard, Pause and Retry could use a retry queue with
+a delivery delay, with the app republishing a failed message to it. That
+design still needs checking.
+
+## 6. Dead message queue behaviour by version
+
+**Ran:** for each case, a fresh queue with `maxRedeliveryCount` 2, a DMQ,
+`respectTtlEnabled` true, and one message. Removal provoked three ways:
+settled FAILED until the redelivery limit, settled REJECTED once, or a 1 s
+TTL with no consumer. The message's DMQ-eligible flag was left unset, set
+false, or set true. Then counted where the message ended up.
+
+**10.26.0.** New queues have `respectDmqEligibleEnabled: false`. The VPN has
+`allowDmqEligibleEndpointOverrideEnabled: true`.
+
+| `respectDmqEligibleEnabled` | DMQ-eligible flag | Max redelivery | REJECTED | TTL expiry |
+| --- | --- | --- | --- | --- |
+| false (default) | unset, false or true | DMQ | DMQ | DMQ |
+| true | unset | DMQ | DMQ | DMQ |
+| true | false | discarded | discarded | discarded |
+| true | true | DMQ | DMQ | DMQ |
+
+**10.8.1.** The attribute does not exist (`Unknown attribute
+'respectDmqEligibleEnabled'`).
+
+| DMQ-eligible flag | Max redelivery | REJECTED | TTL expiry |
+| --- | --- | --- | --- |
+| unset | DMQ | DMQ | DMQ |
+| false | discarded | discarded | discarded |
+| true | DMQ | DMQ | DMQ |
+
+**What this means:**
+
+- The Go API treats a message as DMQ-eligible unless the app sets the flag
+  false. An unset flag reached the DMQ on both versions.
+- On 10.8.1 the message flag decides. On 10.26.0 the queue decides: by
+  default every removed message goes to the DMQ whatever the flag says, and
+  the flag only counts on a queue with `respect_dmq_eligible_enabled`.
+- The docs place this change at 10.25.10, but Docker Hub has no 10.25.10
+  image. 10.26.0 behaves as described.
+- REJECTED goes to the DMQ on both versions, as the core workshop's
+  shock absorber shows.
+- A Dead Letter Queue scenario on 10.26.0 can show the difference directly:
+  one card that flips `respect_dmq_eligible_enabled` and publishes with the
+  flag false.
+
+## 7. Event Gateway inputs
+
+**Ran on 10.26.0**, inside the broker's network namespace: a queue
+subscribed to `spike/gw/>`, a REST delivery point bound to it whose REST
+consumer pointed at a small HTTP server on port 8099. Then one message
+published with `mosquitto_pub` (MQTT, QoS 1, port 1883) and one with an HTTP
+POST to the REST port (9000, `Solace-Delivery-Mode: persistent`).
+
+**Saw:** the HTTP server received both as `POST /ingest` with the original
+payloads. The REST consumer counted 2 requests sent and 2 successful
+responses. On the `default` VPN, MQTT and incoming REST are enabled on 1883
+and 9000 out of the box.
+
+Not tested: MQTT or REST with authentication, TLS, or a REST consumer outside
+the broker's host.
+
+## 8. Things learned while building the pilot
+
+- **Activation listener.** `WithActivationPassivationSupport` fires on a
+  change only. Every receiver starts passive, so the first consumer on an
+  exclusive queue hears `Passive -> Active`, and a standby hears nothing until
+  it is made active. The app has to say it is on standby itself.
+- **SEMP monitor `txFlows`** reports `activityState` as `active-consumer` or
+  `inactive`, by client name. The dashboard uses this to show which consumer
+  is active. The queue monitor object has no current bind count, only
+  cumulative `bindRequestCount` and `bindSuccessCount`.
+- **Stop is not a crash.** The dashboard stops an app with SIGTERM, and the Go
+  apps then terminate the receiver gracefully, which finishes and acknowledges
+  in-flight messages. Nothing is redelivered. A crash has to be a SIGKILL.
+- **`pkill -f` matches any command line** with the pattern, including a shell
+  whose command text contains it. Patterns are anchored on the binary path
+  (`bin/workshop exclusive ledger --role ledger-a `).
+- **A stalled consumer holds exactly `max_delivered_unacked_msgs_per_flow`
+  messages** (5 in the pilot), and the broker sends it nothing more. The
+  standby stays inactive until the stalled consumer's session ends.
+- **The Go API builds and runs on macOS** (darwin arm64 with cgo). The
+  dashboard runs on the host against a broker in Docker with only the
+  `SOLACE_*` variables changed.

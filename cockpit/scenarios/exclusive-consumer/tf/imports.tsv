@@ -1,0 +1,12 @@
+# What the exclusive-consumer scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.excl	{vpn}/cp-excl
+solacebroker_msg_vpn_acl_profile.excl	{vpn}/acl-excl
+
+solacebroker_msg_vpn_queue.postings	{vpn}/q.excl.postings
+solacebroker_msg_vpn_queue_subscription.postings	{vpn}/q.excl.postings/excl%2Fledger%2Fposting%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.excl["payments"]	{vpn}/svc-excl-payments
+solacebroker_msg_vpn_client_username.excl["ledger"]	{vpn}/svc-excl-ledger

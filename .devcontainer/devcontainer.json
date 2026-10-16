@@ -1,0 +1,43 @@
+{
+  "name": "Solace Event-Driven Architecture Patterns Workshop",
+  "image": "ghcr.io/solacedev/solace-core-workshop@sha256:6bc20e9c3115d7e8673359d069333b536dac1a20582da5343287f6c03e2f4119",
+  "updateContentCommand": "/bin/bash cockpit/apps/build.sh",
+  "postCreateCommand": {
+    "environment": "/bin/bash .devcontainer/configureEnv.sh",
+    "cockpit": "/bin/bash cockpit/start_cockpit.sh"
+  },
+  "postStartCommand": "/bin/bash setup_broker.sh",
+  "postAttachCommand": "/bin/bash cockpit/start_cockpit.sh",
+  "hostRequirements": {
+   "cpus": 4,
+   "memory": "16gb",
+   "storage": "32gb"
+  },
+  "forwardPorts": [3000, 8080],
+  "portsAttributes": {
+    "3000": {
+      "label": "Solace Workshop Dashboard",
+      "onAutoForward": "openBrowser"
+    },
+    "8080": {
+      "label": "Solace Broker Manager",
+      "onAutoForward": "silent"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "solace-tools.solace-try-me-vsc-extension",
+        "barnim.markdown-code-copy-button",
+        "golang.go"
+      ],
+       "settings": {
+        "files.autoSave": "afterDelay",
+        "markdown.preview.openPreviewToSide": true,
+        "workbench.editorAssociations": {
+          "*.md": "vscode.markdown.preview.editor"
+        }
+      }
+    }
+  }
+}

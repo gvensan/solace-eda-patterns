@@ -1,0 +1,379 @@
+id: exclusive-consumer
+# Category 3 of the pattern guide (Consumption Patterns), fifth pattern in it.
+order: 350
+eyebrow: Consumption Patterns
+title: Exclusive Consumer
+summary: >
+  A ledger has to apply payment postings one at a time, in the order they were
+  made. Two copies of the ledger run so that one can take over if the other
+  fails, but they must never work at the same time. An exclusive queue gives
+  you both: the broker delivers to one consumer, keeps the other on standby,
+  and hands over when the active one goes away.
+
+objectives:
+  - See two consumers bound to one exclusive queue, with only one receiving
+  - Crash the active consumer and watch the standby take over where it left off
+  - See which messages come back marked redelivered after a handover
+  - "Learn the limit of the pattern: a consumer that freezes without disconnecting stops everything"
+
+# Ledger A binds first, so the broker makes it the active consumer. Ledger B
+# binds second and becomes the standby. Both are up before anything is
+# published, so the first posting already goes to A.
+run:
+  - apply
+  - build
+  - ledger-a
+  - ledger-b
+  - publisher
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The payments service publishes postings to the broker, which keeps them on
+    one exclusive queue. Both ledgers are bound to it, but the broker only
+    delivers to the active one. The other waits, connected and ready, until the
+    active ledger disconnects.
+  duration: 2.4
+  liveWhen: payments
+  nodes:
+    - id: payments
+      label: Payments Service
+      sublabel: two postings a second
+      kind: app
+      col: 0
+      action: publisher
+      requires:
+        - label: svc-excl-payments
+          semp: /msgVpns/{vpn}/clientUsernames/svc-excl-payments
+    - id: broker
+      label: Solace Broker
+      sublabel: one active consumer
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: postings
+          label: q.excl.postings
+      provides:
+        - label: q.excl.postings
+          group: postings
+          semp: /msgVpns/{vpn}/queues/q.excl.postings
+        - label: cp-excl
+          semp: /msgVpns/{vpn}/clientProfiles/cp-excl
+        - label: acl-excl
+          semp: /msgVpns/{vpn}/aclProfiles/acl-excl
+    # flowOn asks the broker which of the two is active, so the picture shows
+    # the broker's decision rather than assuming the first one started.
+    - id: ledgerA
+      label: Ledger A
+      sublabel: instance A
+      kind: app
+      col: 2
+      action: ledger-a
+      flowOn:
+        queue: q.excl.postings
+        client: excl-ledger-a
+      requires:
+        - label: svc-excl-ledger
+          semp: /msgVpns/{vpn}/clientUsernames/svc-excl-ledger
+    - id: ledgerB
+      label: Ledger B
+      sublabel: instance B
+      kind: app
+      col: 2
+      action: ledger-b
+      flowOn:
+        queue: q.excl.postings
+        client: excl-ledger-b
+      requires:
+        - label: svc-excl-ledger
+          semp: /msgVpns/{vpn}/clientUsernames/svc-excl-ledger
+  flows:
+    - from: payments
+      to: broker
+      label: postings
+      delay: 0
+    - from: broker
+      to: ledgerA
+      via: postings
+      delay: 0.8
+    - from: broker
+      to: ledgerB
+      via: postings
+      delay: 0.8
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the exclusive queue q.excl.postings, its topic subscription, and
+      the client profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: ledger-a
+    label: Start ledger A
+    kind: process
+    cmd: [bash, ../../apps/run.sh, exclusive, ledger, --role, ledger-a, --client-name, excl-ledger-a]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Binds the exclusive queue and applies postings one at a time, checking
+      that each sequence number follows the last. It prints ACTIVE or STANDBY
+      whenever the broker changes its role.
+
+  - id: ledger-b
+    label: Start ledger B
+    kind: process
+    cmd: [bash, ../../apps/run.sh, exclusive, ledger, --role, ledger-b, --client-name, excl-ledger-b]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same ledger, a second time. It binds the same queue but the broker
+      already has an active consumer, so this one waits as the standby.
+
+  - id: publisher
+    label: Publish postings
+    kind: process
+    cmd: [bash, ../../apps/run.sh, exclusive, publish]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes a ledger posting every half second, each with the next
+      sequence number, to excl/ledger/posting/v1/<account>.
+
+  # The failure helpers act on whichever ledger holds a role right now. The
+  # broker decides that, so signal_consumer.sh asks it (by client name) and
+  # signals that app. No card has to rearrange the ledgers first.
+  - id: kill-active
+    label: Crash the active ledger
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.excl.postings, active, KILL]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the active ledger outright, with no chance to finish or
+      acknowledge what it is holding, the way a crash or a lost machine would.
+
+  - id: stall-active
+    label: Freeze the active ledger
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.excl.postings, active, USR1]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Tells the active ledger to stop working without disconnecting, as a
+      process stuck on a lock or a long pause would.
+
+  - id: stop-active
+    label: Stop the active ledger
+    kind: process
+    cmd: [bash, ../../scripts/signal_consumer.sh, q.excl.postings, active, TERM]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Stops the active ledger, as a health check that restarts a stuck
+      consumer would.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, exclusive-consumer]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any posting
+      still on the queue goes with it.
+
+# Both cards act on roles, not on a named ledger: whichever ledger the broker
+# has made active is the one that fails, and the standby is the one that
+# takes over. The page resolves {role: ...} from the broker when Break it is
+# pressed, so the marked box and the log follow the same apps through Reset.
+failure_modes:
+  - id: active-crashes
+    title: The active ledger crashes
+    breaks: >
+      The active ledger is killed while it is applying postings, with no
+      chance to finish what it holds.
+    watch: >
+      The card shows the standby's log. It prints ACTIVE within a moment,
+      then carries on from the posting after the last one the crashed ledger
+      finished. Anything the crashed ledger had taken but not acknowledged
+      comes first, marked (redelivered). That is at most 5, the queue's
+      limit, and fewer when it was keeping up. Compare the last number in the
+      crashed ledger's log with the first after ACTIVE here: nothing is
+      skipped. In the diagram, the standby turns active. Reset starts the
+      crashed ledger again, and it joins as the new standby. The broker does
+      not hand the queue back.
+    why: >
+      An exclusive queue delivers to one bound consumer at a time, the first
+      to bind. The broker knows the instant that consumer's session ends.
+      It then makes the next bound consumer active and sends it every message
+      the first had not acknowledged, in their original order, so order is
+      kept across the handover.
+    real_world: >
+      An order book, a ledger, a sequence of device commands: anything that
+      must be processed one at a time and in order, but cannot stop when one
+      server does. Some postings are delivered twice, so the ledger should
+      recognise a posting it has already applied, for example by its
+      sequence number.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Go API reference: activation and passivation listener"
+        url: https://docs.solace.com/API-Developer-Online-Ref-Documentation/go/src/solace.dev/go/messaging/pkg/solace/persistent_message_receiver.go.html
+      - label: "Broker: queues and access types"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+    node: {role: active}
+    logs: {role: standby}
+    trigger:
+      - run: kill-active
+    reset:
+      - start: ledger-a
+      - start: ledger-b
+    # What smoke.py holds this card to. Roles are the ones at Break it: the
+    # active ledger is the one that crashes, the standby the one that takes
+    # over. A handover never skips or repeats a posting (no GAP).
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: {role: active}
+            has: ["exited with code -9"]
+          - log: {role: standby}
+            has: ["ACTIVE: the broker is delivering", "applied posting"]
+            lacks: ["GAP", "already applied"]
+      reset:
+        within: 10
+        logs:
+          # The crashed ledger comes back as the standby and stays one.
+          - log: {role: active}
+            has: ["STANDBY until"]
+            lacks: ["ACTIVE: the broker is delivering"]
+          - log: {role: standby}
+            has: ["applied posting"]
+            lacks: ["GAP", "already applied"]
+
+  - id: active-stalls
+    title: The active ledger hangs, so nothing is consumed
+    breaks: >
+      The active ledger freezes. It stops processing postings but its
+      connection stays open, as happens to a process stuck on a lock or
+      paused. So the broker still treats it as the active consumer, and the
+      standby never gets a turn.
+    watch: >
+      No one is consuming now. The card shows the standby's log: it still
+      says STANDBY and stays quiet. The frozen ledger's log stops after
+      STALLED. In the diagram, the frozen ledger turns to "active, not acking"
+      after a few seconds and no packets reach either ledger. Under On the
+      broker, Consumers on q.excl.postings shows the frozen ledger still
+      active, holding 5 unacknowledged postings, and the standby inactive.
+      Queue shows lastSpooledMsgId pulling away from highestAckedMsgId: the
+      backlog is growing. Reset stops the frozen ledger. It ignores a polite
+      stop, so after 5 seconds it is killed, as a health check would. Only
+      then does the standby turn active and work through the backlog, the first 5 marked
+      (redelivered). The stopped ledger is started again as the new standby.
+    why: >
+      The broker only knows whether a consumer is connected, not whether its
+      code is healthy. A frozen ledger is still connected and bound, so it
+      stays the one active consumer. The broker sends it postings until it
+      holds 5 it has not acknowledged (the queue's
+      max_delivered_unacked_msgs_per_flow), then sends nothing more and
+      waits for acknowledgements that never come. The standby only takes
+      over when the frozen ledger's session ends, and a frozen process does
+      not end its session.
+    real_world: >
+      A deadlock, a long garbage collection pause, a slow downstream call
+      with no timeout. The exclusive queue protects order, but it cannot tell
+      a busy consumer from a stuck one. Pair it with a health check that
+      restarts a consumer that stops making progress, which is the check the
+      diagram makes when it shows "active, not acking". Ending the stuck
+      process is what triggers the handover.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: configuring queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: {role: active}
+    logs: {role: standby}
+    trigger:
+      - run: stall-active
+    reset:
+      - run: stop-active
+      - start: ledger-a
+      - start: ledger-b
+    # Nothing is consumed while the active ledger is frozen: the standby
+    # must not take over or apply anything for the whole window. After
+    # Reset it takes over with the 5 postings the frozen one held.
+    expect:
+      break:
+        within: 12
+        logs:
+          - log: {role: active}
+            has: ["STALLED"]
+          - log: {role: standby}
+            lacks: ["ACTIVE: the broker is delivering", "applied posting"]
+      reset:
+        within: 20
+        logs:
+          - log: {role: standby}
+            has: ["ACTIVE: the broker is delivering", "\\(redelivered\\)"]
+            lacks: ["GAP", "already applied"]
+          - log: {role: active}
+            has: ["STANDBY until"]
+            lacks: ["ACTIVE: the broker is delivering"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.excl.*
+    # lastSpooledMsgId minus highestAckedMsgId is roughly the backlog.
+    # spooledMsgCount is cumulative and never falls, so it is left out.
+    columns: [queueName, accessType, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: Consumers on q.excl.postings
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.excl.postings/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount, redeliveredMsgCount]
+    ui_hint: Manager → Queues → q.excl.postings → Consumers
+    empty: No ledger is bound to q.excl.postings right now. Press Play, or start a ledger.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=10&where=clientUsername==svc-excl-*
+    columns: [clientName, clientUsername, clientAddress, uptime]
+    ui_hint: Manager → Clients
+    empty: None of this scenario's apps is connected right now. Press Play to start them.

@@ -1,0 +1,114 @@
+name: Scenario check and smoke test
+
+# Every scenario, end to end, on a real Standard edition broker: the checker,
+# then Play, every Break it and Reset with its expect: block, Cleanup, Clear
+# broker config and Play again, driven through the dashboard's API exactly as
+# smoke.py does on a developer machine.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with setup_broker.sh; the first step fails if they differ.
+  BROKER_IMAGE: solace/solace-pubsub-standard:10.26.0
+  # The versions in the Codespace image (CONTRIBUTING.md).
+  GO_VERSION: "1.26.9"
+  TERRAFORM_VERSION: "1.16.5"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Broker version matches setup_broker.sh
+        run: |
+          pinned="solace/solace-pubsub-standard:$(sed -n 's/^BROKER_VERSION="\${SOLACE_BROKER_VERSION:-\(.*\)}"$/\1/p' setup_broker.sh)"
+          echo "setup_broker.sh pins $pinned, this workflow uses $BROKER_IMAGE"
+          [ "$pinned" = "$BROKER_IMAGE" ]
+
+      - name: Start the broker
+        # Started first: it takes a minute or two to boot, which the other
+        # setup steps use.
+        run: |
+          docker run -d --name solace --shm-size=2g \
+            -p 8080:8080 -p 55555:55555 \
+            --env username_admin_globalaccesslevel=admin \
+            --env username_admin_password=admin \
+            "$BROKER_IMAGE"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Check every scenario.yaml
+        run: |
+          python -m pip install --quiet -r cockpit/requirements.txt
+          python cockpit/scripts/check_scenarios.py
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: cockpit/apps/go.sum
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          # The dashboard runs terraform itself and reads its output as is.
+          terraform_wrapper: false
+
+      - name: Build the Go apps
+        run: bash cockpit/apps/build.sh
+
+      - name: Wait for the broker
+        # SEMP answers before the message spool is ready, and a queue cannot
+        # be created until it is, so wait for a probe queue to be accepted.
+        run: |
+          semp=http://localhost:8080/SEMP/v2/config/msgVpns/default/queues
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /tmp/probe.json -w '%{http_code}' -u admin:admin \
+              -H 'Content-Type: application/json' -X POST \
+              -d '{"queueName":"ci-probe","permission":"consume","ingressEnabled":true,"egressEnabled":true}' "$semp" || true)
+            if [ "$code" = "200" ]; then
+              curl -s -u admin:admin -X DELETE "$semp/ci-probe" >/dev/null
+              echo "Broker ready after about $((i * 5)) seconds."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Broker not ready after 7.5 minutes. Last answer:"; cat /tmp/probe.json
+          docker logs --tail 50 solace
+          exit 1
+
+      - name: Start the dashboard
+        run: bash cockpit/start_cockpit.sh
+
+      - name: Smoke test every scenario
+        run: cockpit/.venv/bin/python cockpit/scripts/smoke.py
+
+      - name: Dashboard log
+        if: always()
+        run: tail -n 200 cockpit/.state/cockpit.log || true
+
+      - name: Keep logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-logs
+          path: cockpit/.state/cockpit.log
+          if-no-files-found: ignore
