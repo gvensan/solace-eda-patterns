@@ -502,3 +502,36 @@ saw. The redelivered flag says a message was sent before, not that the
 application handled it. Guaranteed Delivery's points service therefore
 decides by its own record of purchase ids, not by the flag.
 
+## 13. Backpressure and Push
+
+Tested on 10.26.0 with the Go API v1.10.0.
+
+**Direct publishing into a queue.** 80 direct messages published to a topic
+a queue subscribes to, with no consumer bound: all 80 were stored
+(`spooledMsgCount` 80), listed under the queue's `msgs` like any
+guaranteed message. So one direct stream can feed a queue for a consumer
+that must not lose anything and, at the same time, direct subscribers.
+
+**`Pause()` and the unacknowledged limit.** A consumer with client
+acknowledgement on a queue with `max_delivered_unacked_msgs_per_flow` 20
+paused its receiver after 20 messages while 40 a second kept arriving. The
+handler was called no more, the flow held at `unackedMsgCount` 20 (the
+broker sent nothing beyond the limit), and the rest waited on the queue
+(281 spooled). After `Resume()` all 400 were handled.
+
+**A slow direct subscriber.** Buffer 20, 100 ms per message, 40 a second
+for 6 seconds:
+
+| Receiver built with | Handled | Discarded (metric) | Last handled |
+| --- | --- | --- | --- |
+| `OnBackPressureDropOldest(20)` | 59 | 150 | #207 of 240: recent |
+| `OnBackPressureDropLatest(20)` | 60 | 151 | #153 of 240: falling behind |
+
+`ReceivedMessagesBackpressureDiscarded` counted the drops in both cases.
+[Consuming Direct Messages](https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm)
+gives the default as drop-latest with a buffer of 50.
+
+Not measured: what the broker does when a direct subscriber falls so far
+behind that its TCP connection backs up. With a buffer of 20 the API drops
+first, so the scenario never gets there.
+

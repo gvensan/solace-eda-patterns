@@ -1,0 +1,13 @@
+# What the backpressure scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.bp	{vpn}/cp-bp
+solacebroker_msg_vpn_acl_profile.bp	{vpn}/acl-bp
+
+solacebroker_msg_vpn_queue.readings	{vpn}/q.bp.readings
+solacebroker_msg_vpn_queue_subscription.readings	{vpn}/q.bp.readings/bp%2Fcoldchain%2Ftemperature%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.bp["sensors"]	{vpn}/svc-bp-sensors
+solacebroker_msg_vpn_client_username.bp["reporter"]	{vpn}/svc-bp-reporter
+solacebroker_msg_vpn_client_username.bp["display"]	{vpn}/svc-bp-display

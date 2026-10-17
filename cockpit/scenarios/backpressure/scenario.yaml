@@ -1,0 +1,339 @@
+id: backpressure
+# Category 3 of the pattern guide (Consumption Patterns), fourth pattern.
+order: 340
+eyebrow: Consumption Patterns
+title: Backpressure and Push
+summary: >
+  Cold-chain monitoring in a refrigerated warehouse. Sensors report 40
+  temperature readings a second. A reporter writes every reading to a
+  compliance database, which slows down at times, and must not lose any. A
+  live display shows the current temperatures, and only cares about the
+  latest. The broker pushes readings to both, so each needs its own way to
+  say "not so fast".
+
+objectives:
+  - See the reporter pause itself when writes pile up, and the broker stop at the queue's unacknowledged limit
+  - See the readings it cannot take wait on the queue, then arrive, none missing
+  - See a display that takes readings direct drop some when it falls behind, because nothing waits for it
+  - Learn which readings to drop, the oldest or the newest, for a live display
+
+run:
+  - apply
+  - build
+  - reporter
+  - display
+  - sensors
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The sensors publish each reading direct. The queue q.bp.readings stores
+    a copy for the reporter, which writes it to the database and then
+    acknowledges it. The display takes the same readings direct, with no
+    queue: the API holds at most 20 for it.
+  duration: 2.4
+  liveWhen: sensors
+  nodes:
+    - id: sensors
+      label: Sensors
+      sublabel: 40 readings a second
+      kind: app
+      col: 0
+      action: sensors
+      requires:
+        - label: svc-bp-sensors
+          semp: /msgVpns/{vpn}/clientUsernames/svc-bp-sensors
+    - id: broker
+      label: Solace Broker
+      sublabel: pushes to consumers
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: readings
+          label: q.bp.readings
+          depth: { queue: q.bp.readings, unit: waiting }
+      provides:
+        - label: q.bp.readings
+          group: readings
+          semp: /msgVpns/{vpn}/queues/q.bp.readings
+        - label: cp-bp
+          semp: /msgVpns/{vpn}/clientProfiles/cp-bp
+        - label: acl-bp
+          semp: /msgVpns/{vpn}/aclProfiles/acl-bp
+    - id: reporter
+      label: Reporter
+      sublabel: writes every reading
+      kind: app
+      col: 2
+      action: reporter
+      flowOn:
+        queue: q.bp.readings
+        client: bp-reporter
+      requires:
+        - label: svc-bp-reporter
+          semp: /msgVpns/{vpn}/clientUsernames/svc-bp-reporter
+    - id: display
+      label: Live Display
+      sublabel: the latest reading
+      kind: app
+      col: 2
+      action: display
+      requires:
+        - label: svc-bp-display
+          semp: /msgVpns/{vpn}/clientUsernames/svc-bp-display
+  flows:
+    - { from: sensors, to: broker, label: readings (direct), delay: 0 }
+    - { from: broker, to: reporter, via: readings, delay: 0.8 }
+    - { from: broker, to: display, label: direct, delay: 1.0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.bp.readings, which stores a copy of every reading for the
+      reporter and sends it at most 100 unacknowledged, and the client
+      profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: reporter
+    label: Start the reporter
+    kind: process
+    cmd: [bash, ../../apps/run.sh, bp, reporter, --client-name, bp-reporter]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.bp.readings and writes each reading to the database, then
+      acknowledges it. It pauses its intake at 50 pending writes and resumes
+      at 10.
+
+  - id: display
+    label: Start the live display
+    kind: process
+    cmd: [bash, ../../apps/run.sh, bp, display, --client-name, bp-display]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Takes the readings direct and shows the latest. The API holds at most
+      20 for it and drops the oldest when it falls behind.
+
+  - id: display-drop-latest
+    label: Start the live display, dropping the newest
+    kind: process
+    cmd: [bash, ../../apps/run.sh, bp, display, --client-name, bp-display, --drop, latest]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same display, but when it falls behind the API drops the newest
+      readings instead of the oldest. Stop the live display first.
+
+  - id: sensors
+    label: Start the sensors
+    kind: process
+    cmd: [bash, ../../apps/run.sh, bp, sensors]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes 40 temperature readings a second, as direct messages.
+
+  - id: slow-database
+    label: Slow the database down
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, bp-reporter, USR1]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Makes each of the reporter's database writes take 100 ms instead of
+      10 ms (SIGUSR1): 10 readings a second, against 40 arriving.
+
+  - id: normal-database
+    label: Bring the database back to normal
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, bp-reporter, USR2]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Back to 10 ms a write (SIGUSR2).
+
+  - id: slow-display
+    label: Slow the display down
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, bp-display, USR1]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Makes the display take 250 ms to show each reading instead of 10 ms
+      (SIGUSR1): 4 a second, against 40 arriving.
+
+  - id: normal-display
+    label: Bring the display back to normal
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, bp-display, USR2]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Back to 10 ms a reading (SIGUSR2).
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, backpressure]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any
+      reading still on the queue goes with it.
+
+failure_modes:
+  - id: slow-database
+    title: The database slows down
+    breaks: >
+      Each of the reporter's database writes takes ten times longer: 10
+      readings a second, while 40 arrive.
+    watch: >
+      The card shows the reporter. Writes pile up inside it, and at 50
+      pending it says "paused with 50 writes pending" and takes no more.
+      Under On the broker, the reporter's flow holds 100 unacknowledged
+      readings, the queue's limit: the broker sends no more, and the count
+      of readings waiting on q.bp.readings climbs in the diagram. The
+      reporter's memory stays flat; the backlog is on the queue. Reset
+      brings the database back: the reporter resumes, works through the
+      readings that waited, says "caught up", and none is missing.
+    why: >
+      The broker pushes guaranteed messages to a consumer until the queue's
+      max_delivered_unacked_msgs_per_flow is reached, then waits for
+      acknowledgements. The reporter acknowledges a reading only once it is
+      written, so a slow database holds it at that limit. It also pauses its
+      own intake (Pause, then Resume), so the readings it has not started on
+      wait in the API's window and on the queue, not in its memory.
+    real_world: >
+      A database, a downstream API or a disk that slows down for a while. A
+      consumer that keeps taking messages it cannot process grows its memory
+      until it falls over; one that applies backpressure lets the broker
+      hold the backlog, which is what the broker's storage is for.
+    docs:
+      - label: "Go API: consuming persistent messages (pause and resume)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: configuring queues (max delivered unacknowledged messages)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: reporter
+    logs: reporter
+    trigger:
+      - run: slow-database
+    reset:
+      - run: normal-database
+    expect:
+      break:
+        within: 25
+        logs:
+          - log: reporter
+            has: ["database is slow now", "paused with \\d+ writes pending"]
+      reset:
+        within: 40
+        logs:
+          - log: reporter
+            has: ["resumed with \\d+ writes pending", "caught up"]
+            lacks: ["GAP"]
+
+  - id: slow-display
+    title: The live display falls behind
+    breaks: >
+      The display takes 250 ms to show each reading: 4 a second, while 40
+      arrive.
+    watch: >
+      The card shows the display. There is no queue and no broker-side
+      brake for direct messages: the API's buffer of 20 fills, and it drops
+      the oldest readings to make room. Every 2 seconds the display says
+      how many it dropped, "dropped 60 readings in the last 2 s (oldest
+      first)", and yet the reading it shows stays less than a second old:
+      on a live display, that is the right trade. The reporter, reading the
+      same sensors through its queue, misses nothing. Reset brings the
+      display back, and the drops stop.
+    why: >
+      Direct messages are not stored, so nothing waits for a slow
+      subscriber. The Go API buffers the readings it has received and not
+      yet handed to the application, and when that buffer is full it drops
+      some: the oldest (OnBackPressureDropOldest) or the newest
+      (OnBackPressureDropLatest). It counts them in the
+      ReceivedMessagesBackpressureDiscarded metric.
+    real_world: >
+      Dashboards, prices, positions, telemetry: anything where the latest
+      value replaces the last. Drop-oldest keeps it current. For data where
+      every message matters, use a queue, as the reporter does.
+    docs:
+      - label: "Go API: consuming direct messages (back-pressure)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Go API reference (metrics: ReceivedMessagesBackpressureDiscarded)"
+        url: https://docs.solace.com/API-Developer-Online-Ref-Documentation/go/index.html
+    node: display
+    logs: display
+    trigger:
+      - run: slow-display
+    reset:
+      - run: normal-display
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: display
+            has: ["rendering is slow now", "dropped \\d+ readings in the last 2 s \\(oldest first\\)"]
+          - log: reporter
+            lacks: ["GAP"]
+      reset:
+        settle: 5
+        within: 12
+        logs:
+          - log: display
+            has: ["showing reading #"]
+            lacks: ["dropped"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.bp.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount, maxDeliveredUnackedMsgsPerFlow]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: The reporter on q.bp.readings
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.bp.readings/txFlows?count=10
+    # unackedMsgCount stops at 100 when the database is slow: the
+    # broker's limit for this queue.
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount]
+    ui_hint: Manager → Queues → q.bp.readings → Consumers
+    empty: No consumer is bound to q.bp.readings right now. Press Play, or start the reporter.
