@@ -1,0 +1,11 @@
+# What the publish-subscribe scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ps	{vpn}/cp-ps
+solacebroker_msg_vpn_acl_profile.ps	{vpn}/acl-ps
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ps["shop"]	{vpn}/svc-ps-shop
+solacebroker_msg_vpn_client_username.ps["shipping"]	{vpn}/svc-ps-shipping
+solacebroker_msg_vpn_client_username.ps["analytics"]	{vpn}/svc-ps-analytics
+solacebroker_msg_vpn_client_username.ps["email"]	{vpn}/svc-ps-email

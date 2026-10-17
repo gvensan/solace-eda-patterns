@@ -1,0 +1,327 @@
+id: publish-subscribe
+# Category 2 of the pattern guide (Communication Patterns), first pattern.
+order: 210
+eyebrow: Communication Patterns
+title: Publish-Subscribe
+summary: >
+  An online shop publishes an event each time an order is placed. Shipping,
+  analytics and email each subscribe to the topics they need, and each gets
+  its own copy of every event. The shop does not know who is listening, and
+  a new team can start listening without the shop changing anything. These
+  are direct messages: delivered to whoever is subscribed at that moment,
+  and kept for no one.
+
+objectives:
+  - See one event reach every subscriber, each with its own copy
+  - See a subscriber pick its slice of the events by topic, with the shop none the wiser
+  - See what a subscriber misses while it is away, and why nothing waits for it
+  - See a second copy of a subscriber double the work, and learn where that leads
+
+run:
+  - apply
+  - build
+  - shipping
+  - analytics
+  - email
+  - shop
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The shop publishes each order once, direct, to a topic that names the
+    region and the order. The broker copies it to every subscriber whose
+    subscription matches: shipping and email take every order, analytics
+    only the EU ones. Nothing is stored on the way.
+  duration: 2.4
+  liveWhen: shop
+  nodes:
+    - id: shop
+      label: Shop
+      sublabel: two orders a second
+      kind: app
+      col: 0
+      action: shop
+      requires:
+        - label: svc-ps-shop
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ps-shop
+    - id: broker
+      label: Solace Broker
+      sublabel: copies to each subscriber
+      kind: broker
+      col: 1
+      action: apply
+      provides:
+        - label: cp-ps
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ps
+        - label: acl-ps
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ps
+    - id: shipping
+      label: Shipping
+      sublabel: every order
+      kind: app
+      col: 2
+      action: shipping
+      requires:
+        - label: svc-ps-shipping
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ps-shipping
+    - id: shipping2
+      label: Shipping 2
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: shipping-2
+      requires:
+        - label: svc-ps-shipping
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ps-shipping
+    - id: analytics
+      label: Analytics
+      sublabel: EU orders only
+      kind: app
+      col: 2
+      action: analytics
+      requires:
+        - label: svc-ps-analytics
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ps-analytics
+    - id: email
+      label: Email
+      sublabel: every order
+      kind: app
+      col: 2
+      action: email
+      requires:
+        - label: svc-ps-email
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ps-email
+  flows:
+    - { from: shop, to: broker, label: ps/shop/order/placed/v1/<region>/<order>, delay: 0 }
+    - { from: broker, to: shipping, label: ".../v1/>", delay: 0.8 }
+    - { from: broker, to: shipping2, label: ".../v1/>", delay: 0.9 }
+    - { from: broker, to: analytics, label: ".../v1/eu/>", delay: 1.0 }
+    - { from: broker, to: email, label: ".../v1/>", delay: 1.1 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the client profile, ACL profile and usernames for this
+      scenario. There are no queues: everything here is direct.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: shipping
+    label: Start shipping
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ps, subscriber, --role, shipping, --user, svc-ps-shipping, --topic, "ps/shop/order/placed/v1/>", --client-name, ps-shipping]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to every order. It remembers the last event number it
+      saw, so after a restart it can say how many it missed.
+
+  - id: shipping-2
+    label: Start a second shipping
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ps, subscriber, --role, shipping-2, --user, svc-ps-shipping, --topic, "ps/shop/order/placed/v1/>", --client-name, ps-shipping-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      A second copy of shipping, with the same subscription.
+
+  - id: analytics
+    label: Start analytics
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ps, subscriber, --role, analytics, --user, svc-ps-analytics, --topic, "ps/shop/order/placed/v1/eu/>", --client-name, ps-analytics]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to EU orders only, by topic. The shop does not know.
+
+  - id: email
+    label: Start email
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ps, subscriber, --role, email, --user, svc-ps-email, --topic, "ps/shop/order/placed/v1/>", --client-name, ps-email]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to every order.
+
+  - id: shop
+    label: Start the shop
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ps, shop]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes an order every half second, direct, numbered from 1.
+
+  - id: kill-shipping
+    label: Crash shipping
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, ps-shipping, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills shipping outright (SIGKILL), and returns once it has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, publish-subscribe]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the access control for this scenario.
+
+failure_modes:
+  - id: shipping-away
+    title: Shipping goes away for a while
+    breaks: >
+      Shipping is killed. Analytics and email carry on.
+    watch: >
+      The card shows email, which goes on receiving every order as if
+      nothing had happened. Shipping's node goes red. Press Reset to start
+      shipping again: its first line says which event it gets first and
+      which it last saw, "missed #41 to #52, 12 events published while it
+      was away". Those orders were never shipped. Nothing on the broker
+      kept them: a direct message goes to whoever is subscribed at that
+      moment.
+    why: >
+      A direct message is delivered to the subscribers that are connected
+      and subscribed when it is published, and then it is gone. The broker
+      stores nothing for a subscriber that is away, and does not know that
+      one is missing. That is what makes publish-subscribe cheap and fast,
+      and what makes it the wrong choice for an event that must not be
+      lost: Point-to-Point and Guaranteed Delivery show the queue that
+      keeps it.
+    real_world: >
+      A deploy, a crash or a network blip on a subscriber. Dashboards,
+      caches and notifications can live with a gap; billing cannot. Choose
+      direct or guaranteed per subscriber, not per system.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Go API: publishing direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Publish.htm
+    node: shipping
+    logs: email
+    trigger:
+      - run: kill-shipping
+    reset:
+      - start: shipping
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: shipping
+            has: ["exited with code -9"]
+          - log: email
+            has: ["event #\\d+: order"]
+      reset:
+        within: 15
+        logs:
+          - log: shipping
+            has: ["missed #\\d+ to #\\d+, \\d+ events published while it was away", "event #\\d+: order"]
+
+  - id: two-shipping
+    title: A second shipping is started to share the load
+    breaks: >
+      A second copy of shipping starts, with the same subscription as the
+      first.
+    watch: >
+      The card shows the second shipping. It receives every order, and so
+      does the first: open shipping's log from its node and compare the
+      event numbers. Every order is now shipped twice. Publish-subscribe
+      copies an event to every subscriber; running two copies of a
+      subscriber does not share the work, it doubles it. Reset stops the
+      second copy.
+    why: >
+      The broker delivers a direct message to every subscription that
+      matches it, and each subscriber's subscription is its own. Two apps
+      with the same subscription are two subscribers. To share one stream
+      of events among several copies of an app, they need something that
+      hands each event to one of them: a queue, as in Competing Consumers,
+      or for direct messages a shared subscription (#share/<group>/<topic>).
+    real_world: >
+      Scaling out a service by running more instances, and finding every
+      event handled once per instance: duplicate emails, double bookings.
+      Pub/sub fans out; sharing work needs a queue or a shared
+      subscription.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Broker: wildcard characters in topic subscriptions"
+        url: https://docs.solace.com/Messaging/Wildcard-Charaters-Topic-Subs.htm
+    node: shipping2
+    logs: shipping-2
+    trigger:
+      - start: shipping-2
+    reset:
+      - stop: shipping-2
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: shipping-2
+            has: ["event #\\d+: order"]
+          - log: shipping
+            has: ["event #\\d+: order"]
+      reset:
+        within: 10
+        logs:
+          - log: shipping-2
+            has: ["exited with code"]
+
+inspect:
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==ps-*
+    # dataTxMsgCount is what the broker sent each client: the same for
+    # shipping and email, a third of it for analytics.
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
+  - label: What shipping subscribed to
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients/ps-shipping/subscriptions
+    columns: [subscriptionTopic]
+    ui_hint: Manager → Clients → ps-shipping → Subscriptions
+    empty: Shipping is not connected. Press Play, or start shipping.
+  - label: What analytics subscribed to
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients/ps-analytics/subscriptions
+    columns: [subscriptionTopic]
+    ui_hint: Manager → Clients → ps-analytics → Subscriptions
+    empty: Analytics is not connected. Press Play, or start analytics.
