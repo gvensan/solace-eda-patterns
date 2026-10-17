@@ -1223,6 +1223,28 @@ a { color: var(--text-link); }
   .dg-packet { opacity: 0.6; }
 }
 
+/* A queue box's live depth, and a message arriving on a dead message queue:
+   a dot hops from the queue it left, with the reason beside the box, and
+   the box flashes. */
+.dg-node__child-depth {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  fill: var(--text-muted);
+}
+.dg-node__child-depth[data-busy="true"] { fill: var(--orange); font-weight: var(--fw-semibold); }
+.dg-hop circle { fill: var(--orange); stroke: #0b1622; stroke-width: 1.5; }
+.dg-hop__label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: var(--fw-semibold);
+  fill: var(--orange);
+}
+.dg-node__child.is-arriving .dg-node__child-box { animation: dg-arrive 1.6s var(--ease-standard); }
+@keyframes dg-arrive {
+  0%, 30% { stroke: var(--orange); stroke-width: 2.5; stroke-dasharray: none; }
+  100%    { stroke: var(--border-strong); stroke-width: 1; }
+}
+
 /* A partitioned queue: one lane per partition, each naming its owner and
    its counts, all read from the broker. A lane with no owner is drawn as
    waiting; a lane that just moved flashes once. */

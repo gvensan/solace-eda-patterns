@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Dead letter queue: who may connect
+# Dead message queue: who may connect
 #
 # The shop places orders, the intake checks them, and operations watches the
 # dead message queue. Each has its own username.

@@ -207,7 +207,7 @@ false, or set true. Then counted where the message ended up.
   image. 10.26.0 behaves as described.
 - REJECTED goes to the DMQ on both versions, as the core workshop's
   shock absorber shows.
-- A Dead Letter Queue scenario on 10.26.0 can show the difference directly:
+- A Dead Message Queue scenario on 10.26.0 can show the difference directly:
   one card that flips `respect_dmq_eligible_enabled` and publishes with the
   flag false.
 
@@ -415,4 +415,49 @@ a new order's `#1`, so nothing showed a pickup; with two orders per
 partition that is rare. The Clear pace keeps one order per partition, so
 the crash card's check rests on the broker reporting the move, not on a
 pickup line.
+
+## 11. Message expiry and the dead message queue
+
+Tested on 10.26.0 with the Go API v1.10.0, on a throwaway queue with a DMQ
+and no consumer. Three messages each, sent with a time to live of 3 seconds
+(`config.MessagePropertyPersistentTimeToLive`, in milliseconds).
+
+[Configuring Queues](https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm)
+says a queue ignores message time to live unless `respect-ttl` is on (off
+by default), that expired messages are discarded or moved to a DMQ if they
+are DMQ-eligible, and that with both a message TTL and a queue `max-ttl`
+the smaller applies.
+[Dead Message Queues](https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm)
+lists expiry as a reason a message leaves a queue, and says that from
+10.25.10 every removed message goes to the DMQ, without saying whether that
+covers expiry. Measured:
+
+| `respect_ttl_enabled` | `respect_dmq_eligible_enabled` | Publisher's flag | Result |
+| --- | --- | --- | --- |
+| true | false (default) | left unset | moved to the DMQ 3 to 4 s after sending; `maxTtlExpiredToDmqMsgCount` 3 |
+| true | false | not eligible | moved to the DMQ just the same |
+| true | true | not eligible | discarded; `maxTtlExpiredDiscardedMsgCount` 3 |
+| false (default) | false | left unset | still on the queue; the TTL is ignored |
+
+So on 10.26.0 expiry follows the same rule as redelivery (section 6): with
+`respect_dmq_eligible_enabled` off, everything the queue removes goes to the
+DMQ.
+
+**A time to live of 0.** The Go API documents it: "The default value is 0,
+which means the message never expires." Measured: three messages sent with
+the property set explicitly to 0, on a queue with `respect_ttl_enabled`
+on, were all still there 8 seconds later, and nothing was counted as
+expired. The queue's own `max_ttl` is 0 by default too, meaning disabled
+(Configuring Queues); the workshop leaves it there. The API takes whole
+milliseconds, so the expiring-orders app refuses a time to live that would
+round down to 0, and a negative one, rather than let either mean "never".
+`MessagePropertyPersistentExpiration`, by contrast, is informational: the
+API says it "does not effect the life cycle of the message".
+
+A queue counts what it moved by reason: `maxTtlExpiredToDmqMsgCount` for
+expiry and `maxRedeliveryExceededToDmqMsgCount` for redelivery. The message
+itself does not say: read from the DMQ with the Go API, an expired message
+reports its expiration as the Unix epoch, the same as a message sent
+without one. Dead Message Queue's diagram therefore takes the reason from
+the counters.
 

@@ -41,7 +41,7 @@ redelivered message is recognised and not applied again).
 
 ### How it differs from its neighbours
 
-- **Dead Letter Queue**: what happens when a message can never be processed.
+- **Dead Message Queue**: what happens when a message can never be processed.
   Guaranteed Delivery is about a message that can be, not being lost or
   doubled on the way.
 - **Exclusive Consumer, Competing Consumers**: who receives. Here there is one

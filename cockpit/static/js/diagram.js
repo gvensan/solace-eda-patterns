@@ -125,13 +125,16 @@ const Diagram = (() => {
      Child labels are 10px monospace, about 6.2px a character; the constant
      covers the insets, the label's padding and the count beside it. */
   const CHILD_CHAR_W = 6.2;
+  const DEPTH_W = 64;
   const CHILD_CHROME_W = 76;
 
   function nodeWidth(n) {
     if (!n.contains?.length) return NODE_W;
     const longest = Math.max(...n.contains.map((c) => (c.label || "").length));
     const lanes = n.contains.some((c) => c.partitions) ? NODE_W_LANES : 0;
-    return Math.max(NODE_W_WIDE, lanes, Math.ceil(CHILD_CHROME_W + longest * CHILD_CHAR_W));
+    // Room for a live depth ("12 waiting") beside the label and its count.
+    const depth = n.contains.some((c) => c.depth) ? DEPTH_W : 0;
+    return Math.max(NODE_W_WIDE, lanes, Math.ceil(CHILD_CHROME_W + depth + longest * CHILD_CHAR_W));
   }
 
   /* A flow label sits between two columns, so a long one (a full topic
@@ -298,6 +301,15 @@ const Diagram = (() => {
         x: n.x + CHILD_INSET + 8, y: cyTop + 17,
         class: "dg-node__child-label", "text-anchor": "start",
       }, child.label));
+
+      // How many messages the queue holds now, read from the broker.
+      if (child.depth) {
+        kid.append(el("text", {
+          x: n.x + n.w - CHILD_INSET - 34, y: cyTop + 17,
+          class: "dg-node__child-depth", "text-anchor": "end",
+          "data-child-depth": child.id || "",
+        }, ""));
+      }
 
       /* The count is filled in from SEMP on each poll, like the node-level
          check, so a box reads as present or missing rather than assumed. */
@@ -853,6 +865,8 @@ const Diagram = (() => {
       }
     }
 
+    paintBoxes(svg, diagram, state);
+
     /* Packets move only on flows that carry traffic, so a stopped app never
        has dots arriving at it or leaving it. `liveWhen` still gates the whole
        picture on one node, for scenarios that want that. */
@@ -863,6 +877,91 @@ const Diagram = (() => {
     for (const packet of svg.querySelectorAll(".dg-packet[data-flow]")) {
       packet.classList.toggle("is-idle", !live.has(Number(packet.dataset.flow)));
     }
+  }
+
+  /* ---------------------------------------------- Queue depth and arrivals
+
+     A queue box can show how many messages it holds (`depth:`), and a dead
+     message queue box can show each message that arrives (`arrivals:`).
+     Both come from the broker on each poll: the depth from the queue's
+     message list, the arrivals from counters on the queue messages leave
+     (maxTtlExpiredToDmqMsgCount and the like), which also say why. Each
+     rise in a counter is drawn as a dot hopping from one box to the other,
+     labelled with the reason, then on along the line to whoever reads that
+     queue, if it is running. Nothing is drawn for counts the page saw
+     before it opened. */
+
+  function boxRect(svg, id) {
+    const r = svg.querySelector(`[data-child="${id}"] > .dg-node__child-box`);
+    return r ? r.getBBox() : null;
+  }
+
+  function paintBoxes(svg, diagram, state) {
+    const boxes = state.boxes || {};
+    const specs = new Map((diagram.nodes || []).flatMap((n) => (n.contains || []).map((c) => [c.id, c])));
+    const seen = svg.__arrivals || (svg.__arrivals = new Map());
+    for (const [id, live] of Object.entries(boxes)) {
+      const spec = specs.get(id);
+      if (!spec) continue;
+      const depthEl = svg.querySelector(`[data-child-depth="${id}"]`);
+      if (depthEl && spec.depth) {
+        const unit = spec.depth.unit || "held";
+        depthEl.textContent = live.depth === null ? "" : `${live.depth} ${unit}`;
+        depthEl.setAttribute("data-busy", String((live.depth || 0) > 0));
+        indicator(depthEl, "box-depth", live.depth === null
+          ? `The broker did not say how many messages ${spec.depth.queue} holds. Press Play if the queue is not there yet.`
+          : `${live.depth} message(s) on ${spec.depth.queue} right now: waiting to be read, or delivered and not yet acknowledged. Read from the broker every few seconds.`);
+      }
+      if (!spec.arrivals || !live.arrivals) continue;
+      const before = seen.get(id);
+      seen.set(id, { ...live.arrivals });
+      if (!before) continue;
+      for (const [reason, count] of Object.entries(live.arrivals)) {
+        const rise = (count ?? 0) - (before[reason] ?? 0);
+        // A counter that went down means the queue was recreated: nothing moved.
+        for (let k = 0; k < Math.min(rise, 3); k++) {
+          setTimeout(() => hop(svg, diagram, state, spec, reason), k * 450);
+        }
+      }
+    }
+  }
+
+  function hop(svg, diagram, state, spec, reason) {
+    const from = boxRect(svg, spec.arrivals.from);
+    const to = boxRect(svg, spec.id);
+    const layer = svg.querySelector(".dg-packets");
+    if (!from || !to || !layer) return;
+    const x1 = from.x + from.width, y1 = from.y + from.height / 2;
+    const x2 = to.x + to.width, y2 = to.y + to.height / 2;
+    let d = `M ${x1 - 8} ${y1} C ${x1 + 26} ${y1}, ${x2 + 26} ${y2}, ${x2 - 8} ${y2}`;
+    // On along the line to the reader of this queue, if it is running.
+    const flows = diagram.flows || [];
+    const i = flows.findIndex((f) => f.via === spec.id && state.nodes?.[f.to]?.running);
+    const line = i >= 0 ? svg.querySelector(`#dg-flow-${i}`) : null;
+    const m = line?.getAttribute("d").match(/^M\s*([-\d.]+)[\s,]+([-\d.]+)\s*(.*)$/);
+    if (m) d += ` L ${m[1]} ${m[2]} ${m[3]}`;
+    const g = el("g", { class: "dg-hop" });
+    g.append(el("circle", { r: 6 }));
+    indicator(g, "box-arrival", `A message moved to ${spec.label}: ${reason}. Counted by the broker on the queue it left.`);
+    layer.append(g);
+    const label = el("text", { x: x2 + 12, y: y2 - 8, class: "dg-hop__label", "text-anchor": "start" }, reason);
+    indicator(label, "box-arrival", `A message moved to ${spec.label}: ${reason}. Counted by the broker on the queue it left.`);
+    layer.append(label);
+    const box = svg.querySelector(`[data-child="${spec.id}"]`);
+    box?.classList.add("is-arriving");
+    setTimeout(() => { box?.classList.remove("is-arriving"); label.remove(); }, 3500);
+    const path = el("path", { d });
+    const len = path.getTotalLength();
+    const t0 = performance.now();
+    const ms = m ? 2200 : 900;
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / ms);
+      const pt = path.getPointAtLength(len * t);
+      g.setAttribute("transform", `translate(${pt.x} ${pt.y})`);
+      if (t < 1) requestAnimationFrame(step);
+      else g.remove();
+    };
+    requestAnimationFrame(step);
   }
 
   /* ------------------------------------------------- Partitioned queues

@@ -281,6 +281,33 @@ A node with `flowOn` is labelled "active, not acking" when it is the active
 consumer, holds unacknowledged messages, and its acked count on the broker
 has not moved for 5 seconds (`STALL_SECONDS` in `cockpit/app/main.py`).
 
+#### Queue depth and arrivals on a box
+
+A queue box can show how many messages the queue holds now, and a dead
+message queue box can draw each message the broker moves into it, with the
+reason, from the counters on the queue it left. Dead Message Queue uses both.
+
+```yaml
+      contains:
+        - id: orders
+          label: q.dlq.orders
+          depth: { queue: q.dlq.orders, unit: waiting }
+        - id: dmq
+          label: q.dlq.orders.dmq
+          depth: { queue: q.dlq.orders.dmq, unit: parked }
+          arrivals:
+            from: orders                 # the box messages leave
+            queue: q.dlq.orders          # whose counters say why
+            reasons:                     # label shown: monitor counter
+              failed 3 attempts: maxRedeliveryExceededToDmqMsgCount
+              expired: maxTtlExpiredToDmqMsgCount
+```
+
+`/state` returns each box's depth (the queue's `msgs` count) and counters.
+Each rise in a counter after the page opened is drawn as a dot hopping
+between the boxes, labelled with the reason, then along the flow `via:` the
+box to its reader, if that reader is running.
+
 #### Settings: a choice on a node
 
 A scenario can offer a choice about how an app runs, shown in that node's

@@ -27,6 +27,7 @@ var roles = map[string]func([]string){
 	"compete worker":    compete.Worker,
 	"dlq shop":          dlq.Shop,
 	"dlq poison":        dlq.Poison,
+	"dlq expiring":      dlq.Expiring,
 	"dlq intake":        dlq.Intake,
 	"dlq watch":         dlq.Watch,
 	"exclusive publish": exclusive.Publish,

@@ -39,7 +39,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 350 | [Exclusive Consumer](guides/350-exclusive-consumer.md) | Consumption Patterns | One active consumer and a standby on an exclusive queue, failover, and the hang it cannot detect |
 | 410 | [Competing Consumers](guides/410-competing-consumers.md) | Consumer Scalability Patterns | Identical workers share one queue; add one to go faster, lose one and the others carry on |
 | 440 | [Partitioning](guides/440-partitioning.md) | Consumer Scalability Patterns | Same key, same partition, same consumer, in order; partitions moving on a crash or a join; what a missing key does |
-| 610 | [Dead Letter Queue](guides/610-dead-letter-queue.md) | Error Handling Patterns | Retry a fixed number of times, then park on a DMQ; what decides parked or dropped on 10.26.0 and 10.8.1 |
+| 610 | [Dead Message Queue](guides/610-dead-letter-queue.md) | Error Handling Patterns | Retry a fixed number of times, then park on a DMQ; orders that expire while waiting; what decides parked or dropped on 10.26.0 and 10.8.1 |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 
 ## What you get in the container

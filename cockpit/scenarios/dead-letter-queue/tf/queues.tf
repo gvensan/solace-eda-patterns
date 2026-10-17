@@ -9,6 +9,12 @@
 #   dead_msg_queue                where a message goes when the queue gives up
 #   respect_dmq_eligible_enabled  whether the publisher's DMQ-eligible flag
 #                                 counts
+#   respect_ttl_enabled           whether a message's time to live counts;
+#                                 off by default, when an order the sender
+#                                 marked "valid for 5 seconds" would wait
+#                                 on the queue for ever. A time to live of
+#                                 0 means never expires. max_ttl is left at
+#                                 0 (disabled), so only the sender's counts
 #
 # Written for broker 10.26.0. There, with respect_dmq_eligible_enabled false
 # (its default), every message the queue removes goes to the DMQ whatever its
@@ -31,6 +37,7 @@ resource "solacebroker_msg_vpn_queue" "orders" {
   max_redelivery_count         = 2
   dead_msg_queue               = solacebroker_msg_vpn_queue.dmq.queue_name
   respect_dmq_eligible_enabled = false
+  respect_ttl_enabled          = true
 }
 
 resource "solacebroker_msg_vpn_queue_subscription" "orders" {

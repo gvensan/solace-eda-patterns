@@ -1,12 +1,12 @@
-// Package dlq implements the dead letter queue scenario.
+// Package dlq implements the dead message queue scenario.
 //
 // The shop's order intake reads new orders from a queue and passes them on
 // for shipping. Now and then an order arrives that can never be processed:
 // here, one with no delivery address. Retrying it forever would waste the
 // intake's time and, on a queue read in order, hold up every order behind it.
 // The queue gives it a few attempts, then moves it to a dead message queue
-// (Solace's name for a dead letter queue) where someone can look at it, and
-// the orders behind it keep flowing.
+// (what other brokers and the pattern guide call a dead letter queue), where
+// someone can look at it, and the orders behind it keep flowing.
 package dlq
 
 import (
@@ -90,6 +90,63 @@ func Poison(args []string) {
 		os.Exit(1)
 	}
 	solace.Logf(*role, "placed order %s with no delivery address (DMQ-eligible: %s)", order, *eligible)
+}
+
+// Expiring places orders that are only worth processing for a few seconds,
+// and exits: each holds a payment authorisation that lapses, so the
+// publisher gives it a time to live. A queue that respects time to live
+// removes an order that has waited longer and, because it names a dead
+// message queue, moves it there. Run while the intake is stopped, they
+// expire before anyone reads them.
+func Expiring(args []string) {
+	fs := flag.NewFlagSet("dlq expiring", flag.ExitOnError)
+	user := fs.String("user", "svc-dlq-shop", "client username to connect as")
+	role := fs.String("role", "shop", "label for log lines")
+	count := fs.Int("count", 3, "orders to place")
+	ttl := fs.Duration("ttl", 5*time.Second, "time to live of each order; 0 means it never expires")
+	fs.Parse(args)
+
+	// The API takes a time to live in whole milliseconds, and 0 means the
+	// message never expires (it is also the default). So 0 sends none, and
+	// anything that would round down to 0, or is negative, is refused
+	// rather than quietly meaning "never".
+	if *ttl < 0 || (*ttl > 0 && ttl.Milliseconds() == 0) {
+		solace.Errf(*role, "time to live %s: use 0 (never expires) or 1ms or more", *ttl)
+		os.Exit(2)
+	}
+	hold := "none"
+	if *ttl > 0 {
+		hold = ttl.String()
+	}
+
+	svc := solace.ConnectAs(*role, *user, "dlq-expiring")
+	defer svc.Disconnect()
+	pub := solace.StartPersistentPublisher(*role, *user, svc)
+	defer solace.Terminate(pub)
+
+	for n := 1; n <= *count; n++ {
+		order := fmt.Sprintf("H-%d", time.Now().UnixMilli()%100000)
+		payload := fmt.Sprintf(`{"order":"%s","address":"%d Market Street","eligible":"default","hold":"%s"}`, order, n, hold)
+		b := svc.MessageBuilder()
+		if *ttl > 0 {
+			b = b.WithProperty(config.MessagePropertyPersistentTimeToLive, ttl.Milliseconds())
+		}
+		msg, err := b.BuildWithStringPayload(payload)
+		if err != nil {
+			solace.Errf(*role, "could not build the order: %s", err)
+			os.Exit(1)
+		}
+		if err := pub.PublishAwaitAcknowledgement(msg, resource.TopicOf("dlq/shop/order/placed/v1/"+order), 5*time.Second, nil); err != nil {
+			solace.Errf(*role, "the broker did not take order %s: %s", order, err)
+			os.Exit(1)
+		}
+		if *ttl > 0 {
+			solace.Logf(*role, "placed order %s, valid for %s (time to live)", order, *ttl)
+		} else {
+			solace.Logf(*role, "placed order %s with no time to live: it never expires", order)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // Intake reads orders and passes the good ones on. An order without an
@@ -188,6 +245,13 @@ func Watch(args []string) {
 		payload := solace.PayloadOf(msg)
 		line := fmt.Sprintf("[%s] parked %s, published to %s (eligible=%s)", *role,
 			solace.FieldString(payload, "order"), msg.GetDestinationName(), solace.FieldString(payload, "eligible"))
+		// Why it was parked is not on the message: an expired order arrives
+		// with no expiry time (the API reports the Unix epoch). The broker
+		// counts the reasons on q.dlq.orders, which the diagram shows. What
+		// the shop said about the order is in its payload.
+		if hold := solace.FieldString(payload, "hold"); hold != "" && hold != "none" {
+			line += fmt.Sprintf(", was valid for %s", hold)
+		}
 		if msg.IsRedelivered() {
 			line += "  (shown before)"
 		}

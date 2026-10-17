@@ -410,7 +410,42 @@ async def scenario_state(scenario_id: str):
         }
 
     return {"nodes": out,
+            "boxes": await _box_state(nodes),
             "settings": {name: setting_value(scenario, name) for name in scenario.settings}}
+
+
+async def _box_state(nodes) -> dict:
+    """Live numbers for queue boxes drawn inside the broker.
+
+    A box with `depth: {queue, unit}` shows how many messages that queue
+    holds now (its msgs count: waiting, or delivered and not yet
+    acknowledged). A box with `arrivals: {queue, reasons}` reports the
+    queue counters that say why messages moved into it, such as
+    maxTtlExpiredToDmqMsgCount; the page draws a hop for each one that
+    rises. None where the broker could not be asked."""
+    boxes = [c for n in nodes for c in n.get("contains", []) or []
+             if c.get("depth") or c.get("arrivals")]
+
+    async def one(box):
+        out = {"depth": None, "arrivals": None}
+        try:
+            if box.get("depth"):
+                q = quote(box["depth"]["queue"], safe="")
+                data = await broker.semp_get(f"/msgVpns/{{vpn}}/queues/{q}/msgs?count=1&select=msgId",
+                                             api="monitor")
+                out["depth"] = data.get("meta", {}).get("count", len(data.get("data", [])))
+            if box.get("arrivals"):
+                spec = box["arrivals"]
+                fields = ",".join(spec["reasons"].values())
+                data = await broker.semp_get(
+                    f"/msgVpns/{{vpn}}/queues/{quote(spec['queue'], safe='')}?select={fields}", api="monitor")
+                row = data.get("data", {})
+                out["arrivals"] = {reason: row.get(field) for reason, field in spec["reasons"].items()}
+        except Exception:
+            pass
+        return box["id"], out
+
+    return dict(await asyncio.gather(*(one(b) for b in boxes))) if boxes else {}
 
 
 @app.put("/api/scenarios/{scenario_id}/settings/{name}")

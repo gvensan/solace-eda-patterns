@@ -2,18 +2,20 @@ id: dead-letter-queue
 # Category 6 of the pattern guide (Error Handling Patterns), first pattern.
 order: 610
 eyebrow: Error Handling Patterns
-title: Dead Letter Queue
+title: Dead Message Queue
 summary: >
   Now and then an order arrives that can never be processed: this one has no
   delivery address. Retrying it forever would waste the order intake's time
   and hold up the orders behind it. The queue gives it three attempts, then
   moves it to a dead message queue, where it waits for someone to look at
-  it, and the orders behind it keep flowing. This page describes broker
-  10.26.0, the version this workshop pins.
+  it, and the orders behind it keep flowing. Orders that wait too long and
+  expire go there too. This page describes broker 10.26.0, the version this
+  workshop pins.
 
 objectives:
   - See an order that keeps failing retried a fixed number of times, then parked
   - See good orders keep flowing past the one that failed
+  - See an order that waited past its time to live moved to the same place
   - Find the parked order on the dead message queue, kept rather than lost
   - "Learn what decides whether a message is parked or dropped: on 10.26.0 the queue, on 10.8.1 the sender"
 
@@ -32,8 +34,9 @@ diagram:
     The shop places orders on q.dlq.orders and the intake checks them. An
     order the intake cannot process is handed back for another attempt;
     after three, the broker moves it to q.dlq.orders.dmq, where operations
-    can see it. The line to operations is drawn without packets: it only
-    carries the odd parked order.
+    can see it. So does an order that waits past its time to live. Each
+    order the broker moves is drawn as a dot hopping from one queue to the
+    other, labelled with the reason, then on to operations.
   duration: 2.4
   liveWhen: shop
   nodes:
@@ -55,8 +58,17 @@ diagram:
       contains:
         - id: orders
           label: q.dlq.orders
+          depth: { queue: q.dlq.orders, unit: waiting }
         - id: dmq
           label: q.dlq.orders.dmq
+          depth: { queue: q.dlq.orders.dmq, unit: parked }
+          # The counters on q.dlq.orders that say why an order moved here.
+          arrivals:
+            from: orders
+            queue: q.dlq.orders
+            reasons:
+              failed 3 attempts: maxRedeliveryExceededToDmqMsgCount
+              expired: maxTtlExpiredToDmqMsgCount
       provides:
         - label: q.dlq.orders
           group: orders
@@ -158,6 +170,17 @@ actions:
       Places one order with no delivery address, leaving its DMQ-eligible
       flag unset (the Go API sends that as eligible).
 
+  - id: send-expiring
+    label: Place orders that expire
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dlq, expiring]
+    cwd: .
+    variant: secondary
+    description: >
+      Places three orders that are only valid for 5 seconds: each is sent
+      with a time to live. If the intake has not taken them by then, the
+      queue moves them to its dead message queue.
+
   - id: send-ineligible-order
     label: Place a bad order marked not DMQ-eligible
     kind: process
@@ -220,8 +243,9 @@ failure_modes:
     watch: >
       Open the intake's log from its node: the bad order (P-...) fails on
       attempt 1, 2 and 3, and good orders keep being accepted around it.
-      The card shows Operations: after the third attempt the order appears
-      there as parked. Under On the broker, Parked orders lists
+      After the third attempt a dot hops from q.dlq.orders to the DMQ,
+      labelled "failed 3 attempts", and the DMQ's count goes up. The card
+      shows Operations: the order appears there as parked. Under On the broker, Parked orders lists
       it on q.dlq.orders.dmq, where it stays. Nothing needs resetting: the
       order is kept for someone to look at.
     why: >
@@ -240,7 +264,7 @@ failure_modes:
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
       - label: "Broker: dead message queues"
         url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
-    node: {role: active}
+    node: intake
     logs: dmq-watch
     trigger:
       - run: send-bad-order
@@ -250,7 +274,7 @@ failure_modes:
       break:
         within: 30
         logs:
-          - log: {role: active}
+          - log: intake
             has: ["FAILED P-.*attempt 3", "accepted \\d+ orders"]
           - log: dmq-watch
             has: ["parked P-.*eligible=default"]
@@ -262,8 +286,9 @@ failure_modes:
       a bad order marked not eligible for a dead message queue.
     watch: >
       This describes broker 10.26.0. The intake fails the order three times,
-      as before (its log says eligible=false), but this time Operations sees
-      nothing: the queue respected the flag and dropped the order. Reset
+      as before (its log says eligible=false), but this time no dot hops to
+      the DMQ and Operations sees nothing: the queue respected the flag and
+      dropped the order. Reset
       turns the setting back off and places the same kind of order again.
       This time it is parked, even though it says not eligible: with the
       setting off, which is the 10.26.0 default, the queue parks everything
@@ -285,7 +310,7 @@ failure_modes:
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
       - label: "Broker: dead message queues"
         url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
-    node: {role: active}
+    node: intake
     logs: dmq-watch
     trigger:
       - run: respect-on
@@ -297,7 +322,7 @@ failure_modes:
       break:
         within: 25
         logs:
-          - log: {role: active}
+          - log: intake
             has: ["FAILED P-.*attempt 3 \\(eligible=false\\)"]
           - log: dmq-watch
             lacks: ["parked P-"]
@@ -307,6 +332,61 @@ failure_modes:
           - log: dmq-watch
             has: ["parked P-.*eligible=false"]
 
+  - id: orders-expire
+    title: Orders expire while the intake is down
+    breaks: >
+      The order intake stops. Then the shop places three orders that are
+      only valid for 5 seconds: each holds a payment authorisation that
+      lapses, so it is sent with a time to live.
+    watch: >
+      The intake's node goes grey, and q.dlq.orders starts counting orders
+      waiting. The shop's ordinary orders wait there unharmed: they have no
+      time to live. The three time-limited orders (H-...) do not: about 5
+      seconds after they were placed, the broker moves them to the DMQ. A
+      dot hops across for each, labelled "expired", and the card shows
+      Operations printing each one as parked, "was valid for 5s".
+      Reset starts the intake, which works through the waiting orders.
+    why: >
+      A publisher can give a message a time to live, in milliseconds; 0, the
+      default, means it never expires. A queue only honours it when
+      respect_ttl_enabled is on (it is off by default; this queue has it
+      on). An order still on the queue when its time runs out is removed
+      and, because the queue names a dead message queue, moved there. On
+      10.26.0 that happens whatever the order's DMQ-eligible flag says,
+      unless the queue respects that flag. The queue counts them in
+      maxTtlExpiredToDmqMsgCount.
+    real_world: >
+      Quotes, reservations, payment holds, sensor readings: data that is
+      worse than useless once it is stale. Without a time to live it is
+      processed late; with one and no dead message queue it disappears
+      without trace. A DMQ keeps it, so someone can see how much expired
+      and why the consumer fell behind.
+    docs:
+      - label: "Go API: publishing persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: configuring queues (respect TTL, max TTL)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+      - label: "Broker: dead message queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
+    node: intake
+    logs: dmq-watch
+    trigger:
+      - stop: intake
+      - run: send-expiring
+    reset:
+      - start: intake
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: dmq-watch
+            has: ["parked H-.*was valid for 5s"]
+      reset:
+        within: 20
+        logs:
+          - log: intake
+            has: ["accepted \\d+ orders"]
+
 inspect:
   - label: Queues
     kind: semp
@@ -314,13 +394,15 @@ inspect:
     path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.dlq.*
     # maxRedeliveryExceededToDmqMsgCount counts the orders moved to the DMQ.
     # ...ToDmqFailedMsgCount counts orders that had nowhere to go: no DMQ.
-    columns: [queueName, msgSpoolUsage, redeliveredMsgCount, maxRedeliveryExceededToDmqMsgCount, maxRedeliveryExceededToDmqFailedMsgCount]
+    # maxTtlExpiredToDmqMsgCount counts orders moved there because they
+    # waited past their time to live.
+    columns: [queueName, msgSpoolUsage, redeliveredMsgCount, maxRedeliveryExceededToDmqMsgCount, maxTtlExpiredToDmqMsgCount, maxRedeliveryExceededToDmqFailedMsgCount]
     ui_hint: Manager → Queues
     empty: The queues are not on the broker. Press Play, or run Apply configuration.
   - label: Retry settings on q.dlq.orders
     kind: semp
     path: /msgVpns/{vpn}/queues?where=queueName==q.dlq.orders
-    columns: [queueName, maxRedeliveryCount, deadMsgQueue, respectDmqEligibleEnabled]
+    columns: [queueName, maxRedeliveryCount, deadMsgQueue, respectDmqEligibleEnabled, respectTtlEnabled]
     ui_hint: Manager → Queues → q.dlq.orders → Settings
     empty: The queue is not on the broker. Press Play, or run Apply configuration.
   - label: Parked orders on q.dlq.orders.dmq

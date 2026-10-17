@@ -355,6 +355,25 @@ def check_partitions(spec, here, actions) -> list:
                     elif int(count.group(1)) != part["count"]:
                         bad.append(f"diagram draws {part['count']} lanes for {part['queue']}, "
                                    f"but {tf.name} creates {count.group(1)} partitions")
+    # depth: and arrivals: on a queue box, read from the broker on each poll.
+    all_boxes = {c.get("id"): c for n in diagram.get("nodes", []) or [] for c in n.get("contains", []) or []}
+    for box in all_boxes.values():
+        depth = box.get("depth")
+        if depth is not None and not (isinstance(depth, dict) and depth.get("queue") and depth.get("unit")):
+            bad.append(f"diagram box {box.get('id')!r} depth: needs queue: and unit:")
+        arr = box.get("arrivals")
+        if arr is None:
+            continue
+        if not isinstance(arr, dict) or not arr.get("queue") or not isinstance(arr.get("reasons"), dict) \
+                or not arr["reasons"]:
+            bad.append(f"diagram box {box.get('id')!r} arrivals: needs queue: and reasons: (label: counter)")
+            continue
+        if arr.get("from") not in all_boxes or arr.get("from") == box.get("id"):
+            bad.append(f"diagram box {box.get('id')!r} arrivals from: must name another box")
+        for label, field in arr["reasons"].items():
+            if not isinstance(field, str) or not re.fullmatch(r"[a-zA-Z]+", field):
+                bad.append(f"diagram box {box.get('id')!r} arrivals reason {label!r} must name a queue counter")
+
     events = diagram.get("events")
     if events is not None:
         if not boxes:
