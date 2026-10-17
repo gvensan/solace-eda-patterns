@@ -24,6 +24,12 @@ SCENARIOS = COCKPIT / "scenarios"
 STATIC_JS = COCKPIT / "static" / "js"
 READING_GUIDE = COCKPIT.parent / "guides" / "000-reading-the-dashboard.md"
 
+# Queue monitor counters that count messages a queue moved to its dead
+# message queue, each for one reason. An arrivals: label must name one of
+# these, and no two labels the same one, or a hop would carry the wrong
+# reason.
+DMQ_COUNTERS = {"maxRedeliveryExceededToDmqMsgCount", "maxTtlExpiredToDmqMsgCount"}
+
 # Flags a diagram's events: block may define, each drawn by diagram.js.
 EVENT_FLAGS = {"gap", "order", "picked", "redelivered"}
 
@@ -208,11 +214,13 @@ def check_expect(mid, expect, actions, spec) -> list:
         allowed = ("play",) if mid == "(play)" else ("break", "reset")
         if phase not in allowed:
             continue
-        if not isinstance(part, dict) or not (part.get("logs") or part.get("partitions")):
-            bad.append(f"{where} {phase} needs a non-empty logs: list, partitions: checks, or both")
+        if not isinstance(part, dict) or not (part.get("logs") or part.get("partitions") or part.get("boxes")):
+            bad.append(f"{where} {phase} needs a non-empty logs: list, partitions: or boxes: checks")
             continue
         if "partitions" in part:
             bad.extend(check_partition_expect(f"{where} {phase}", part["partitions"], spec))
+        if "boxes" in part:
+            bad.extend(check_boxes_expect(f"{where} {phase}", part["boxes"], spec))
         if not part.get("logs"):
             continue
         if not isinstance(part["logs"], list):
@@ -371,8 +379,12 @@ def check_partitions(spec, here, actions) -> list:
         if arr.get("from") not in all_boxes or arr.get("from") == box.get("id"):
             bad.append(f"diagram box {box.get('id')!r} arrivals from: must name another box")
         for label, field in arr["reasons"].items():
-            if not isinstance(field, str) or not re.fullmatch(r"[a-zA-Z]+", field):
-                bad.append(f"diagram box {box.get('id')!r} arrivals reason {label!r} must name a queue counter")
+            if field not in DMQ_COUNTERS:
+                bad.append(f"diagram box {box.get('id')!r} arrivals reason {label!r} names {field!r}, "
+                           f"not one of the DMQ counters {sorted(DMQ_COUNTERS)}")
+        fields = list(arr["reasons"].values())
+        for field in sorted({f for f in fields if fields.count(f) > 1}):
+            bad.append(f"diagram box {box.get('id')!r} arrivals has two labels on {field}; a hop would carry either")
 
     events = diagram.get("events")
     if events is not None:
@@ -395,6 +407,34 @@ def check_partitions(spec, here, actions) -> list:
                     re.compile(pat)
                 except (re.error, TypeError) as exc:
                     bad.append(f"diagram events flag {name!r} is not a valid regex: {exc}")
+    return bad
+
+
+def check_boxes_expect(where, checks, spec) -> list:
+    """boxes: in an expect: phase: how much each arrivals: counter on a box
+    must rise during the window, which smoke.py reads from /state.
+
+        boxes:
+          dmq: {expired: 3, failed 3 attempts: 0}
+    """
+    bad = []
+    arrivals = {c.get("id"): c.get("arrivals") for n in spec.get("diagram", {}).get("nodes", []) or []
+                for c in n.get("contains", []) or []}
+    if not isinstance(checks, dict) or not checks:
+        return [f"{where} boxes: must map box ids to counts"]
+    for box, want in checks.items():
+        spec_arr = arrivals.get(box)
+        if not spec_arr:
+            bad.append(f"{where} boxes: {box!r} is not a box with arrivals:")
+            continue
+        if not isinstance(want, dict) or not want:
+            bad.append(f"{where} boxes: {box!r} must map reasons to counts")
+            continue
+        for reason, n in want.items():
+            if reason not in spec_arr.get("reasons", {}):
+                bad.append(f"{where} boxes: {box!r} has no reason {reason!r}")
+            if not isinstance(n, int) or n < 0:
+                bad.append(f"{where} boxes: {box!r} {reason!r} must be a count of 0 or more")
     return bad
 
 

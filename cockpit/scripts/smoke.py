@@ -211,7 +211,33 @@ async def snapshot(client, sid: str, aids) -> dict:
     # Asking also keeps the dashboard sampling the partitions from now on.
     if await partitions_since(client, sid, time.time()) is not None:
         out["__partitions__"] = time.time()
+    out["__boxes__"] = await box_counters(client, sid)
     return out
+
+
+async def box_counters(client, sid: str) -> dict:
+    """Each box's arrivals counters, as /state reports them."""
+    boxes = (await client.get(f"/api/scenarios/{sid}/state")).json().get("boxes", {})
+    return {b: dict(v.get("arrivals") or {}) for b, v in boxes.items()}
+
+
+def judge_boxes(spec, before, now) -> tuple:
+    """(pending, failed) for a boxes: block: each counter must have risen by
+    exactly the count given. More than that can never come right."""
+    pending, failed = [], []
+    for box, want in spec.items():
+        for reason, n in want.items():
+            was = (before.get(box) or {}).get(reason)
+            cur = (now.get(box) or {}).get(reason)
+            if was is None or cur is None:
+                pending.append(f"{box} {reason!r}: the broker did not report the counter")
+                continue
+            rise = cur - was
+            if rise > n:
+                failed.append(f"{box} {reason!r} rose by {rise}, expected {n}")
+            elif rise < n:
+                pending.append(f"{box} {reason!r} rose by {rise}, expected {n}")
+    return pending, failed
 
 
 async def lines_since(client, sid: str, aid: str, snap) -> list:
@@ -298,11 +324,15 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
     window = float(part.get("within", 15))
     deadline = time.time() + window
     parts = part.get("partitions")
+    boxes = part.get("boxes")
     since = snap.get("__partitions__", time.time())
-    any_lacks = any(lacks for _, _, lacks in checks) or (parts or {}).get("orders") == "one-consumer"
+    # A count of 0 can only be shown by waiting the whole window.
+    any_lacks = (any(lacks for _, _, lacks in checks) or (parts or {}).get("orders") == "one-consumer"
+                 or any(n == 0 for want in (boxes or {}).values() for n in want.values()))
     missing = {}
     pending = []
     while True:
+        pending = []
         if parts:
             pending, broken = judge_partitions(parts, await partitions_since(client, sid, since),
                                                since, node_for or (lambda r: r))
@@ -310,6 +340,13 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
                 for b in broken:
                     fail(f"{sid}: {mode_id} {phase}: partitions: {b}")
                 return
+        if boxes:
+            more, broken = judge_boxes(boxes, snap.get("__boxes__", {}), await box_counters(client, sid))
+            if broken:
+                for b in broken:
+                    fail(f"{sid}: {mode_id} {phase}: boxes: {b}")
+                return
+            pending += more
         missing, found = {}, {}
         for aid, has, lacks in checks:
             text = await lines_since(client, sid, aid, snap)
@@ -329,7 +366,7 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
         for pat in pats:
             fail(f"{sid}: {mode_id} {phase}: {aid} never printed /{pat}/ within {window:g}s")
     for p in pending:
-        fail(f"{sid}: {mode_id} {phase}: partitions: {p} within {window:g}s")
+        fail(f"{sid}: {mode_id} {phase}: {p} within {window:g}s")
     if not any(missing.values()) and not pending:
         say(f"     expect {phase}: passed")
 

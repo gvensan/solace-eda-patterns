@@ -306,7 +306,10 @@ reason, from the counters on the queue it left. Dead Message Queue uses both.
 `/state` returns each box's depth (the queue's `msgs` count) and counters.
 Each rise in a counter after the page opened is drawn as a dot hopping
 between the boxes, labelled with the reason, then along the flow `via:` the
-box to its reader, if that reader is running.
+box to its reader, if that reader is running. Each label has its own
+counter, so a hop cannot take another's reason. When several counters move
+between two polls, all their hops run one after another, at most three per
+reason, the last saying how many more there were.
 
 #### Settings: a choice on a node
 
@@ -505,6 +508,17 @@ block.
   ```
 
   `orders: one-consumer` waits the full window, like `lacks:`.
+- A box with `arrivals:` can check how much each of its counters rose in
+  the window, which is what labels its hops:
+
+  ```yaml
+        boxes:
+          dmq: { expired: 3, failed 3 attempts: 0 }
+  ```
+
+  A rise above the count fails at once; a count of 0 waits the full window.
+  The checker also requires each `arrivals:` label to name a different
+  counter, and only counters that count moves to a dead message queue.
 - A scenario can also say what must hold once Play has finished, before any
   card, with the same checks under a top-level `expect: play:`.
 - `check_scenarios.py` validates the block: known phases, a `logs:` list or
@@ -622,6 +636,12 @@ Give it the dashboard to itself:
   sleep. Smoke compares the wall clock with the monotonic clock, which stops
   during sleep, and fails the run if they drift apart by more than 5
   seconds.
+- **Do not save `cockpit/app/` files during a run**, `config.py` included.
+  In development mode a save, even with no change, restarts the dashboard,
+  which stops every app and cuts a smoke run short.
+- The sleep check has not been tested against a real sleep: only the
+  clocks it relies on were checked (`time.monotonic` is
+  `mach_absolute_time()` on macOS, which stops during sleep).
 
 ```bash
 caffeinate -i ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py partitioning

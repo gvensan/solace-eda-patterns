@@ -278,6 +278,10 @@ failure_modes:
             has: ["FAILED P-.*attempt 3", "accepted \\d+ orders"]
           - log: dmq-watch
             has: ["parked P-.*eligible=default"]
+        # The broker counts it as a redelivery failure, not an expiry, so
+        # its hop is labelled "failed 3 attempts".
+        boxes:
+          dmq: { failed 3 attempts: 1, expired: 0 }
 
   - id: not-eligible
     title: The sender says not to keep it (broker 10.26.0)
@@ -326,11 +330,16 @@ failure_modes:
             has: ["FAILED P-.*attempt 3 \\(eligible=false\\)"]
           - log: dmq-watch
             lacks: ["parked P-"]
+        # Dropped, not moved: neither counter rises, so no hop is drawn.
+        boxes:
+          dmq: { failed 3 attempts: 0, expired: 0 }
       reset:
         within: 25
         logs:
           - log: dmq-watch
             has: ["parked P-.*eligible=false"]
+        boxes:
+          dmq: { failed 3 attempts: 1, expired: 0 }
 
   - id: orders-expire
     title: Orders expire while the intake is down
@@ -381,6 +390,10 @@ failure_modes:
         logs:
           - log: dmq-watch
             has: ["parked H-.*was valid for 5s"]
+        # Three expiries, counted apart from redelivery failures, so each
+        # hop is labelled "expired".
+        boxes:
+          dmq: { expired: 3, failed 3 attempts: 0 }
       reset:
         within: 20
         logs:

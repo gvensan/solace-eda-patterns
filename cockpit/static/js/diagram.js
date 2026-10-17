@@ -916,15 +916,26 @@ const Diagram = (() => {
       const before = seen.get(id);
       seen.set(id, { ...live.arrivals });
       if (!before) continue;
+      /* Each reason has its own counter, so a hop's label is that
+         counter's. When several move between two polls, all their hops run
+         one after another, never on top of each other, and at most three
+         per reason are drawn: the last one says how many more there were.
+         A counter that went down means the queue was recreated: nothing
+         moved. */
+      let slot = 0;
       for (const [reason, count] of Object.entries(live.arrivals)) {
         const rise = (count ?? 0) - (before[reason] ?? 0);
-        // A counter that went down means the queue was recreated: nothing moved.
-        for (let k = 0; k < Math.min(rise, 3); k++) {
-          setTimeout(() => hop(svg, diagram, state, spec, reason), k * 450);
+        const drawn = Math.min(rise, 3);
+        for (let k = 0; k < drawn; k++) {
+          const label = k === drawn - 1 && rise > drawn ? `${reason}, +${rise - drawn} more` : reason;
+          setTimeout(() => hop(svg, diagram, state, spec, label), slot++ * HOP_GAP_MS);
         }
       }
     }
   }
+
+  // Time between one hop and the next, long enough for its label to be read.
+  const HOP_GAP_MS = 1100;
 
   function hop(svg, diagram, state, spec, reason) {
     const from = boxRect(svg, spec.arrivals.from);
@@ -944,7 +955,10 @@ const Diagram = (() => {
     g.append(el("circle", { r: 6 }));
     indicator(g, "box-arrival", `A message moved to ${spec.label}: ${reason}. Counted by the broker on the queue it left.`);
     layer.append(g);
-    const label = el("text", { x: x2 + 12, y: y2 - 8, class: "dg-hop__label", "text-anchor": "start" }, reason);
+    // One label per box at a time: the newest hop's replaces the last.
+    for (const old of layer.querySelectorAll(`.dg-hop__label[data-box="${spec.id}"]`)) old.remove();
+    const label = el("text", { x: x2 + 12, y: y2 - 8, class: "dg-hop__label", "text-anchor": "start",
+      "data-box": spec.id }, reason);
     indicator(label, "box-arrival", `A message moved to ${spec.label}: ${reason}. Counted by the broker on the queue it left.`);
     layer.append(label);
     const box = svg.querySelector(`[data-child="${spec.id}"]`);
