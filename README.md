@@ -55,6 +55,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 510 | [Event Bridge](guides/510-event-bridge.md) | Deployment Patterns | Two VPNs joined by a bridge that carries a chosen set of events; prices wait while the bridge is down; an event the bridge was never told about |
 | 610 | [Dead Message Queue](guides/610-dead-letter-queue.md) | Error Handling Patterns | Retry a fixed number of times, then park on a DMQ; orders that expire while waiting; what decides parked or dropped on 10.26.0 and 10.8.1 |
 | 620 | [Discard, Pause and Retry](guides/620-discard-pause-retry.md) | Error Handling Patterns | Discard a message that can never succeed, retry one that failed because of the moment, pause when the bank is down |
+| 630 | [Saga](guides/630-saga.md) | Error Handling Patterns | Three services, each its own step and event; a sold-out item undone by a refund; a service down delays the sagas that need it |
 | 750 | [Access Control and Authorization](guides/750-access-control.md) | Governance Patterns | Per-username ACL profiles; a refused publish reaches nobody; a refused subscription |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 

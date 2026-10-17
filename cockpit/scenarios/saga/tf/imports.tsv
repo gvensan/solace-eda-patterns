@@ -1,0 +1,21 @@
+# What the saga scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.saga	{vpn}/cp-saga
+solacebroker_msg_vpn_acl_profile.saga	{vpn}/acl-saga
+
+solacebroker_msg_vpn_queue.orders	{vpn}/q.saga.orders
+solacebroker_msg_vpn_queue_subscription.orders["saga/shop/stock/reserved/v1/>"]	{vpn}/q.saga.orders/saga%2Fshop%2Fstock%2Freserved%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.orders["saga/shop/payment/refunded/v1/>"]	{vpn}/q.saga.orders/saga%2Fshop%2Fpayment%2Frefunded%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.payments	{vpn}/q.saga.payments
+solacebroker_msg_vpn_queue_subscription.payments["saga/shop/order/created/v1/>"]	{vpn}/q.saga.payments/saga%2Fshop%2Forder%2Fcreated%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.payments["saga/shop/stock/failed/v1/>"]	{vpn}/q.saga.payments/saga%2Fshop%2Fstock%2Ffailed%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.inventory	{vpn}/q.saga.inventory
+solacebroker_msg_vpn_queue_subscription.inventory	{vpn}/q.saga.inventory/saga%2Fshop%2Fpayment%2Ftaken%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.saga["orders"]	{vpn}/svc-saga-orders
+solacebroker_msg_vpn_client_username.saga["payments"]	{vpn}/svc-saga-payments
+solacebroker_msg_vpn_client_username.saga["inventory"]	{vpn}/svc-saga-inventory

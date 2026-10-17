@@ -78,4 +78,4 @@ and where you would meet it in production.
 - Pause: the Go receiver's Pause stops delivery to the app; messages stay on
   the queue. Resume starts it again.
 
-Next: [Access Control and Authorization](750-access-control.md).
+Next: [Saga](630-saga.md).

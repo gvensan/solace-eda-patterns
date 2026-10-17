@@ -1,0 +1,329 @@
+id: saga
+# Category 6 of the pattern guide (Error Handling Patterns), third pattern.
+order: 630
+eyebrow: Error Handling Patterns
+title: Saga
+summary: >
+  Placing an order takes three services, each with its own data: orders,
+  payments and inventory. No transaction spans them. Each takes its step and
+  publishes an event, and the next service reacts to it. When a later step
+  fails, the earlier ones are undone by compensating steps, driven by events
+  too: no stock means the payment is refunded and the order cancelled.
+
+objectives:
+  - Follow one order through three services, each acting on the last one's event
+  - See a failed step undo the earlier ones with a compensating action
+  - See a service that is down delay the sagas that need it, and nothing lost
+  - Learn why a saga ends consistent, but not at once, and not by rollback
+
+run:
+  - apply
+  - build
+  - inventory
+  - payments
+  - orders
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Orders publishes "order created". Payments takes the money and publishes
+    "payment taken". Inventory reserves stock and publishes "stock
+    reserved", or "stock failed", and then payments refunds and publishes
+    "payment refunded". Orders confirms or cancels. Each service reads its
+    own queue.
+  duration: 2.8
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Orders
+      sublabel: starts and ends each saga
+      kind: app
+      shape: processor
+      col: 0
+      action: orders
+      flowOn:
+        queue: q.saga.orders
+        client: saga-orders
+      requires:
+        - label: svc-saga-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-saga-orders
+    - id: broker
+      label: Solace Broker
+      sublabel: a queue per service
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: ordersq
+          label: q.saga.orders
+          depth: { queue: q.saga.orders, unit: waiting }
+        - id: paymentsq
+          label: q.saga.payments
+          depth: { queue: q.saga.payments, unit: waiting }
+        - id: inventoryq
+          label: q.saga.inventory
+          depth: { queue: q.saga.inventory, unit: waiting }
+      provides:
+        - label: q.saga.orders
+          group: ordersq
+          semp: /msgVpns/{vpn}/queues/q.saga.orders
+        - label: q.saga.payments
+          group: paymentsq
+          semp: /msgVpns/{vpn}/queues/q.saga.payments
+        - label: q.saga.inventory
+          group: inventoryq
+          semp: /msgVpns/{vpn}/queues/q.saga.inventory
+        - label: cp-saga
+          semp: /msgVpns/{vpn}/clientProfiles/cp-saga
+        - label: acl-saga
+          semp: /msgVpns/{vpn}/aclProfiles/acl-saga
+    - id: payments
+      label: Payments
+      sublabel: takes, or refunds
+      kind: app
+      shape: processor
+      col: 2
+      action: payments
+      flowOn:
+        queue: q.saga.payments
+        client: saga-payments
+      requires:
+        - label: svc-saga-payments
+          semp: /msgVpns/{vpn}/clientUsernames/svc-saga-payments
+    - id: inventory
+      label: Inventory
+      sublabel: reserves, or reports it cannot
+      kind: app
+      shape: processor
+      col: 2
+      action: inventory
+      flowOn:
+        queue: q.saga.inventory
+        client: saga-inventory
+      requires:
+        - label: svc-saga-inventory
+          semp: /msgVpns/{vpn}/clientUsernames/svc-saga-inventory
+  flows:
+    - { from: orders, to: broker, label: order created, delay: 0 }
+    - { from: broker, to: payments, via: paymentsq, delay: 0.5 }
+    - { from: payments, to: broker, label: taken or refunded, delay: 1.0 }
+    - { from: broker, to: inventory, via: inventoryq, source: payments, delay: 1.5 }
+    - { from: inventory, to: broker, label: reserved or failed, delay: 2.0 }
+    - { from: broker, to: orders, via: ordersq, source: inventory, delay: 2.5 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates a queue for each service, subscribed to the events it reacts
+      to, and the client profile, ACL profile and usernames for this
+      scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: inventory
+    label: Start inventory
+    kind: process
+    cmd: [bash, ../../apps/run.sh, saga, inventory, --client-name, saga-inventory]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      On "payment taken", reserves stock and publishes "stock reserved", or
+      publishes "stock failed" when it is sold out.
+
+  - id: payments
+    label: Start payments
+    kind: process
+    cmd: [bash, ../../apps/run.sh, saga, payments, --client-name, saga-payments]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      On "order created", takes the money and publishes "payment taken". On
+      "stock failed", refunds it and publishes "payment refunded".
+
+  - id: orders
+    label: Start orders
+    kind: process
+    cmd: [bash, ../../apps/run.sh, saga, orders, --client-name, saga-orders]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Creates an order every 2 seconds, confirms it on "stock reserved",
+      cancels it on "payment refunded", and lists the sagas still waiting.
+
+  - id: sell-out
+    label: Sell the stock out
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, saga-inventory, USR1]
+    cwd: .
+    variant: secondary
+    description: >
+      Inventory has nothing left: every reservation fails until it is
+      restocked.
+
+  - id: restock
+    label: Restock
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, saga-inventory, USR2]
+    cwd: .
+    variant: secondary
+    description: >
+      Inventory has stock again.
+
+  - id: kill-payments
+    label: Crash payments
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, saga-payments, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the payments service outright (SIGKILL), and returns once it has
+      gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, saga]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: out-of-stock
+    title: An item sells out mid-saga
+    breaks: >
+      Inventory sells out. Every order still gets paid first, then cannot be
+      reserved.
+    watch: >
+      The card shows orders. Each new order is now "cancelled: out of stock,
+      payment refunded". Open the payments log: "took 40.00", then a moment
+      later "refunded 40.00 (compensation: the stock failed)". The payment
+      really was taken, and really was given back. Reset restocks, and
+      orders are confirmed again.
+    why: >
+      The three services cannot share a transaction, so a later step cannot
+      roll back an earlier one. Each step instead has a compensating step
+      that undoes its effect, here a refund for a payment, and the failure
+      event triggers it. Between the two, the customer's money was taken:
+      a saga is consistent at the end, not at every moment.
+    real_world: >
+      Travel booking (flight, hotel, car), order fulfilment, account
+      opening. Compensation is a business action: a refund, a cancellation
+      email, a released reservation, and it can fail too, so it must be
+      retried until it succeeds.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+    node: inventory
+    logs: orders
+    trigger:
+      - run: sell-out
+    reset:
+      - run: restock
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: inventory
+            has: ["out of stock, reported stock failed"]
+          - log: payments
+            has: ["refunded \\d+\\.00 \\(compensation: the stock failed\\)"]
+          - log: orders
+            has: ["O-\\d+ cancelled: out of stock, payment refunded"]
+      reset:
+        settle: 3
+        within: 12
+        logs:
+          - log: orders
+            has: ["O-\\d+ confirmed: paid and stock reserved"]
+            lacks: ["cancelled"]
+
+  - id: payments-down
+    title: Payments crashes mid-saga
+    breaks: >
+      The payments service is killed while orders keep being created.
+    watch: >
+      The card shows orders. New orders are created, and nothing comes back:
+      "waiting on O-001234 (8 s), ...". Their "order created" events wait on
+      q.saga.payments. No order is lost and none is half done in a way the
+      saga cannot finish. Reset starts payments, which takes each waiting
+      order in turn, and the sagas complete late, "confirmed ... after 20 s".
+    why: >
+      Each service reads its own queue, so a service that is down only stops
+      the sagas at its step. The events that would drive it wait on its
+      queue, and when it is back the sagas carry on from where they stopped.
+      Nobody has to restart them.
+    real_world: >
+      A deploy or a crash of one service in a chain. With synchronous calls
+      instead of events, the order service would fail every order while
+      payments is down, and would need its own retry and recovery logic.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues and topic endpoints"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: payments
+    logs: orders
+    trigger:
+      - run: kill-payments
+    reset:
+      - start: payments
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: orders
+            has: ["waiting on O-\\d+ \\(\\d+ s\\)"]
+      reset:
+        within: 15
+        logs:
+          - log: payments
+            has: ["O-\\d+: took \\d+\\.00"]
+          - log: orders
+            has: ["O-\\d+ confirmed: paid and stock reserved after \\d+\\.\\d s"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.saga.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: What payments reacts to
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.saga.payments/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.saga.payments → Subscriptions
+    empty: No queue yet. Press Play.
