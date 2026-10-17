@@ -1,0 +1,19 @@
+# What the access-control scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ac	{vpn}/cp-ac
+solacebroker_msg_vpn_acl_profile.ac["payments"]	{vpn}/acl-ac-payments
+solacebroker_msg_vpn_acl_profile.ac["reporting"]	{vpn}/acl-ac-reporting
+solacebroker_msg_vpn_acl_profile.ac["partner"]	{vpn}/acl-ac-partner
+
+# ACL exceptions: children of their profile, listed so Reconcile is complete
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.ac["payments:ac/bank/payment/>"]	{vpn}/acl-ac-payments/smf/ac%2Fbank%2Fpayment%2F%3E
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.ac["payments:ac/bank/public/>"]	{vpn}/acl-ac-payments/smf/ac%2Fbank%2Fpublic%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.ac["payments:ac/bank/>"]	{vpn}/acl-ac-payments/smf/ac%2Fbank%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.ac["reporting:ac/bank/payment/>"]	{vpn}/acl-ac-reporting/smf/ac%2Fbank%2Fpayment%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.ac["partner:ac/bank/public/>"]	{vpn}/acl-ac-partner/smf/ac%2Fbank%2Fpublic%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ac["payments"]	{vpn}/svc-ac-payments
+solacebroker_msg_vpn_client_username.ac["reporting"]	{vpn}/svc-ac-reporting
+solacebroker_msg_vpn_client_username.ac["partner"]	{vpn}/svc-ac-partner

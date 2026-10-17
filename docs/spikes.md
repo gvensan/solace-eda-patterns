@@ -565,6 +565,39 @@ for 4 seconds; at +4 s it owned a partition and still read `inactive`; at
 a consumer reading active while owning no partition lasts at most a
 moment.
 
+## 15. Request-Reply and Access Control
+
+Tested on 10.26.0 with the Go API v1.10.0, in the scenarios themselves.
+
+**Two repliers on one request topic.** With the pricing service and a
+second copy both subscribed to `rr/pricing/price/request/v1/>`, both
+received every request and both replied. The till's reply handler ran once
+per request, with whichever reply arrived first (pricing for some
+requests, pricing-2 for others); the second reply was discarded by the
+API. Work is done twice and one answer thrown away. To share requests
+among repliers instead, they subscribe with a shared subscription
+(`BuildWithSharedSubscription` on the request-reply receiver builder).
+
+**The Go API's request-reply builders** are on the service's
+`RequestReply()` view (`svc.RequestReply().CreateRequestReplyMessagePublisherBuilder()`),
+not on `MessagingService` itself.
+
+**A publish the ACL forbids.**
+
+| Published as | What the publisher saw | Did a subscriber get it |
+| --- | --- | --- |
+| direct | nothing: `Publish` returned no error and the failure listener never fired | no: the broker dropped it |
+| guaranteed | `Publish ACL Denied - Topic 'ac/bank/payment/refund/v1'` on the receipt | no |
+
+So a direct publisher cannot tell whether it was allowed. The shared
+direct-publisher helper's comment, inherited from the core workshop, said
+the failure listener reports an ACL-denied publish; on this broker and API
+it did not.
+
+**A subscription the ACL forbids** was refused by `AddSubscription` with
+`Subscription ACL Denied - Topic 'ac/bank/payment/>' Subscribe: Response
+code: '403'`.
+
 ## 16. Shock Absorber
 
 Tested on 10.26.0 with the Go API v1.10.0, on the scenario's own queue

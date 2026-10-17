@@ -1,0 +1,346 @@
+id: access-control
+# Category 7 of the pattern guide (Governance Patterns), fifth pattern.
+order: 750
+eyebrow: Governance Patterns
+title: Access Control and Authorization
+summary: >
+  A bank's payment events. Three apps connect under three usernames, and
+  each username's ACL profile says which topics it may publish to and
+  subscribe to. The payments service publishes payments and rates;
+  reporting may only read payments; a partner may only read rates. The
+  broker enforces it at the moment an app publishes or subscribes, and says
+  so in the API's error.
+
+objectives:
+  - See each app allowed exactly the topics its role needs, and nothing else
+  - See a publish to a forbidden topic refused, and reach nobody
+  - See a subscription to a forbidden topic refused, with the broker's reason
+  - Learn where access control lives on Solace, and what it is keyed on
+
+run:
+  - apply
+  - build
+  - reporting
+  - partner
+  - payments
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Each app connects under its own username, and each username has an ACL
+    profile that allows its topics and denies the rest. The payments
+    service publishes to ac/bank/payment/ and ac/bank/public/. Reporting
+    may subscribe to payments, the partner only to rates.
+  duration: 2.4
+  liveWhen: payments
+  nodes:
+    - id: payments
+      label: Payments
+      sublabel: publishes payments and rates
+      kind: app
+      col: 0
+      action: payments
+      requires:
+        - label: svc-ac-payments
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ac-payments
+        - label: acl-ac-payments
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-payments
+    - id: broker
+      label: Solace Broker
+      sublabel: enforces each ACL
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: acls
+          label: three ACL profiles
+      provides:
+        - label: acl-ac-payments
+          group: acls
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-payments
+        - label: acl-ac-reporting
+          group: acls
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-reporting
+        - label: acl-ac-partner
+          group: acls
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-partner
+        - label: cp-ac
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ac
+    - id: reporting
+      label: Reporting
+      sublabel: may read payments
+      kind: app
+      col: 2
+      action: reporting
+      requires:
+        - label: svc-ac-reporting
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ac-reporting
+        - label: acl-ac-reporting
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-reporting
+    - id: partner
+      label: Partner
+      sublabel: may read rates
+      kind: app
+      col: 2
+      action: partner
+      requires:
+        - label: svc-ac-partner
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ac-partner
+        - label: acl-ac-partner
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ac-partner
+    - id: refunds
+      label: Reporting, publishing
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: reporting-refund
+      requires:
+        - label: svc-ac-reporting
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ac-reporting
+    - id: snoop
+      label: Partner, reading payments
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: partner-payments
+      requires:
+        - label: svc-ac-partner
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ac-partner
+  flows:
+    - { from: payments, to: broker, label: ac/bank/payment/made/v1, ac/bank/public/rate/v1, delay: 0 }
+    - { from: broker, to: reporting, label: ac/bank/payment/>, delay: 0.8 }
+    - { from: broker, to: partner, label: ac/bank/public/>, delay: 1.0 }
+    - { from: refunds, to: broker, label: ac/bank/payment/refund/v1 (refused), animate: false }
+    - { from: broker, to: snoop, label: ac/bank/payment/> (refused), animate: false }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the client profile, three ACL profiles with their topic
+      exceptions, and the three usernames for this scenario. There are no
+      queues: everything here is direct.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: reporting
+    label: Start reporting
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, reporting, --user, svc-ac-reporting, --client-name, ac-reporting, --subscribe, "ac/bank/payment/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to payment events, which its ACL profile allows.
+
+  - id: partner
+    label: Start the partner
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, partner, --user, svc-ac-partner, --client-name, ac-partner, --subscribe, "ac/bank/public/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to the public rates, which its ACL profile allows.
+
+  - id: payments
+    label: Start the payments service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, payments, --user, svc-ac-payments, --client-name, ac-payments, --subscribe, "ac/bank/>", --publish, ac/bank/payment/made/v1]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes a payment event once a second, and subscribes to everything
+      under ac/bank/, both allowed by its ACL profile.
+
+  - id: reporting-refund
+    label: Start a reporting app that publishes a refund
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, reporting-refund, --user, svc-ac-reporting, --client-name, ac-reporting-refund, --publish, ac/bank/payment/refund/v1, --guaranteed]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      Connects as reporting and publishes to ac/bank/payment/refund/v1 once
+      a second, as guaranteed messages, so each receipt carries the broker's
+      answer. Reporting's ACL profile allows no publishing at all.
+
+  - id: reporting-refund-direct
+    label: Start a reporting app that publishes a refund, direct
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, reporting-refund-direct, --user, svc-ac-reporting, --client-name, ac-reporting-refund-direct, --publish, ac/bank/payment/refund/v1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same refund, published as direct messages. The broker drops each
+      one, and the app is not told.
+
+  - id: partner-payments
+    label: Start a partner app that subscribes to payments
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, partner-payments, --user, svc-ac-partner, --client-name, ac-partner-payments, --subscribe, "ac/bank/payment/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      Connects as the partner and subscribes to ac/bank/payment/>, which
+      the partner's ACL profile does not allow.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, access-control]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the ACL profiles, client profile and usernames for this
+      scenario.
+
+failure_modes:
+  - id: publish-denied
+    title: Reporting tries to publish a refund
+    breaks: >
+      An app connects as reporting and publishes to
+      ac/bank/payment/refund/v1, once a second.
+    watch: >
+      The card shows that app. It connects without trouble: the ACL allows
+      connecting. It publishes each refund as a guaranteed message and
+      waits for the broker's receipt, and each receipt is a refusal, with
+      the broker's reason printed as the API returns it and, under it, the
+      dashboard's one-line explanation. Open the payments service's log
+      from its node: subscribed to everything under ac/bank/, it sees no
+      refund. A refused message reaches nobody. Reset stops the app.
+    why: >
+      An ACL profile has a default action for publishing and a list of
+      exceptions. Reporting's profile denies publishing by default and has
+      no exceptions, so every publish from its username is refused on the
+      broker, before any subscriber sees it. A guaranteed publish learns it
+      from the broker's receipt. A direct publish is dropped all the same,
+      but nothing tells the publisher: try the direct version from Step
+      through it.
+    real_world: >
+      A read-only team with a bug, or a compromised credential. Deny by
+      default on the broker, and grant each username the topics its role
+      needs. A publisher that must know whether it was allowed publishes
+      guaranteed and reads its receipts; a direct publisher is never told.
+    docs:
+      - label: "Go API: publishing direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Publish.htm
+      - label: "Broker: configuring ACL profiles"
+        url: https://docs.solace.com/Configuring-and-Managing/Managing-Access-Control-Lists.htm
+    node: refunds
+    logs: reporting-refund
+    trigger:
+      - start: reporting-refund
+    reset:
+      - stop: reporting-refund
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: reporting-refund
+            has: ["publish #\\d+ refused: .*ACL", "svc-ac-reporting is not permitted to publish"]
+          - log: payments
+            lacks: ["refund"]
+      reset:
+        within: 10
+        logs:
+          - log: reporting-refund
+            has: ["exited with code"]
+
+  - id: subscribe-denied
+    title: The partner subscribes to payment events
+    breaks: >
+      An app connects as the partner and subscribes to ac/bank/payment/>.
+    watch: >
+      The card shows that app. It connects, and the subscription is refused
+      with the broker's reason, printed as the API returns it: "Subscription
+      ACL Denied - Topic 'ac/bank/payment/>'". The app exits. The partner's
+      ACL profile allows subscribing to ac/bank/public/> and nothing else.
+      Reporting, subscribed to the same topic under its own username,
+      carries on. Reset stops the app, which has already stopped.
+    why: >
+      Subscribing is checked the same way as publishing: the username's ACL
+      profile has a default action and exceptions for subscribe topics.
+      The partner's allows ac/bank/public/> only. AddSubscription is
+      synchronous, so the refusal comes back as the call's error, and the
+      app treats it as fatal.
+    real_world: >
+      An external partner with access to a public feed must never see
+      internal events, whatever topic they try. Grant subscriptions by
+      pattern, as narrowly as the role allows, and review the ACL profiles
+      the way you review code.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Broker: configuring ACL profiles"
+        url: https://docs.solace.com/Configuring-and-Managing/Managing-Access-Control-Lists.htm
+    node: snoop
+    logs: partner-payments
+    trigger:
+      - start: partner-payments
+    reset:
+      - stop: partner-payments
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: partner-payments
+            has: ["Subscription ACL Denied - Topic 'ac/bank/payment/>'", "exited with code 1"]
+          - log: reporting
+            has: ["received on ac/bank/payment/made/v1"]
+
+inspect:
+  - label: ACL profiles
+    kind: semp
+    path: /msgVpns/{vpn}/aclProfiles?count=10&where=aclProfileName==acl-ac-*
+    columns: [aclProfileName, clientConnectDefaultAction, publishTopicDefaultAction, subscribeTopicDefaultAction]
+    ui_hint: Manager → Access Control → ACL Profiles
+    empty: The ACL profiles are not on the broker. Press Play, or run Apply configuration.
+  - label: What payments may publish
+    kind: semp
+    path: /msgVpns/{vpn}/aclProfiles/acl-ac-payments/publishTopicExceptions
+    columns: [publishTopicException]
+    ui_hint: Manager → Access Control → ACL Profiles → acl-ac-payments → Publish Topic Exceptions
+    empty: The ACL profile is not on the broker. Press Play.
+  - label: What the partner may subscribe to
+    kind: semp
+    path: /msgVpns/{vpn}/aclProfiles/acl-ac-partner/subscribeTopicExceptions
+    columns: [subscribeTopicException]
+    ui_hint: Manager → Access Control → ACL Profiles → acl-ac-partner → Subscribe Topic Exceptions
+    empty: The ACL profile is not on the broker. Press Play.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==ac-*
+    columns: [clientName, clientUsername, aclProfileName, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.

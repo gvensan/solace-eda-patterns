@@ -48,6 +48,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 430 | [Shock Absorber](guides/430-shock-absorber.md) | Consumer Scalability Patterns | A queue taking a burst the workers drain at their pace; a burst too big; requests that go stale |
 | 440 | [Partitioning](guides/440-partitioning.md) | Consumer Scalability Patterns | Same key, same partition, same consumer, in order; partitions moving on a crash or a join; what a missing key does |
 | 610 | [Dead Message Queue](guides/610-dead-letter-queue.md) | Error Handling Patterns | Retry a fixed number of times, then park on a DMQ; orders that expire while waiting; what decides parked or dropped on 10.26.0 and 10.8.1 |
+| 750 | [Access Control and Authorization](guides/750-access-control.md) | Governance Patterns | Per-username ACL profiles; a refused publish reaches nobody; a refused subscription |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 
 ## What you get in the container

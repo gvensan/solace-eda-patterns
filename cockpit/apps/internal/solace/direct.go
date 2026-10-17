@@ -47,10 +47,11 @@ func Subscribe(role, username string, rcv solace.DirectMessageReceiver, topic st
 
 // StartDirectPublisher builds and starts a direct publisher.
 //
-// A direct publisher reports a rejected publish asynchronously rather than
+// A direct publisher reports a failed publish asynchronously rather than
 // returning an error from Publish, so the failure listener is wired up here.
-// Without it an ACL-denied publish is silently dropped and the scenario looks
-// like it is working while nothing arrives.
+// It does not hear about everything: measured on broker 10.26.0, a publish
+// the ACL forbids is dropped by the broker and the listener never fires
+// (docs/spikes.md, section 15). Publish guaranteed to learn that.
 func StartDirectPublisher(role, username string, svc solace.MessagingService) solace.DirectMessagePublisher {
 	pub, err := svc.CreateDirectMessagePublisherBuilder().Build()
 	if err != nil {
