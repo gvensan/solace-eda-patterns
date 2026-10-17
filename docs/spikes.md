@@ -655,6 +655,9 @@ and receivers built with `WithMessageReplay`.
 - A time-based replay from before the oldest logged message terminated the
   receiver: `Replay Start Time Not Available`.
 - `maxSpoolUsage` can be changed on a live replay log.
+- `PUT /SEMP/v2/action/msgVpns/{vpn}/replayLogs/{name}/trimLoggedMsgs` with
+  `olderThanTime` a minute in the future empties the log: a replay of all
+  messages then delivered none.
 
 ## 18. Selectors and a full queue, for Event Filtering
 

@@ -74,4 +74,4 @@ and where you would meet it in production.
 - In production the connector is a tool such as Debezium, publishing to the
   broker. This scenario uses a small Go connector so every step is visible.
 
-Next: [Publish-Subscribe](210-publish-subscribe.md).
+Next: [Event Sourcing](140-event-sourcing.md).

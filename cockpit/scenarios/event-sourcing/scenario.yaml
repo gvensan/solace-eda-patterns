@@ -1,0 +1,295 @@
+id: event-sourcing
+# Category 1 of the pattern guide (Event Generation Patterns), fourth pattern.
+order: 140
+eyebrow: Event Generation Patterns
+title: Event Sourcing
+summary: >
+  A bank's ledger keeps no balances table. Every deposit and withdrawal is
+  an event, and a balance is what the events add up to. The broker keeps a
+  copy of each event in its replay log. When the ledger starts, it asks for
+  every logged event again and rebuilds the balances from them. The replay
+  log is small on purpose, to show what it is not: a permanent store.
+
+objectives:
+  - See the balances rebuilt from events after the ledger crashes, exactly as they were
+  - See the broker replay logged events into an exclusive queue on request
+  - See a full replay log drop its oldest events, and the history go with them
+  - Learn why event sourcing needs a store of record, and what the replay log is for
+
+run:
+  - apply
+  - build
+  - ledger
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The ledger publishes each transaction to esrc/bank/account/<account>/...
+    The broker logs it in rl-esrc and delivers it to q.esrc.ledger, and the
+    ledger applies it. When the ledger starts, it asks the broker to replay
+    the whole log into its queue and rebuilds the balances first.
+  duration: 2.4
+  liveWhen: ledger
+  nodes:
+    - id: statements
+      label: Statements Job
+      sublabel: large monthly statements
+      kind: app
+      col: 0
+      action: statements
+      requires:
+        - label: svc-esrc-ledger
+          semp: /msgVpns/{vpn}/clientUsernames/svc-esrc-ledger
+    - id: broker
+      label: Solace Broker
+      sublabel: logs, then replays
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: log
+          label: rl-esrc (replay log, 1 MB)
+        - id: ledgerq
+          label: q.esrc.ledger
+          depth: { queue: q.esrc.ledger, unit: waiting }
+      provides:
+        - label: rl-esrc
+          group: log
+          semp: /msgVpns/{vpn}/replayLogs/rl-esrc
+        - label: q.esrc.ledger
+          group: ledgerq
+          semp: /msgVpns/{vpn}/queues/q.esrc.ledger
+        - label: cp-esrc
+          semp: /msgVpns/{vpn}/clientProfiles/cp-esrc
+        - label: acl-esrc
+          semp: /msgVpns/{vpn}/aclProfiles/acl-esrc
+    - id: ledger
+      label: Ledger
+      sublabel: balances from events only
+      kind: app
+      shape: processor
+      col: 2
+      action: ledger
+      flowOn:
+        queue: q.esrc.ledger
+        client: esrc-ledger
+      requires:
+        - label: svc-esrc-ledger
+          semp: /msgVpns/{vpn}/clientUsernames/svc-esrc-ledger
+  flows:
+    - { from: ledger, to: broker, label: transactions, delay: 0 }
+    - { from: broker, to: ledger, via: ledgerq, delay: 0.8 }
+    - { from: statements, to: broker, label: statements, animate: false, delay: 0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the replay log rl-esrc (1 MB, logging esrc/> only),
+      q.esrc.ledger, and the client profile, ACL profile and username for
+      this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: ledger
+    label: Start the ledger
+    kind: process
+    cmd: [bash, ../../apps/run.sh, esrc, ledger, --client-name, esrc-ledger]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Asks the broker to replay every logged event into q.esrc.ledger,
+      rebuilds the balances from them, then makes a deposit or withdrawal
+      every second and publishes it as an event.
+
+  - id: statements
+    label: Publish the monthly statements
+    kind: process
+    cmd: [bash, ../../apps/run.sh, esrc, statements, --client-name, esrc-statements]
+    cwd: .
+    variant: secondary
+    description: >
+      Publishes 45 statements of 30 KB each on esrc/bank/statement/v1/,
+      which the replay log keeps too: 1.35 MB into a 1 MB log.
+
+  - id: kill-ledger
+    label: Crash the ledger
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, esrc-ledger, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the ledger outright (SIGKILL), and returns once it has gone.
+
+  - id: trim-log
+    label: Empty the replay log
+    kind: process
+    cmd: [bash, ./trim.sh]
+    cwd: .
+    variant: secondary
+    description: >
+      Removes every event from the replay log. The ledger's next start
+      finds no history and begins with every balance at 0.00.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-sourcing]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the replay log, the queue and the access control for this
+      scenario.
+
+failure_modes:
+  - id: ledger-crash
+    title: The ledger crashes
+    breaks: >
+      The ledger is killed. Its balances were only in memory.
+    watch: >
+      The card shows the ledger. Reset starts it with no balances at all.
+      It asks the broker to replay every logged event, and rebuilds:
+      "rebuilt from 57 events: A-1 120.00, A-2 35.00, ...", the same
+      balances it had before the crash, then "every event's recorded balance
+      matched the events before it". Then it carries on with the next
+      transaction.
+    why: >
+      In event sourcing the events are the record and the state is derived
+      from them, so state that is lost can be derived again. The broker's
+      replay log holds a copy of every event published on esrc/>. A
+      receiver built with a replay strategy asks the broker to deliver the
+      logged events into its queue again, in order, before anything new.
+    real_world: >
+      A service restarted after a crash or a deploy, or a new read model
+      built from the full history. Real event stores also keep snapshots,
+      so a rebuild does not have to start from the first event ever.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Replaying from a replay log"
+        url: https://docs.solace.com/API/API-Developer-Guide/Replay-from-Replay-Log.htm
+      - label: "Message replay"
+        url: https://docs.solace.com/Features/Replay/Msg-Replay-Concepts-Config.htm
+    node: ledger
+    logs: ledger
+    trigger:
+      - run: kill-ledger
+    reset:
+      - start: ledger
+    expect:
+      break:
+        within: 10
+        logs:
+          - log: ledger
+            has: ["exited with code -9"]
+      reset:
+        within: 15
+        logs:
+          - log: ledger
+            has: ["asked the broker to replay every logged event", "rebuilt from \\d+ events: A-", "every event's recorded balance matched"]
+
+  - id: log-rolls-over
+    title: The replay log rolls over
+    breaks: >
+      While the ledger is stopped, the statements job publishes 1.35 MB of
+      statements into the 1 MB replay log. Then the ledger starts again.
+    watch: >
+      The card shows the ledger. It asks for every logged event, as before,
+      and gets none of the transactions: "rebuilt from 0 events: no
+      transactions in the log, every account starts at 0.00". The statements
+      filled the log,
+      and the broker dropped the oldest messages to make room, every
+      transaction among them, without telling anyone. Reset cannot bring
+      them back: it empties the log and the bank starts over.
+    why: >
+      A replay log has a fixed size. When it is full, the broker discards
+      its oldest messages to log new ones. Publishing never fails because of
+      it, and a replay simply starts from the oldest message still there.
+      Anything that needs the full history needs a store that keeps it:
+      the replay log is a buffer for recovery, not the record.
+    real_world: >
+      A replay log sized for a day of traffic, and a consumer that needs to
+      rebuild after a week. Event-sourced systems keep their events in an
+      event store or database, and use broker replay to recover a consumer
+      that missed recent events.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Replaying from a replay log"
+        url: https://docs.solace.com/API/API-Developer-Guide/Replay-from-Replay-Log.htm
+      - label: "Message replay"
+        url: https://docs.solace.com/Features/Replay/Msg-Replay-Concepts-Config.htm
+    node: ledger
+    logs: ledger
+    trigger:
+      - stop: ledger
+      - run: statements
+      - start: ledger
+    reset:
+      - stop: ledger
+      - run: trim-log
+      - start: ledger
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: statements
+            has: ["published 45 monthly statements of 30 KB each"]
+          - log: ledger
+            has: ["rebuilt from 0 events: no transactions in the log"]
+      reset:
+        within: 15
+        logs:
+          - log: trim-log
+            has: ["OK: the replay log is empty"]
+          - log: ledger
+            has: ["rebuilt from 0 events"]
+
+inspect:
+  - label: Replay log
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/replayLogs
+    # msgSpoolUsage is in bytes; maxSpoolUsage in MB.
+    columns: [replayLogName, maxSpoolUsage, msgSpoolUsage, ingressEnabled, egressEnabled]
+    ui_hint: Manager → Replay
+    empty: No replay log yet. Press Play.
+  - label: What the log keeps
+    kind: semp
+    path: /msgVpns/{vpn}/replayLogs/rl-esrc/topicFilterSubscriptions
+    columns: [replayLogName, topicFilterSubscription]
+    ui_hint: Manager → Replay → rl-esrc → Topic Filter Subscriptions
+    empty: No replay log yet. Press Play.
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.esrc.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.

@@ -38,6 +38,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 110 | [Event-Carried State Transfer](guides/110-event-carried-state-transfer.md) | Event Generation Patterns | Consumers keep a copy from events that carry the state; the owner goes down and only the caller stops; a copy lost and given back |
 | 120 | [CQRS](guides/120-cqrs.md) | Event Generation Patterns | Commands on one side, a view built from events on the other; reads carry on while writes are down; a view that falls behind and says so |
 | 130 | [Change Data Capture](guides/130-change-data-capture.md) | Event Generation Patterns | Events from a database's change log, with the app untouched; a connector that resumes from its saved position; old changes published again and ignored |
+| 140 | [Event Sourcing](guides/140-event-sourcing.md) | Event Generation Patterns | Balances rebuilt from events replayed by the broker; a crash costs nothing; a replay log that rolls over takes the history with it |
 | 210 | [Publish-Subscribe](guides/210-publish-subscribe.md) | Communication Patterns | One event, a copy for every subscriber; what a subscriber misses while away; two copies of a subscriber double the work |
 | 220 | [Point-to-Point](guides/220-point-to-point.md) | Communication Patterns | One sender, one named queue, one receiver; what the queue holds while the receiver is away |
 | 230 | [Request-Reply](guides/230-request-reply.md) | Communication Patterns | Ask and wait, with a timeout; nobody there to answer; a reply that comes too late |
