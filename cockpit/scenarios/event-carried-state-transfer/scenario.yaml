@@ -1,0 +1,337 @@
+id: event-carried-state-transfer
+# Category 1 of the pattern guide (Event Generation Patterns), first pattern.
+order: 110
+eyebrow: Event Generation Patterns
+title: Event-Carried State Transfer
+summary: >
+  A shop. The customer service publishes the whole customer record every
+  time a customer changes. Shipping keeps its own copy from those events and
+  never has to ask anyone where to send a parcel. Invoicing keeps no copy:
+  for every order it asks the customer service. The cards show what each
+  choice costs.
+
+objectives:
+  - See shipping answer from its own copy, with no call to the customer service
+  - See invoicing stop when the customer service stops, and shipping carry on
+  - See a service that has lost its copy, and one way to give it back
+  - Learn what an event must carry for consumers to keep their own state
+
+run:
+  - apply
+  - build
+  - shipping
+  - invoicing
+  - customers
+  - orders
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The customer service publishes every changed customer record, whole, and
+    answers lookups. Orders carry only the customer's id. Shipping's queue
+    gets both, and shipping keeps a copy of every customer. Invoicing's queue
+    gets orders only, and invoicing asks the customer service about each one.
+  duration: 2.4
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Order Service
+      sublabel: customer id only
+      kind: app
+      col: 0
+      action: orders
+      requires:
+        - label: svc-ecst-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-orders
+    - id: customers
+      label: Customer Service
+      sublabel: whole records, lookups
+      kind: app
+      shape: processor
+      col: 0
+      action: customers
+      requires:
+        - label: svc-ecst-crm
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-crm
+    - id: broker
+      label: Solace Broker
+      sublabel: two queues
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: shipq
+          label: q.ecst.shipping
+          depth: { queue: q.ecst.shipping, unit: waiting }
+        - id: invq
+          label: q.ecst.invoicing
+          depth: { queue: q.ecst.invoicing, unit: waiting }
+      provides:
+        - label: q.ecst.shipping
+          group: shipq
+          semp: /msgVpns/{vpn}/queues/q.ecst.shipping
+        - label: q.ecst.invoicing
+          group: invq
+          semp: /msgVpns/{vpn}/queues/q.ecst.invoicing
+        - label: cp-ecst
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ecst
+        - label: acl-ecst
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ecst
+    - id: shipping
+      label: Shipping
+      sublabel: keeps a copy
+      kind: app
+      col: 2
+      action: shipping
+      flowOn:
+        queue: q.ecst.shipping
+        client: ecst-shipping
+      requires:
+        - label: svc-ecst-shipping
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-shipping
+    - id: invoicing
+      label: Invoicing
+      sublabel: asks per order
+      kind: app
+      shape: processor
+      col: 2
+      action: invoicing
+      flowOn:
+        queue: q.ecst.invoicing
+        client: ecst-invoicing
+      requires:
+        - label: svc-ecst-invoicing
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-invoicing
+  flows:
+    - { from: orders, to: broker, label: orders, delay: 0 }
+    - { from: customers, to: broker, label: customer records, delay: 0.3 }
+    - { from: broker, to: shipping, via: shipq, delay: 0.8 }
+    - { from: broker, to: invoicing, via: invq, delay: 0.8 }
+    - { from: invoicing, to: broker, label: lookup, delay: 1.4 }
+    - { from: broker, to: customers, label: lookup, source: invoicing, delay: 1.9 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.ecst.shipping (orders and customer records) and
+      q.ecst.invoicing (orders), and the client profile, ACL profile and
+      usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: shipping
+    label: Start shipping
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ecst, shipping, --client-name, ecst-shipping]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.ecst.shipping. Keeps a copy of every customer from the
+      customer records, in memory, and ships each order to the city in its
+      copy.
+
+  - id: invoicing
+    label: Start invoicing
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ecst, invoicing, --client-name, ecst-invoicing]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.ecst.invoicing. For each order, asks the customer service for
+      the customer's name and waits up to 2 seconds. Without an answer it
+      asks again, and takes no other order meanwhile.
+
+  - id: customers
+    label: Start the customer service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ecst, customers, --client-name, ecst-customers]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Publishes every customer record once, then moves a customer to a new
+      city every 4 seconds and publishes the whole record again. Answers
+      lookups.
+
+  - id: orders
+    label: Start the order service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ecst, orders, --client-name, ecst-orders]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Places an order a second for a random customer. The event carries the
+      customer's id and nothing else about them.
+
+  - id: kill-customers
+    label: Crash the customer service
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, ecst-customers, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the customer service outright (SIGKILL), and returns once it has
+      gone.
+
+  - id: resend
+    label: Ask the customer service to publish every record again
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, ecst-customers, USR1]
+    cwd: .
+    variant: secondary
+    description: >
+      The customer service publishes every customer record again, to every
+      queue that subscribes to them. A consumer that lost its copy gets it
+      back.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-carried-state-transfer]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: customers-down
+    title: The customer service goes down
+    breaks: >
+      The customer service is killed. Orders keep coming.
+    watch: >
+      The card shows invoicing. Each lookup now fails after 2 seconds with
+      the API's timeout error, and invoicing asks again about the same
+      order: no invoice goes out, and q.ecst.invoicing fills up. Open the
+      shipping log: it carries on, "ships to Lyon (from my copy)". Shipping
+      already has what it needs. Reset starts the customer service, and
+      invoicing works through the orders that waited.
+    why: >
+      Invoicing depends on the customer service being up at the moment of
+      every order: a thin event plus a call back couples the two services'
+      availability. Shipping copied the state from earlier events, so it
+      depends on the customer service only for changes, and a change it has
+      not seen yet just leaves its copy a little out of date.
+    real_world: >
+      A shipping, pricing or fraud service that calls a central customer or
+      product service for every event. When that service is slow or down,
+      every caller is too. Copying the state from events removes the call,
+      at the cost of keeping a copy and of the copy being slightly behind.
+    docs:
+      - label: "Go API: request-reply messaging"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-API-Request-Reply.htm
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+    node: customers
+    logs: invoicing
+    trigger:
+      - run: kill-customers
+    reset:
+      - start: customers
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: invoicing
+            has: ["lookup of C-\\d+ failed: .*(?i:time ?out|timed out)", "not billed yet, asking again"]
+          - log: shipping
+            has: ["ships to \\w+ \\(from my copy"]
+      reset:
+        within: 20
+        logs:
+          - log: invoicing
+            has: ["billed to .* \\(asked the customer service"]
+
+  - id: shipping-loses-copy
+    title: Shipping restarts and has lost its copy
+    breaks: >
+      Shipping is restarted. Its copy of the customers was in memory, so it
+      starts with none.
+    watch: >
+      The card shows shipping. Orders keep arriving, but for most customers
+      shipping now has no copy: "no copy of C-05 yet, parcel held". Each
+      customer comes back only when it next changes, which is rare. Reset
+      asks the customer service to publish every record again: the held
+      parcels ship at once, "copy arrived, ships to".
+    why: >
+      With event-carried state transfer the copy is the consumer's to keep.
+      The events it consumed are gone from its queue once acknowledged, so a
+      consumer that loses its copy cannot rebuild it from the queue. It needs
+      the copy stored durably, or a way to get the current state again: here
+      the owner publishes every record again on request.
+    real_world: >
+      A new service that starts consuming customer events today knows only
+      the customers that change from today. Teams handle this with a bulk
+      load at start, a "republish everything" request, a compacted or
+      replayable log, or by storing the copy in a database.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: shipping
+    logs: shipping
+    trigger:
+      - stop: shipping
+      - start: shipping
+    reset:
+      - start: shipping
+      - run: resend
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: shipping
+            has: ["starting with no copy of any customer", "no copy of C-\\d+ yet, parcel held"]
+      reset:
+        within: 15
+        logs:
+          - log: customers
+            has: ["published all 8 customer records \\(asked to send everything again\\)"]
+          - log: shipping
+            has: ["copy arrived, ships to"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.ecst.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==ecst-*
+    # Invoicing's dataTxMsgCount rises with every lookup; shipping's does not.
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.

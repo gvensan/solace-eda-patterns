@@ -17,6 +17,7 @@ import (
 	"solace-workshop/apps/scenarios/backpressure"
 	"solace-workshop/apps/scenarios/compete"
 	"solace-workshop/apps/scenarios/dlq"
+	"solace-workshop/apps/scenarios/ecst"
 	"solace-workshop/apps/scenarios/exclusive"
 	"solace-workshop/apps/scenarios/groups"
 	"solace-workshop/apps/scenarios/guaranteed"
@@ -32,6 +33,10 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"ecst invoicing":    ecst.Invoicing,
+	"ecst shipping":     ecst.Shipping,
+	"ecst orders":       ecst.Orders,
+	"ecst customers":    ecst.Customers,
 	"ac app":            access.App,
 	"rr till":           reqreply.Till,
 	"rr pricing":        reqreply.Pricing,

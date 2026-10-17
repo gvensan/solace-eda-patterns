@@ -1,0 +1,18 @@
+# What the event-carried-state-transfer scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ecst	{vpn}/cp-ecst
+solacebroker_msg_vpn_acl_profile.ecst	{vpn}/acl-ecst
+
+solacebroker_msg_vpn_queue.shipping	{vpn}/q.ecst.shipping
+solacebroker_msg_vpn_queue_subscription.shipping["ecst/crm/customer/updated/v1/>"]	{vpn}/q.ecst.shipping/ecst%2Fcrm%2Fcustomer%2Fupdated%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.shipping["ecst/shop/order/placed/v1/>"]	{vpn}/q.ecst.shipping/ecst%2Fshop%2Forder%2Fplaced%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.invoicing	{vpn}/q.ecst.invoicing
+solacebroker_msg_vpn_queue_subscription.invoicing	{vpn}/q.ecst.invoicing/ecst%2Fshop%2Forder%2Fplaced%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ecst["crm"]	{vpn}/svc-ecst-crm
+solacebroker_msg_vpn_client_username.ecst["orders"]	{vpn}/svc-ecst-orders
+solacebroker_msg_vpn_client_username.ecst["shipping"]	{vpn}/svc-ecst-shipping
+solacebroker_msg_vpn_client_username.ecst["invoicing"]	{vpn}/svc-ecst-invoicing
