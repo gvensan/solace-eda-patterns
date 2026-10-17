@@ -44,7 +44,11 @@ real service would update, so it survives the service stopping.
   `redeliveredMsgCount` counts purchases delivered a second time.
 - **What the queue tells publishers**: `rejectMsgToSenderOnDiscardBehavior`
   is `always`, so a purchase the queue cannot take is refused to the tills.
-  More on that in the second card.
+  It is set that way on purpose. With the broker's default,
+  `when-queue-enabled`, a queue whose ingress is off confirms a purchase to
+  the tills and then drops it, so the tills would believe it was stored and
+  never send it again. Refusing is what lets the tills keep it and retry.
+  The second card shows it, and Try this shows the default.
 - **The points service on q.gd.awards**: `ackedMsgCount` is purchases
   acknowledged, `unackedMsgCount` those delivered and not yet acknowledged.
 
