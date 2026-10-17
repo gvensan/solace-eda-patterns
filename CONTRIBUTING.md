@@ -585,8 +585,10 @@ Give it the dashboard to itself:
 - **Close the dashboard's tabs** (or leave them alone). A Break it, Reset,
   Play or Stop pressed in a tab while smoke runs changes what it is
   measuring. The dashboard logs every change and who sent it
-  (`GET /api/activity`), and smoke fails the run if anything but itself
-  changed something.
+  (`GET /api/activity`), and smoke fails the run if another client changed
+  a scenario it is testing, cleared the broker or stopped everything.
+  Changes to other scenarios do not count: scenarios share no broker
+  objects.
 - **Keep the machine awake.** On a laptop, run it under `caffeinate -i`
   (macOS). If the machine sleeps, the dashboard's timers stop while the
   clock smoke waits on runs on, and a Play can look hung for as long as the

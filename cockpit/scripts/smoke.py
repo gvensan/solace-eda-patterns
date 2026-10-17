@@ -25,7 +25,8 @@ scenario setting (for example --set pace=busy) before Play; every scenario
 that has that setting runs with it, and it is put back to its default after.
 
 Two things make a run meaningless, and fail it: another client changing
-something on the dashboard meanwhile (a Break it pressed in an open tab),
+the scenarios under test meanwhile (a Break it pressed in an open tab), or
+clearing the broker or stopping everything,
 and the machine sleeping, which stops the dashboard's timers while the
 clock this script waits on keeps going. Close the dashboard's tabs, and on
 a laptop run it under `caffeinate -i`.
@@ -421,9 +422,17 @@ async def watch_for_sleep(slept: list) -> None:
         wall, mono = time.time(), time.monotonic()
 
 
-async def check_interference(client, since: float) -> None:
+# Changes anywhere that reach every scenario: these count wherever they came
+# from. Scenarios never share broker objects, so a change to another
+# scenario does not touch the one under test.
+GLOBAL_CHANGES = ("/api/broker/clear", "/api/runs/stop-all")
+
+
+async def check_interference(client, since: float, ids) -> None:
     changes = (await client.get("/api/activity", params={"since": since})).json()["changes"]
-    others = [c for c in changes if c["client"] != CLIENT]
+    mine = tuple(f"/api/scenarios/{sid}/" for sid in ids)
+    others = [c for c in changes if c["client"] != CLIENT
+              and (c["path"] in GLOBAL_CHANGES or c["path"].startswith(mine))]
     for c in others[:5]:
         fail(f"another client ({c['client']}) changed something during the run: {c['method']} {c['path']}")
     if len(others) > 5:
@@ -460,7 +469,7 @@ async def main(ids, chosen_settings) -> int:
                 await smoke(client, scenario)
         finally:
             await apply_settings(client, chosen, chosen_settings, default=True)
-        await check_interference(client, started)
+        await check_interference(client, started, [s["id"] for s in chosen])
     sleeper.cancel()
     if slept:
         fail(f"the machine slept for {sum(slept):.0f}s during the run, so timings are meaningless; "
