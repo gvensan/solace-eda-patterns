@@ -1021,30 +1021,32 @@
     try {
       const data = await API.overview();
       const tiles = [
-        ["Queues", data.queues],
-        ["Client profiles", data.clientProfiles],
-        ["ACL profiles", data.aclProfiles],
-        ["Client usernames", data.clientUsernames],
+        ["Queues", data.queues, "queues"],
+        ["Client profiles", data.clientProfiles, "client profiles"],
+        ["ACL profiles", data.aclProfiles, "ACL profiles"],
+        ["Client usernames", data.clientUsernames, "client usernames"],
       ];
-      host.replaceChildren(
-        ...tiles.map(([label, value]) =>
-          h(
-            "div",
-            { class: "stat" },
-            h("div", { class: "stat__label", text: label }),
-            h(
-              "div",
-              { class: "stat__value" },
-              h("span", { class: "stat__number", text: value === null ? "?" : String(value) }),
-              h("span", { class: "stat__unit", text: "on broker" })
-            )
-          )
-        )
-      );
+      const vpn = state.env?.msgVpn || "the message VPN";
+      // Built once, then updated in place, so a hover in progress survives.
+      if (host.children.length !== tiles.length) {
+        host.replaceChildren(...tiles.map(([label]) => h("div", { class: "stat" },
+          h("div", { class: "stat__label", text: label }),
+          h("div", { class: "stat__value" },
+            h("span", { class: "stat__number" }),
+            h("span", { class: "stat__unit", text: "on broker" })))));
+      }
+      tiles.forEach(([, value, noun], i) => {
+        const tile = host.children[i];
+        tile.querySelector(".stat__number").textContent = value === null ? "?" : String(value);
+        indicator(tile, "broker-total", value === null
+          ? `The broker did not answer, so the number of ${noun} is not known. It is read again every 5 seconds.`
+          : `${value} ${noun} in message VPN ${vpn} right now, across every scenario and including the broker's own defaults. Read every 5 seconds. This scenario's own objects are listed on the broker box in the diagram.`);
+      });
     } catch (_) {
       host.replaceChildren();
     }
   }
+
 
   /* --------------------------------------------------------- node panel */
 
@@ -1616,8 +1618,14 @@
     pollRuns();
     setInterval(pollBroker, 5000);
     setInterval(pollRuns, 3000);
+    // The counts above the page are read on the same 5 second beat as the
+    // On the broker tables. Read only once, they went on saying "0 on
+    // broker" after Play had created the queues.
     setInterval(() => {
-      if (state.activeId && document.visibilityState === "visible") refreshInspect(state.activeId);
+      if (state.activeId && document.visibilityState === "visible") {
+        refreshInspect(state.activeId);
+        refreshStats();
+      }
     }, 5000);
     if (state.env?.dev) watchForChanges();
 

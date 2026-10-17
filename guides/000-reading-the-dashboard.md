@@ -60,6 +60,7 @@ second; nothing moves on a timer.
 
 | Mark | What it means |
 | --- | --- |
+| <!-- indicator: broker-total --> `2 on broker` under the diagram | How many queues, client profiles, ACL profiles and client usernames the message VPN holds right now, across every scenario and including the broker's own defaults. Read every 5 seconds. The broker box in the diagram lists this scenario's own. |
 | <!-- indicator: running-count --> `3 running` in the top bar | Apps or steps running across every scenario. **Stop everything** ends them all. |
 | <!-- indicator: step-dot --> Dots on the Step through it flowchart | Each step's state, as on the diagram. Click a step to see what it does, and to run or stop it on its own. |
 | <!-- indicator: card-badge --> Badge on a Break it card | **Ready**: you can break it. **Not ready**: press Play first. **Broken**: the failure is in effect, press Reset. **Reset the other first**: another card is in effect. **Recovered**: Reset is done and the log shows the recovery. |
