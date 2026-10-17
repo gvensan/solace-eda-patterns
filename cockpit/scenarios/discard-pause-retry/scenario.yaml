@@ -1,0 +1,377 @@
+id: discard-pause-retry
+# Category 6 of the pattern guide (Error Handling Patterns), second pattern.
+order: 620
+eyebrow: Error Handling Patterns
+title: Discard, Pause and Retry
+summary: >
+  A payment processor charges each payment at the bank. When something goes
+  wrong, the right answer depends on what went wrong. A payment that can
+  never succeed is discarded to a dead message queue. A payment the bank is
+  too busy for is retried a few seconds later. When the bank does not answer
+  at all, no payment can succeed, so the processor pauses until it is back.
+
+objectives:
+  - See a malformed payment discarded, and the others carry on
+  - See a payment retried after 5 seconds through a retry queue with a delivery delay
+  - See the processor pause when the bank is down, and resume when it is back
+  - Learn to tell a bad message from a bad moment from a broken dependency
+
+run:
+  - apply
+  - build
+  - bank
+  - processor
+  - shop
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Payments wait on q.dpr.payments. The processor charges each one at the
+    bank by request-reply. A payment the bank is busy for goes to
+    q.dpr.retry, which holds it back 5 seconds. A payment that can never
+    succeed is rejected into q.dpr.dmq.
+  duration: 2.6
+  liveWhen: shop
+  nodes:
+    - id: shop
+      label: Shop
+      sublabel: a payment a second
+      kind: app
+      col: 0
+      action: shop
+      requires:
+        - label: svc-dpr-shop
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dpr-shop
+    - id: badshop
+      label: Faulty Till
+      sublabel: malformed payments
+      kind: app
+      col: 0
+      action: bad-payments
+      requires:
+        - label: svc-dpr-shop
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dpr-shop
+    - id: broker
+      label: Solace Broker
+      sublabel: three queues
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: payments
+          label: q.dpr.payments
+          depth: { queue: q.dpr.payments, unit: waiting }
+        - id: retry
+          label: q.dpr.retry (5 s delay)
+          depth: { queue: q.dpr.retry, unit: waiting }
+        - id: dmq
+          label: q.dpr.dmq
+          depth: { queue: q.dpr.dmq, unit: discarded }
+      provides:
+        - label: q.dpr.payments
+          group: payments
+          semp: /msgVpns/{vpn}/queues/q.dpr.payments
+        - label: q.dpr.retry
+          group: retry
+          semp: /msgVpns/{vpn}/queues/q.dpr.retry
+        - label: q.dpr.dmq
+          group: dmq
+          semp: /msgVpns/{vpn}/queues/q.dpr.dmq
+        - label: cp-dpr
+          semp: /msgVpns/{vpn}/clientProfiles/cp-dpr
+        - label: acl-dpr
+          semp: /msgVpns/{vpn}/aclProfiles/acl-dpr
+    - id: processor
+      label: Payment Processor
+      sublabel: discard, pause or retry
+      kind: app
+      shape: processor
+      col: 2
+      action: processor
+      flowOn:
+        queue: q.dpr.payments
+        client: dpr-processor
+      requires:
+        - label: svc-dpr-processor
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dpr-processor
+    - id: bank
+      label: Bank
+      sublabel: answers each charge
+      kind: app
+      shape: processor
+      col: 2
+      action: bank
+      requires:
+        - label: svc-dpr-bank
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dpr-bank
+  flows:
+    - { from: shop, to: broker, label: payments, delay: 0 }
+    - { from: badshop, to: broker, label: malformed, delay: 0 }
+    - { from: broker, to: processor, via: payments, delay: 0.6 }
+    - { from: processor, to: broker, label: charge, delay: 1.1 }
+    - { from: broker, to: bank, label: charge, source: processor, delay: 1.5 }
+    - { from: bank, to: broker, label: answer, source: processor, delay: 1.9 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.dpr.payments, q.dpr.retry with a 5 second delivery delay,
+      and q.dpr.dmq, the dead message queue of both, with the client
+      profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: bank
+    label: Start the bank
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dpr, bank, --client-name, dpr-bank]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Answers every charge with "charged".
+
+  - id: bank-busy
+    label: Start the bank, busy now and then
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dpr, bank, --client-name, dpr-bank, --busy-every, "3"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same bank, answering every third charge with "busy, try later".
+      Stop the bank first.
+
+  - id: processor
+    label: Start the payment processor
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dpr, processor, --client-name, dpr-processor]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.dpr.payments and q.dpr.retry and charges each payment at the
+      bank, waiting up to 1 second for the answer. Discards, retries or
+      pauses when that fails.
+
+  - id: shop
+    label: Start the shop
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dpr, payments, --client-name, dpr-shop]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Sends a payment a second.
+
+  - id: bad-payments
+    label: Start the faulty till
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dpr, payments, --client-name, dpr-faulty, --bad, --every, 3s]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Sends a malformed payment every 3 seconds: its amount is "twelve", not
+      a number.
+
+  - id: kill-bank
+    label: Crash the bank
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, dpr-bank, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the bank outright (SIGKILL), and returns once it has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, discard-pause-retry]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: bank-down
+    title: The bank goes down
+    breaks: >
+      The bank is killed. Payments keep coming.
+    watch: >
+      The card shows the processor. The first charge gets no answer within a
+      second: "no answer from the bank", then "pausing payments, checking
+      the bank every 2 s". It keeps that payment, takes no other, and
+      q.dpr.payments fills up. Nothing goes to q.dpr.dmq: these payments are
+      fine, it is the bank that is not. Reset starts the bank: "the bank
+      answers again: resuming payments", and the waiting payments are
+      charged in order.
+    why: >
+      When a dependency is down, every message would fail the same way.
+      Retrying each one wastes the attempts, and discarding them throws away
+      good payments. Pausing stops taking messages, leaves them on the queue
+      where they are safe, and resumes when the dependency answers. The Go
+      API's receiver has Pause and Resume for this.
+    real_world: >
+      A payment gateway, a database or a partner API down for maintenance.
+      A consumer that discards or dead-letters during the outage turns a
+      short outage into a long clean-up.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Go API: request-reply messaging"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-API-Request-Reply.htm
+    node: bank
+    logs: processor
+    trigger:
+      - run: kill-bank
+    reset:
+      - start: bank
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: processor
+            has: ["no answer from the bank", "pausing payments, checking the bank every 2 s"]
+            lacks: ["discarded to the dead message queue"]
+      reset:
+        within: 15
+        logs:
+          - log: processor
+            has: ["the bank answers again: resuming payments", "P-\\d+ charged"]
+
+  - id: malformed
+    title: Malformed payments arrive
+    breaks: >
+      A faulty till starts sending payments whose amount is not a number.
+    watch: >
+      The card shows the processor. Each malformed payment is discarded at
+      once: "amount is not a number, can never succeed: discarded to the
+      dead message queue", and q.dpr.dmq counts them. The good payments
+      around them are charged as before. Reset stops the faulty till. The
+      discarded payments stay on q.dpr.dmq for someone to look at.
+    why: >
+      A message that can never be processed, whatever the moment, should
+      leave the queue at once. Retrying it only blocks the messages behind
+      it. The processor settles it as rejected, and the broker moves it to
+      the queue's dead message queue, kept and out of the way.
+    real_world: >
+      A producer's bug, a schema change nobody announced, a field in the
+      wrong format. The dead message queue is where someone looks next
+      morning, and why each rejected message keeps its original content.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Dead message queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
+    node: badshop
+    logs: processor
+    trigger:
+      - start: bad-payments
+    reset:
+      - stop: bad-payments
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: processor
+            has: ["X-\\d+: amount is not a number, can never succeed: discarded to the dead message queue", "P-\\d+ charged"]
+      reset:
+        settle: 4
+        within: 10
+        logs:
+          - log: processor
+            has: ["P-\\d+ charged"]
+            lacks: ["X-\\d+: amount is not a number"]
+
+  - id: bank-busy
+    title: The bank is busy now and then
+    breaks: >
+      The bank restarts answering every third charge with "busy, try
+      later".
+    watch: >
+      The card shows the processor. A payment the bank is busy for goes on
+      q.dpr.retry: "bank busy, retry 1 of 2 in 5 s". Five seconds later the
+      queue's delivery delay lets it out, and it is charged: "charged
+      (attempt 2)". The payments behind it were not held up. A payment busy
+      three times is discarded. Reset restarts the bank as before.
+    why: >
+      A temporary refusal is about the moment, not the message, so the
+      message deserves another try, later. Retrying at once would hit the
+      same busy bank. The processor republishes the payment to a retry
+      queue with a delivery delay, which keeps it back for 5 seconds, then
+      acknowledges the original. The attempt count travels in the payment,
+      so the processor knows when to give up.
+    real_world: >
+      Rate limits ("429 Too Many Requests"), a lock held by someone else, a
+      service warming up. Real systems often use several retry queues with
+      growing delays. Solace queues also have a delayed redelivery setting,
+      but it needs transacted sessions, which the Go API does not offer.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Delayed delivery"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Delayed-Delivery.htm
+    node: bank
+    logs: processor
+    trigger:
+      - stop: bank
+      - start: bank-busy
+    reset:
+      - stop: bank-busy
+      - start: bank
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: processor
+            has: ["P-\\d+: bank busy, retry 1 of 2 in 5 s", "P-\\d+ charged \\(attempt 2\\)"]
+      reset:
+        settle: 8
+        within: 10
+        logs:
+          - log: processor
+            has: ["P-\\d+ charged \\(attempt 1\\)"]
+            lacks: ["bank busy"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.dpr.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: Queue settings
+    kind: semp
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.dpr.*
+    # deliveryDelay is the retry's wait; deadMsgQueue is where rejects go.
+    columns: [queueName, deliveryDelay, deadMsgQueue]
+    ui_hint: Manager → Queues → (queue) → Settings
+    empty: No queue yet. Press Play.

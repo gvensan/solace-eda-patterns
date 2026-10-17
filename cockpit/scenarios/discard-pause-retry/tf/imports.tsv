@@ -1,0 +1,18 @@
+# What the discard-pause-retry scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.dpr	{vpn}/cp-dpr
+solacebroker_msg_vpn_acl_profile.dpr	{vpn}/acl-dpr
+
+solacebroker_msg_vpn_queue.dmq	{vpn}/q.dpr.dmq
+
+solacebroker_msg_vpn_queue.payments	{vpn}/q.dpr.payments
+solacebroker_msg_vpn_queue_subscription.payments	{vpn}/q.dpr.payments/dpr%2Fpay%2Fpayment%2Frequested%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.retry	{vpn}/q.dpr.retry
+solacebroker_msg_vpn_queue_subscription.retry	{vpn}/q.dpr.retry/dpr%2Fpay%2Fpayment%2Fretry%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.dpr["shop"]	{vpn}/svc-dpr-shop
+solacebroker_msg_vpn_client_username.dpr["bank"]	{vpn}/svc-dpr-bank
+solacebroker_msg_vpn_client_username.dpr["processor"]	{vpn}/svc-dpr-processor

@@ -11,3 +11,4 @@ waves). One line each; pick them up between waves.
 - smoke.py: a group mode (`--group "Communication Patterns"`) for group-level regression.
 - Clear broker config: also delete replay logs, bridges and a scenario's extra VPN (Event Sourcing, Event Bridge list them in imports.tsv, but `_TOP_LEVEL` covers queues, usernames and profiles only, and a VPN must be emptied before it can be deleted).
 - Diagram: a flow whose messages cross a bridge stops its packets while the bridge's inboundState is not ready-in-sync (Event Bridge card 1 says so in text for now).
+- Diagram: two queue boxes with flows into the same processor are placed at the same height and overlap (placeQueueBoxes uses the processor's single lane). Discard, Pause and Retry draws its retry queue without a flow for now.
