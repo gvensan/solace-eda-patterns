@@ -1,0 +1,13 @@
+# What the event-streaming scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.es	{vpn}/cp-es
+solacebroker_msg_vpn_acl_profile.es	{vpn}/acl-es
+
+solacebroker_msg_vpn_queue.rides	{vpn}/q.es.rides
+solacebroker_msg_vpn_queue_subscription.rides	{vpn}/q.es.rides/es%2Fbikes%2Fride%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.es["bikes"]	{vpn}/svc-es-bikes
+solacebroker_msg_vpn_client_username.es["counter"]	{vpn}/svc-es-counter
+solacebroker_msg_vpn_client_username.es["board"]	{vpn}/svc-es-board

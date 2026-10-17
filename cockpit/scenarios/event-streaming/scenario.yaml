@@ -1,0 +1,313 @@
+id: event-streaming
+# Category 2 of the pattern guide (Communication Patterns), fourth pattern.
+order: 240
+eyebrow: Communication Patterns
+title: Event Streaming
+summary: >
+  A bike-share. Every ride start and ride end is an event, and the counter
+  keeps the number of bikes in use: plus one on a start, minus one on an
+  end. That number is only right if the counter has seen the stream in
+  order from where its count started. A queue keeps the stream in order and
+  holds the counter's position in it; a snapshot keeps the count across a
+  crash. The city's board takes the same events direct, with neither.
+
+objectives:
+  - See a stream of events consumed in order, with the consumer's state built from it
+  - See a consumer crash and carry on from its position with its state intact
+  - See a consumer that joins the stream late get its state wrong, and why
+  - Learn what a queue holds for a stream consumer, and what a snapshot adds
+
+run:
+  - apply
+  - build
+  - counter
+  - bikes
+
+cleanup:
+  - destroy
+  - forget-snapshot
+
+diagram:
+  caption: >
+    The bikes publish each ride start and end, guaranteed and numbered.
+    q.es.rides keeps them in order and holds the counter's position: the
+    counter applies each event to its count, writes a snapshot, and
+    acknowledges. The board takes the same events direct, from the moment
+    it starts.
+  duration: 2.4
+  liveWhen: bikes
+  nodes:
+    - id: bikes
+      label: Bikes
+      sublabel: four ride events a second
+      kind: app
+      col: 0
+      action: bikes
+      requires:
+        - label: svc-es-bikes
+          semp: /msgVpns/{vpn}/clientUsernames/svc-es-bikes
+    - id: broker
+      label: Solace Broker
+      sublabel: keeps the stream in order
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: rides
+          label: q.es.rides
+          depth: { queue: q.es.rides, unit: ahead }
+      provides:
+        - label: q.es.rides
+          group: rides
+          semp: /msgVpns/{vpn}/queues/q.es.rides
+        - label: cp-es
+          semp: /msgVpns/{vpn}/clientProfiles/cp-es
+        - label: acl-es
+          semp: /msgVpns/{vpn}/aclProfiles/acl-es
+    - id: counter
+      label: Counter
+      sublabel: bikes in use, with a snapshot
+      kind: app
+      col: 2
+      action: counter
+      flowOn:
+        queue: q.es.rides
+        client: es-counter
+      requires:
+        - label: svc-es-counter
+          semp: /msgVpns/{vpn}/clientUsernames/svc-es-counter
+    - id: board
+      label: City Board
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: board
+      requires:
+        - label: svc-es-board
+          semp: /msgVpns/{vpn}/clientUsernames/svc-es-board
+  flows:
+    - { from: bikes, to: broker, label: ride started, ride ended, delay: 0 }
+    - { from: broker, to: counter, via: rides, delay: 0.8 }
+    - { from: broker, to: board, label: direct, delay: 1.0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.es.rides, which keeps every ride event in order for the
+      counter, and the client profile, ACL profile and usernames for this
+      scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: counter
+    label: Start the counter
+    kind: process
+    cmd: [bash, ../../apps/run.sh, es, counter, --client-name, es-counter]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.es.rides in order, keeps the set of bikes in use, writes it to
+      a snapshot before acknowledging each event, and prints the count once
+      a second.
+
+  - id: counter-no-snapshot
+    label: Start the counter without a snapshot
+    kind: process
+    cmd: [bash, ../../apps/run.sh, es, counter, --client-name, es-counter, --no-snapshot]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same counter, keeping its count in memory only. Stop the counter
+      first.
+
+  - id: board
+    label: Start the city board
+    kind: process
+    cmd: [bash, ../../apps/run.sh, es, board, --client-name, es-board]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      Counts the same way from the events it receives direct, from the
+      moment it starts.
+
+  - id: bikes
+    label: Start the bikes
+    kind: process
+    cmd: [bash, ../../apps/run.sh, es, bikes]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes four ride events a second, guaranteed and numbered, and
+      says how many bikes it has out.
+
+  - id: kill-counter
+    label: Crash the counter
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, es-counter, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the counter outright (SIGKILL), and returns once it has gone.
+
+  - id: forget-snapshot
+    label: Delete the counter's snapshot
+    kind: process
+    cmd: [bash, ../../apps/run.sh, es, counter, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes the snapshot, so the next Play starts the count from zero.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-streaming]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any ride
+      event still on the queue goes with it.
+
+failure_modes:
+  - id: counter-crashes
+    title: The counter crashes
+    breaks: >
+      The counter is killed mid-stream.
+    watch: >
+      The card shows the counter. Its node goes red, and the count on
+      q.es.rides in the diagram starts climbing: the stream goes on, and
+      the queue holds the counter's place in it. Press Reset. The counter
+      says "restored 23 rides in use from the snapshot", then "resumed at
+      #812, delivered again after the last stop": the events it held
+      unacknowledged come back first, then the rest, in order. Its "in use"
+      stays equal to what the bikes report, with no "end without a start".
+    why: >
+      A stream consumer has two things to keep: its position in the stream
+      and the state it built from it. The queue keeps the position: an
+      event is removed only when acknowledged, so a crashed consumer gets
+      the unacknowledged ones again and everything after. The snapshot
+      keeps the state: the counter writes its set of bikes before each
+      acknowledgement, so what it restores matches where it resumes.
+    real_world: >
+      Running totals, sessions, fraud windows, inventory. A consumer that
+      keeps state in memory alone starts from nothing after a restart and
+      is wrong until the stream has replayed past everything it forgot. A
+      queue gives it its position; a snapshot (or a replay log) gives it
+      its state.
+    docs:
+      - label: "Go API: consuming persistent messages and acknowledging them"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: guaranteed messages"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Guaranteed-Messages.htm
+    node: counter
+    logs: counter
+    trigger:
+      - run: kill-counter
+    reset:
+      - start: counter
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: counter
+            has: ["exited with code -9"]
+      reset:
+        within: 20
+        logs:
+          - log: counter
+            has: ["restored \\d+ rides in use from the snapshot", "resumed at #\\d+", "in use: \\d+ \\(at #\\d+; the bikes say \\d+\\)"]
+            lacks: ["end without a start"]
+
+  - id: board-late
+    title: The city board joins the stream late
+    breaks: >
+      The board starts now, taking the ride events direct.
+    watch: >
+      The card shows the board. It receives every event from the moment it
+      started and none before, so for a bike that was already out it sees
+      the end and never saw the start: "end without a start for B-12:
+      joined late, no history". Its "in use" sits below what the bikes
+      report, and the gap never closes. The counter, next to it, stays
+      right. Reset stops the board.
+    why: >
+      A direct subscriber has no position in the stream: it gets what is
+      published while it is subscribed, and nothing before. State built
+      from a stream is only right if it was built from the start, or from
+      a snapshot taken at a known position. The board has neither.
+    real_world: >
+      A new dashboard instance, a cache warming up, a replacement service
+      started mid-day. Either give it a snapshot and the position it was
+      taken at, or let it replay the stream from the start (a replay log),
+      or accept that it is wrong until every bike it never saw has come
+      back.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Broker: guaranteed messages"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Guaranteed-Messages.htm
+    node: board
+    logs: board
+    trigger:
+      - start: board
+    reset:
+      - stop: board
+    expect:
+      break:
+        within: 30
+        logs:
+          - log: board
+            has: ["end without a start for B-\\d+: joined late, no history"]
+          - log: counter
+            lacks: ["end without a start"]
+      reset:
+        within: 10
+        logs:
+          - log: board
+            has: ["stopped: \\d+ in use on the board, \\d+ ends without a start"]
+
+inspect:
+  - label: The stream's queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.es.*
+    # spooledMsgCount is the length of the stream so far; msgSpoolUsage is
+    # how far the counter is behind.
+    columns: [queueName, spooledMsgCount, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: The counter on q.es.rides
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.es.rides/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount, redeliveredMsgCount]
+    ui_hint: Manager → Queues → q.es.rides → Consumers
+    empty: No consumer is bound to q.es.rides right now. Press Play, or start the counter.

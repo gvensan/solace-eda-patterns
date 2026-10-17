@@ -23,11 +23,15 @@ import (
 	"solace-workshop/apps/scenarios/partition"
 	"solace-workshop/apps/scenarios/pubsub"
 	"solace-workshop/apps/scenarios/shock"
+	"solace-workshop/apps/scenarios/streaming"
 )
 
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"es bikes":          streaming.Bikes,
+	"es counter":        streaming.Counter,
+	"es board":          streaming.Board,
 	"ps shop":           pubsub.Shop,
 	"ps subscriber":     pubsub.Subscriber,
 	"sa onsale":         shock.OnSale,
