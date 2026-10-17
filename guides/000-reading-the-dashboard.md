@@ -19,6 +19,13 @@ starts or ends at the broker: apps never talk to each other directly.
 | Moving dots on a line | Events flowing. They move only while the app that sends them is running, so a still picture means nothing is being sent. They show that events flow, not each single event. |
 | <!-- indicator: faulted-border --> Red dashed border | A **Break it** card is in effect on this app. It is the failure you caused, not a fault in the workshop. |
 
+A box can also show a setting you chose, under its name:
+
+| Mark | What it means |
+| --- | --- |
+| <!-- indicator: node-setting --> `clear: 6 orders, 2/s` under an app | The setting it runs with now, such as how fast a publisher goes. Click the box to change it in the side panel. |
+| <!-- indicator: setting-choice --> **Clear**, **Busy** in the side panel | The choices for that setting; the filled one is in use. Choosing another restarts the app if it is running, so it takes effect at once. |
+
 Some scenarios also say what the broker decided about a consumer, under its
 name:
 
@@ -43,11 +50,11 @@ second; nothing moves on a timer.
 | <!-- indicator: lane-in --> `412 in` on a lane | Messages that have gone into that partition since the queue was created. Keys are hashed onto partitions, so the counts differ. |
 | <!-- indicator: lane-edge --> Solid line from a lane to a consumer | Which consumer that partition is delivered to. When the broker moves a partition, the line swings to the new owner and the lane flashes green. |
 | <!-- indicator: partition-status --> `waiting to rebalance`, `moving partitions` above the lanes | A consumer came or went. The broker waits a few seconds (the rebalance delay), then moves partitions. Blank means every partition has an owner and nothing is moving. |
-| <!-- indicator: event-dot --> Coloured dot with a letter | One update a consumer handled, drawn a moment after it happened, along the path it took: from the publisher, through its partition, to that consumer, where it shrinks away: consumed and gone from the queue. The colour and letter stand for one order, so the same letter is the same order. When an order is finished, its letter goes to a new one. Point at it for the order, its sequence number and the log line. |
+| <!-- indicator: event-dot --> Coloured dot with a letter | One update a consumer handled, drawn a moment after it happened, along the path it took: from the publisher, through its partition, to that consumer, where it shrinks away: consumed and gone from the queue. The colour and letter stand for one order while it is in flight. When it is finished, its letter goes to a new order in the same partition, so a letter keeps to one lane and one consumer. One letter at two consumers means one order really did split. Point at it for the order, its sequence number and the log line. |
 | <!-- indicator: event-dot-unplaced --> Faint dashed dot crossing the queue | An update the dashboard could not place in a partition: the broker had already removed it before the dashboard looked. It still goes to the consumer that handled it. |
 | <!-- indicator: consumer-partitions --> `partitions P1 and P4` under a consumer | The partitions the broker has given this consumer. **no partition: idle** (orange): it is bound to the queue but owns nothing, so it receives nothing. |
-| <!-- indicator: seq-chip --> `A3`, `C1` in a consumer | The last updates this consumer handled, newest on the right: the order's letter and its sequence number. One order's numbers should rise one at a time. Each fades after a few seconds, so the row shows recent work, not a backlog. |
-| <!-- indicator: seq-chip-flagged --> `A3!` with a red outline | The consumer's own log flagged that update: a **gap** (a number was skipped, so it went to another consumer) or an **out of order** arrival. It stays for 20 seconds, so you have time to point at it. |
+| <!-- indicator: seq-chip --> `A3`, `C1` in a consumer | The last updates this consumer handled, as a line packed against the right end: each one enters at the left of the line and leaves from the right end, oldest first, and the rest slide right as it drains: the order's letter and its sequence number. One order's numbers should rise one at a time. Each leaves after a few seconds, so the row shows recent work, not a backlog. |
+| <!-- indicator: seq-chip-flagged --> `A3!` with a red outline | The consumer's own log flagged that update: a **gap** (a number was skipped, so it went to another consumer) or an **out of order** arrival. It stays for 20 seconds, so you have time to point at it; newer updates wait behind it, in order. |
 
 ## The rest of the page
 

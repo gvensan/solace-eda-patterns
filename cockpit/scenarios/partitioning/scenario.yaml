@@ -28,6 +28,33 @@ run:
 cleanup:
   - destroy
 
+# How hard the order service works. Clear is easiest to follow: one order
+# per partition, so each lane carries one colour at a time. Busy shows the
+# usual case, several keys sharing a partition. Shown on the Order Service.
+settings:
+  pace:
+    label: Pace
+    node: orders
+    default: clear
+    choices:
+      - value: clear
+        label: Clear
+        sublabel: "clear: 6 orders, 2/s"
+        description: >
+          Six orders in flight, one in each partition, two updates a second.
+          Each lane carries one colour at a time, so one order is easy to
+          follow from the order service to its consumer.
+        args: [--in-flight, "6", --rate, "2"]
+      - value: busy
+        label: Busy
+        sublabel: "busy: 10 orders, 5/s"
+        description: >
+          Ten orders in flight, five updates a second. Closer to real
+          traffic: several keys share most partitions, unevenly, and every
+          consumer stays busy. Ten is as many colours as stay easy to tell
+          apart.
+        args: [--in-flight, "10", --rate, "5"]
+
 # Checked by smoke.py once Play has finished, before any Break it card.
 expect:
   play:
@@ -213,19 +240,20 @@ actions:
   - id: orders
     label: Publish order updates
     kind: process
-    cmd: [bash, ../../apps/run.sh, partition, orders]
+    cmd: [bash, ../../apps/run.sh, partition, orders, "{setting:pace}"]
     cwd: .
     long_running: true
     variant: primary
     description: >
-      Publishes status updates for twelve orders at a time, five a second,
-      each with its order id as the partition key and a sequence number,
-      #1 to #5.
+      Publishes status updates for several orders at a time, each with its
+      order id as the partition key and a sequence number, #1 to #5. How
+      many, and how fast, is the Pace setting on the Order Service: six
+      orders at two a second (Clear), or ten at five (Busy).
 
   - id: orders-no-key
     label: Publish without a key
     kind: process
-    cmd: [bash, ../../apps/run.sh, partition, orders, --no-key]
+    cmd: [bash, ../../apps/run.sh, partition, orders, --no-key, "{setting:pace}"]
     cwd: .
     long_running: true
     variant: secondary
@@ -273,11 +301,11 @@ failure_modes:
     watch: >
       In the diagram, the crashed consumer's two lanes lose their owner and
       say "no owner". For 5 seconds nothing reads them, so their held counts
-      climb. Then the broker gives one lane to each of the other consumers,
-      and the lane lines swing over. The card shows one of them: it starts
-      receiving orders it has never seen, part way through their lives,
-      "picked up O-... at #3" (now and then a moved partition happens to
-      start with a new order instead). Every order still moves one number
+      creep up. Then the broker gives one lane to each of the other
+      consumers, and the lane lines swing over. The card shows one of them:
+      it usually starts receiving an order it has never seen, part way
+      through its life, "picked up O-... at #3". Sometimes the moved lane
+      happens to start a new order instead, at #1. Every order still moves one number
       at a time: no GAP and no OUT OF ORDER. Reset starts the crashed consumer
       again, and after 5 seconds two lanes move back to it.
     why: >
@@ -317,7 +345,6 @@ failure_modes:
             lacks: ["GAP", "OUT OF ORDER"]
         partitions:
           moved: true
-          picked: true
           owned: all
           owns:
             - { node: {role: active}, max: 0 }

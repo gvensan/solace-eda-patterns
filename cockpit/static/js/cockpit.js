@@ -1180,6 +1180,25 @@
       );
     }
 
+    for (const [name, setting] of Object.entries(scenario.settings || {})) {
+      if (setting.node !== spec.id) continue;
+      const current = choiceOf(scenario, name);
+      rows.push(
+        h("p", { class: "panel__section-title", text: setting.label }),
+        h("div", { class: "panel__choices", role: "group", "aria-label": setting.label },
+          setting.choices.map((c) => h("button", {
+            class: `btn btn--${c.value === current?.value ? "primary" : "ghost"} btn--sm`,
+            "aria-pressed": String(c.value === current?.value),
+            "data-setting": name,
+            "data-value": c.value,
+            text: c.label,
+            indicator: ["setting-choice", `${c.description.trim()} Choosing it restarts the app if it is running.`],
+            onClick: () => chooseSetting(scenario, name, c.value),
+          }))),
+        h("p", { class: "panel__desc", text: current?.description || "" }),
+      );
+    }
+
     if (action) {
       const running = Boolean(nodeState?.running);
       rows.push(
@@ -1322,11 +1341,46 @@
     setTimeout(tick, 0);
   }
 
+  /* A setting (the Order Service's pace, say) shows its current choice as
+     the sublabel of the node it belongs to. */
+  function choiceOf(scenario, name) {
+    const spec = scenario.settings?.[name];
+    const value = state.diagramState?.settings?.[name] ?? spec?.default;
+    return spec?.choices.find((c) => c.value === value);
+  }
+
+  function paintSettings(scenario) {
+    for (const [name, spec] of Object.entries(scenario.settings || {})) {
+      const choice = choiceOf(scenario, name);
+      const sub = document.querySelector(`.dg-node[data-node="${spec.node}"] .dg-node__sub`);
+      if (!sub || !choice) continue;
+      sub.textContent = choice.sublabel;
+      indicator(sub, "node-setting",
+        `${spec.label}: ${choice.label}. ${choice.description.trim()} Change it in this node's panel.`);
+    }
+  }
+
+  async function chooseSetting(scenario, name, value) {
+    const spec = scenario.settings[name];
+    try {
+      const { restarted } = await API.setSetting(scenario.id, name, value);
+      const label = spec.choices.find((c) => c.value === value)?.label;
+      toast(restarted.length
+        ? `${spec.label} set to ${label}. Restarted: ${labelsFor(scenario, restarted).join(", ")}`
+        : `${spec.label} set to ${label}. It applies the next time it starts`);
+      await refreshDiagramState(scenario);
+      renderPanel();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
   async function refreshDiagramState(scenario) {
     try {
       state.diagramState = await API.scenarioState(scenario.id);
       const host = document.getElementById("diagram-host");
       if (host) Diagram.paint(host, scenario.diagram, state.diagramState, gatedNodes(scenario));
+      paintSettings(scenario);
       // Keep an open Detail tab honest as things start and stop, but update it
       // in place rather than rebuilding: a full re-render on every poll would
       // replace the Start/Stop button out from under a click in progress.

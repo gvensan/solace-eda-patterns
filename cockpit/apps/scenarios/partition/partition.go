@@ -67,8 +67,8 @@ func Orders(args []string) {
 	user := fs.String("user", "svc-part-orders", "client username to connect as")
 	role := fs.String("role", "orders", "label for log lines")
 	clientName := fs.String("client-name", "part-orders", "client name the broker reports this app by")
-	inFlight := fs.Int("in-flight", 12, "orders in progress at any time")
-	rate := fs.Float64("rate", 5, "updates per second")
+	inFlight := fs.Int("in-flight", 6, "orders in progress at any time")
+	rate := fs.Float64("rate", 2, "updates per second")
 	noKey := fs.Bool("no-key", false, "publish without a partition key")
 	fs.Parse(args)
 
@@ -89,9 +89,8 @@ func Orders(args []string) {
 	go func() { solace.WaitForStop(); close(stop) }()
 
 	// Order k in flight always takes its next id from the ids measured to
-	// land on partition k mod 6, so all six partitions stay busy with two
-	// orders each. Two, so that a partition handed to another consumer
-	// almost always holds an order part way through its life. Each run
+	// land on partition k mod 6, so all six partitions stay busy: one order
+	// each with six in flight, one or two each with ten. Each run
 	// starts at a random point in the list, so a restarted order service
 	// does not reuse the ids a consumer saw a moment ago.
 	by := idsFor()

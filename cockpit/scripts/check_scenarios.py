@@ -12,6 +12,7 @@ imports.tsv for every scenario offering a reconcile action.
 Run from anywhere:  python3 cockpit/scripts/check_scenarios.py
 """
 
+import math
 import pathlib
 import re
 import sys
@@ -145,6 +146,8 @@ def check(path: pathlib.Path) -> list[str]:
                            f"but its action does not pass --client-name {flow_on['client']}")
 
     bad.extend(check_partitions(spec, here, actions))
+    bad.extend(check_settings(spec, actions, node_ids))
+    bad.extend(check_in_flight(spec))
 
     live = spec.get("diagram", {}).get("liveWhen")
     if live and live not in node_ids:
@@ -262,6 +265,60 @@ def partition_box(spec):
     return None
 
 
+def check_settings(spec, actions, node_ids) -> list:
+    """settings: choices an attendee makes about how an app runs.
+
+        settings:
+          pace:
+            label: Pace
+            node: <diagram node whose panel shows it>
+            default: <a choice value>
+            choices:
+              - {value: clear, label: Clear, sublabel: ..., description: ..., args: [--rate, "2"]}
+
+    An action uses one by putting "{setting:pace}" in its cmd."""
+    bad = []
+    settings = spec.get("settings") or {}
+    if not isinstance(settings, dict):
+        return ["settings: must map names to settings"]
+    used = {part[len("{setting:"):-1] for a in actions.values() for part in a.get("cmd", []) or []
+            if isinstance(part, str) and part.startswith("{setting:") and part.endswith("}")}
+    for name in sorted(used - set(settings)):
+        bad.append(f"an action's cmd uses {{setting:{name}}}, which is not under settings:")
+    nodes = {n["id"]: n for n in spec.get("diagram", {}).get("nodes", []) or []}
+    for name, st in settings.items():
+        where = f"setting {name!r}"
+        if not isinstance(st, dict):
+            bad.append(f"{where} must be a mapping")
+            continue
+        if name not in used:
+            bad.append(f"{where} is used by no action's cmd")
+        for key in ("label", "node", "default"):
+            if not isinstance(st.get(key), str):
+                bad.append(f"{where} needs {key}:")
+        if st.get("node") not in node_ids:
+            bad.append(f"{where} node {st.get('node')!r} is not a diagram node")
+        else:
+            action = actions.get(nodes[st["node"]].get("action"), {})
+            if f"{{setting:{name}}}" not in (action.get("cmd") or []):
+                bad.append(f"{where} is shown on {st['node']!r}, whose action does not use it")
+        choices = st.get("choices") or []
+        values = [c.get("value") for c in choices if isinstance(c, dict)]
+        if len(choices) < 2 or len(values) != len(choices):
+            bad.append(f"{where} needs two or more choices")
+        if st.get("default") not in values:
+            bad.append(f"{where} default {st.get('default')!r} is not one of its choices")
+        for c in choices:
+            if not isinstance(c, dict):
+                continue
+            for key in ("value", "label", "sublabel", "description"):
+                if not isinstance(c.get(key), str):
+                    bad.append(f"{where} choice {c.get('value')!r} needs {key}: as plain text")
+            if not isinstance(c.get("args"), list) or not all(isinstance(a, str) for a in c["args"]):
+                bad.append(f"{where} choice {c.get('value')!r} args: must be a list of strings")
+    return bad
+
+
 def check_partitions(spec, here, actions) -> list:
     """A box drawn as partition lanes, and the events: that put dots on them.
 
@@ -367,6 +424,99 @@ def check_partition_expect(where, checks, spec) -> list:
                     bad.append(f"{where} partitions owns entry needs min: or max:")
         else:
             bad.append(f"{where} partitions: has unknown check {key!r}")
+    return bad
+
+
+# Event dots and chips are told apart by colour (and a letter). Every pair
+# of colours must be at least this far apart in CIEDE2000, with lightness at
+# half weight so two shades of one hue do not count as different, and each
+# colour this far from the dashboard's dark backgrounds.
+MIN_COLOUR_GAP = 20.0
+MIN_BACKGROUND_GAP = 45.0
+DARK_BACKGROUNDS = ("#03213B", "#0B3A5C", "#061A2B")
+
+
+def _lab(colour: str) -> tuple:
+    """CIE L*a*b* (D65) of a #RRGGBB colour."""
+    def linear(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (linear(int(colour[i:i + 2], 16)) for i in (1, 3, 5))
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    f = lambda t: t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+    return 116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))
+
+
+def _de2000(c1: str, c2: str, kL: float = 2.0) -> float:
+    """CIEDE2000 colour difference. kL above 1 gives lightness less weight."""
+    L1, a1, b1 = _lab(c1)
+    L2, a2, b2 = _lab(c2)
+    cbar = (math.hypot(a1, b1) + math.hypot(a2, b2)) / 2
+    g = 0.5 * (1 - math.sqrt(cbar ** 7 / (cbar ** 7 + 25 ** 7)))
+    a1, a2 = (1 + g) * a1, (1 + g) * a2
+    C1, C2 = math.hypot(a1, b1), math.hypot(a2, b2)
+    h1 = math.degrees(math.atan2(b1, a1)) % 360
+    h2 = math.degrees(math.atan2(b2, a2)) % 360
+    dh = 0.0 if C1 * C2 == 0 else (h2 - h1 + 180) % 360 - 180
+    dH = 2 * math.sqrt(C1 * C2) * math.sin(math.radians(dh / 2))
+    if C1 * C2 == 0:
+        hbar = h1 + h2
+    elif abs(h1 - h2) <= 180:
+        hbar = (h1 + h2) / 2
+    else:
+        hbar = (h1 + h2 + 360) / 2 if h1 + h2 < 360 else (h1 + h2 - 360) / 2
+    lbar, cbarp = (L1 + L2) / 2, (C1 + C2) / 2
+    t = (1 - 0.17 * math.cos(math.radians(hbar - 30)) + 0.24 * math.cos(math.radians(2 * hbar))
+         + 0.32 * math.cos(math.radians(3 * hbar + 6)) - 0.20 * math.cos(math.radians(4 * hbar - 63)))
+    sl = 1 + 0.015 * (lbar - 50) ** 2 / math.sqrt(20 + (lbar - 50) ** 2)
+    sc = 1 + 0.045 * cbarp
+    sh = 1 + 0.015 * cbarp * t
+    rt = (-math.sin(math.radians(60 * math.exp(-((hbar - 275) / 25) ** 2)))
+          * 2 * math.sqrt(cbarp ** 7 / (cbarp ** 7 + 25 ** 7)))
+    dl, dc, dhh = (L2 - L1) / (kL * sl), (C2 - C1) / sc, dH / sh
+    return math.sqrt(dl ** 2 + dc ** 2 + dhh ** 2 + rt * dc * dhh)
+
+
+def key_colours() -> list:
+    text = (STATIC_JS / "diagram.js").read_text()
+    m = re.search(r"const KEY_COLOURS = \[(.*?)\]", text, re.S)
+    return re.findall(r'"(#[0-9A-Fa-f]{6})"', m.group(1)) if m else []
+
+
+def check_palette() -> list:
+    """The colours of event dots stay distinct: measured pairwise, and
+    against the dashboard's dark backgrounds."""
+    bad = []
+    colours = key_colours()
+    if not colours:
+        return ["diagram.js: KEY_COLOURS not found"]
+    for i, a in enumerate(colours):
+        for b in colours[i + 1:]:
+            gap = _de2000(a, b)
+            if gap < MIN_COLOUR_GAP:
+                bad.append(f"KEY_COLOURS {a} and {b} are only {gap:.1f} apart (need {MIN_COLOUR_GAP:g})")
+        for bg in DARK_BACKGROUNDS:
+            gap = _de2000(a, bg, kL=1.0)
+            if gap < MIN_BACKGROUND_GAP:
+                bad.append(f"KEY_COLOURS {a} is only {gap:.1f} from background {bg} (need {MIN_BACKGROUND_GAP:g})")
+    return [f"palette: {m}" for m in bad]
+
+
+def check_in_flight(spec) -> list:
+    """A diagram that colours events by order can tell at most as many
+    orders apart as it has colours, so no setting may keep more in flight."""
+    if not (spec.get("diagram") or {}).get("events"):
+        return []
+    limit, bad = len(key_colours()), []
+    for name, st in (spec.get("settings") or {}).items():
+        for c in st.get("choices", []) if isinstance(st, dict) else []:
+            args = c.get("args", []) if isinstance(c, dict) else []
+            for i, a in enumerate(args[:-1]):
+                if a == "--in-flight" and str(args[i + 1]).isdigit() and int(args[i + 1]) > limit:
+                    bad.append(f"setting {name!r} choice {c.get('value')!r} keeps {args[i + 1]} orders "
+                               f"in flight, more than the {limit} colours that tell them apart")
     return bad
 
 
@@ -476,6 +626,7 @@ def main() -> int:
     for path in found:
         problems.extend(check(path))
     problems.extend(check_indicators())
+    problems.extend(check_palette())
 
     for p in problems:
         print(p)

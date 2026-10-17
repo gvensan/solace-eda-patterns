@@ -32,6 +32,10 @@ const API = (() => {
     stopAction: (scenario, action) =>
       req(`/api/scenarios/${scenario}/actions/${action}/stop`, { method: "POST" }),
     inspect: (scenario) => req(`/api/scenarios/${scenario}/inspect`),
+    setSetting: (scenario, name, value) =>
+      req(`/api/scenarios/${scenario}/settings/${name}`, {
+        method: "PUT", body: JSON.stringify({ value }),
+      }),
     partitions: (scenario, since) => req(`/api/scenarios/${scenario}/partitions?since=${since || 0}`),
     scenarioState: (scenario) => req(`/api/scenarios/${scenario}/state`),
     runScenario: (scenario) => req(`/api/scenarios/${scenario}/run`, { method: "POST" }),

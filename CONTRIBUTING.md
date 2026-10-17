@@ -281,6 +281,40 @@ A node with `flowOn` is labelled "active, not acking" when it is the active
 consumer, holds unacknowledged messages, and its acked count on the broker
 has not moved for 5 seconds (`STALL_SECONDS` in `cockpit/app/main.py`).
 
+#### Settings: a choice on a node
+
+A scenario can offer a choice about how an app runs, shown in that node's
+side panel, with the current choice as the node's sublabel. Each choice is a
+list of arguments, put into any action's `cmd` where it says
+`"{setting:<name>}"`, so every start uses it (Play, a card's reset, a click
+in the panel). Choosing another value restarts any running action that uses
+it. The dashboard holds the value until it restarts or the scenario is
+reset; `smoke.py` runs with the default, or with `--set <name>=<value>`.
+Each choice needs hover text on the node's sublabel and the panel's buttons
+(both done by the dashboard), and a smoke run of its own.
+
+```yaml
+settings:
+  pace:
+    label: Pace
+    node: orders               # the node whose panel shows it
+    default: clear
+    choices:
+      - value: clear
+        label: Clear
+        sublabel: "clear: 6 orders, 2/s"
+        description: Six orders in flight, two updates a second.
+        args: [--in-flight, "6", --rate, "2"]
+      - value: busy
+        label: Busy
+        sublabel: "busy: 10 orders, 5/s"
+        description: Ten orders in flight, five updates a second.
+        args: [--in-flight, "10", --rate, "5"]
+actions:
+  - id: orders
+    cmd: [bash, ../../apps/run.sh, partition, orders, "{setting:pace}"]
+```
+
 #### Partitioned queues: lanes and real events
 
 A box inside the broker can be drawn as one lane per partition of a
@@ -545,6 +579,28 @@ It runs Play, every Break it and Reset with the same step rules as the page,
 Cleanup, Clear broker config, and Play again from an empty broker. It fails
 if a step does not reach running or succeeded, and prints each card's log so
 you can read whether the failure and the recovery look the way the card says.
+
+Give it the dashboard to itself:
+
+- **Close the dashboard's tabs** (or leave them alone). A Break it, Reset,
+  Play or Stop pressed in a tab while smoke runs changes what it is
+  measuring. The dashboard logs every change and who sent it
+  (`GET /api/activity`), and smoke fails the run if anything but itself
+  changed something.
+- **Keep the machine awake.** On a laptop, run it under `caffeinate -i`
+  (macOS). If the machine sleeps, the dashboard's timers stop while the
+  clock smoke waits on runs on, and a Play can look hung for as long as the
+  sleep. Smoke compares the wall clock with the monotonic clock, which stops
+  during sleep, and fails the run if they drift apart by more than 5
+  seconds.
+
+```bash
+caffeinate -i ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py partitioning
+```
+
+`--set <name>=<value>` runs with a setting other than its default, for
+example `--set pace=busy`; smoke puts it back afterwards. Run a scenario with
+settings once per choice.
 
 What reloads on its own:
 

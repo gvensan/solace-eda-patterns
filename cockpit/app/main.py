@@ -7,10 +7,11 @@ WebSocket for streaming subprocess output to the browser.
 import asyncio
 import shutil
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,7 +19,8 @@ from . import broker, partitions
 from .config import (BROKER_UI_URL, DEV, MSG_VPN, SEMP_PORT, STATE_DIR, STATIC_DIR,
                      scenario_state_dir, terraform_env)
 from .processes import RunState, manager
-from .scenarios import build_command, registry
+from .scenarios import (build_command, forget_settings, registry, set_setting, setting_value,
+                        uses_setting)
 
 
 @asynccontextmanager
@@ -30,6 +32,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Solace Workshop Dashboard", lifespan=lifespan)
+
+
+# Every request that changes something (start, stop, Play, a setting), and
+# who sent it: the X-Workshop-Client header, or "page" for the dashboard
+# itself. smoke.py reads it to fail a run that someone else interfered
+# with, such as a Break it pressed in an open tab.
+_activity: deque = deque(maxlen=1000)
+
+
+@app.middleware("http")
+async def record_changes(request: Request, call_next):
+    if request.method in ("POST", "PUT", "DELETE") and request.url.path.startswith("/api/"):
+        _activity.append({"ts": time.time(), "method": request.method, "path": request.url.path,
+                          "client": request.headers.get("x-workshop-client", "page")})
+    return await call_next(request)
+
+
+@app.get("/api/activity")
+async def get_activity(since: float = 0.0):
+    return {"changes": [a for a in _activity if a["ts"] > since]}
 
 
 # ---------------------------------------------------------------- environment
@@ -387,7 +409,29 @@ async def scenario_state(scenario_id: str):
             "flow": _flow_role(node.get("flowOn"), tx),
         }
 
-    return {"nodes": out}
+    return {"nodes": out,
+            "settings": {name: setting_value(scenario, name) for name in scenario.settings}}
+
+
+@app.put("/api/scenarios/{scenario_id}/settings/{name}")
+async def change_setting(scenario_id: str, name: str, body: dict):
+    """Choose a setting's value. Every action that uses the setting and is
+    running now is restarted with it, so the choice takes effect at once."""
+    scenario = registry.get(scenario_id)
+    if scenario is None:
+        raise HTTPException(404, f"unknown scenario: {scenario_id}")
+    try:
+        set_setting(scenario, name, str(body.get("value")))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    restarted = []
+    for action in scenario.actions:
+        run = manager.get(f"{scenario_id}:{action.id}")
+        if uses_setting(action, name) and run and run.is_active:
+            await manager.stop(f"{scenario_id}:{action.id}")
+            await _start_one(scenario, action)
+            restarted.append(action.id)
+    return {"value": setting_value(scenario, name), "restarted": restarted}
 
 
 # When each consumer flow last acknowledged something, keyed by (queue, client
@@ -554,6 +598,7 @@ async def reset_scenario(scenario_id: str):
     state = scenario_state_dir(scenario_id)
     if state.exists():
         shutil.rmtree(state)
+    forget_settings(scenario_id)
     return {"stopped": stopped, "stateCleared": True}
 
 

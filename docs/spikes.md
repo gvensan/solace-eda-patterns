@@ -399,16 +399,20 @@ layout is not documented. Each partition's `msgs` collection lists the ids it
 holds now, and its `meta.count` is how many (waiting, or delivered and not
 yet acknowledged). The dashboard polls these (a list every 0.25 s, each
 partition's messages every 0.5 s) and places an update by its id, or by its
-key once another update with that key has been placed. In a 30 second
-window with three consumers, 88 of 133 updates were placed (the sampler
-had only just started); none disagreed with the measured table, and none
-sat in a lane its consumer did not own.
+key once another update with that key has been placed. Measured over ten
+runs (Play, then a 30 second window once the sampler had been running 25
+seconds, with no other client touching the dashboard): at the Clear pace
+59 of 59 updates placed in each of five runs, at the Busy pace 147 of 147
+in each of five. None disagreed with the measured table, and none sat in a
+lane its consumer did not own. Updates logged in the first seconds after
+the sampler starts can miss: in one early window 88 of 133 were placed.
 
 **Crash and join, with traffic.** After a SIGKILL, the two orphaned
 partitions went one to each survivor after 5.3 s, and the first update
 through each was an order part way through (`#2`, `#3`), with no gap. With
 one order in flight per partition, a moved partition sometimes started with
 a new order's `#1`, so nothing showed a pickup; with two orders per
-partition that is rare, which is why the order service keeps twelve in
-flight.
+partition that is rare. The Clear pace keeps one order per partition, so
+the crash card's check rests on the broker reporting the move, not on a
+pickup line.
 

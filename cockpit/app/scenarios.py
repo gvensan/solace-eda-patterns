@@ -104,6 +104,10 @@ class Scenario:
     # What smoke.py checks once Play has finished (`play:`), in the same
     # form as a failure mode's expect: block.
     expect: dict = field(default_factory=dict)
+    # Choices an attendee can make about how an app runs (how fast a
+    # publisher goes, say). Each choice is a set of arguments, put into any
+    # action's cmd where it says "{setting:<name>}".
+    settings: dict = field(default_factory=dict)
 
     @property
     def run_sequence(self) -> list:
@@ -185,6 +189,7 @@ class Scenario:
             "diagram": self.diagram,
             "failureModes": self.failure_modes,
             "expect": self.expect,
+            "settings": self.settings,
         }
 
 
@@ -206,6 +211,7 @@ def _load_one(path: Path) -> Scenario:
         diagram=raw.get("diagram", {}) or {},
         failure_modes=raw.get("failure_modes", []) or [],
         expect=raw.get("expect", {}) or {},
+        settings=raw.get("settings", {}) or {},
     )
 
 
@@ -270,6 +276,53 @@ class Registry:
         return self._scenarios.get(scenario_id)
 
 
+# The value chosen for each setting, by (scenario id, setting name). Held
+# here rather than in the browser so every start uses it, whoever presses
+# Play: the page, a Break it card's reset or smoke.py. Forgotten when the
+# dashboard restarts, or when the scenario is reset.
+_setting_values: dict = {}
+
+
+def setting_value(scenario: Scenario, name: str) -> str:
+    spec = scenario.settings.get(name) or {}
+    return _setting_values.get((scenario.id, name), spec.get("default"))
+
+
+def set_setting(scenario: Scenario, name: str, value: str) -> None:
+    spec = scenario.settings.get(name)
+    if spec is None:
+        raise ValueError(f"{scenario.id} has no setting {name!r}")
+    if value not in [c["value"] for c in spec.get("choices", [])]:
+        raise ValueError(f"{value!r} is not a choice for {name}")
+    _setting_values[(scenario.id, name)] = value
+
+
+def forget_settings(scenario_id: str) -> None:
+    for key in [k for k in _setting_values if k[0] == scenario_id]:
+        del _setting_values[key]
+
+
+def uses_setting(action: Action, name: str) -> bool:
+    return f"{{setting:{name}}}" in (action.cmd or [])
+
+
+def _expand(scenario: Scenario, cmd: list) -> list:
+    """Replace each "{setting:<name>}" with the chosen choice's arguments."""
+    out = []
+    for part in cmd:
+        if isinstance(part, str) and part.startswith("{setting:") and part.endswith("}"):
+            name = part[len("{setting:"):-1]
+            value = setting_value(scenario, name)
+            choice = next((c for c in scenario.settings.get(name, {}).get("choices", [])
+                           if c["value"] == value), None)
+            if choice is None:
+                raise ValueError(f"setting {name!r} has no choice {value!r}")
+            out.extend(str(a) for a in choice.get("args", []))
+        else:
+            out.append(part)
+    return out
+
+
 def build_command(scenario: Scenario, action: Action):
     """Resolve an action into (argv, cwd, env) ready for the ProcessManager.
 
@@ -303,7 +356,7 @@ def build_command(scenario: Scenario, action: Action):
         # shell out to terraform need the TF_VAR_* values and the state location.
         # Without them a script would silently target a different broker, or a
         # different state file, than the cockpit does.
-        return list(action.cmd), str(cwd), terraform_env()
+        return _expand(scenario, list(action.cmd)), str(cwd), terraform_env()
 
     raise ValueError(f"unsupported action kind: {action.kind}")
 

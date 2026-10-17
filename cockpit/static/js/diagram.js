@@ -893,20 +893,19 @@ const Diagram = (() => {
     return null;
   }
 
-  /* Twelve colours chosen to be as far apart as possible (from Sasha
-     Trubetskoy's list of distinct colours), each with the text colour that
-     reads on it. They are ordered so that letters handed out one after
-     another look nothing alike, and a dark ring keeps each one apart from
-     the background. A letter goes with each, so nothing depends on telling
-     two colours apart. Twelve, for the twelve orders Partitioning keeps in
-     flight. */
+  /* Ten colours, measured to stay apart: every pair is at least 24 apart
+     in CIEDE2000 with lightness given half weight, so two shades of one hue
+     never count as different, and each is far from the dashboard's dark
+     backgrounds. check_scenarios.py measures them again, and fails a pace
+     that keeps more orders in flight than there are colours. More than ten
+     cannot be told apart on this background. They are ordered so letters
+     handed out one after another look nothing alike; dark text reads on
+     all of them. */
   const KEY_COLOURS = [
-    ["#FFE119", "#1b1b1b"], ["#4363D8", "#ffffff"], ["#E6194B", "#ffffff"],
-    ["#3CB44B", "#ffffff"], ["#F032E6", "#ffffff"], ["#42D4F4", "#1b1b1b"],
-    ["#F58231", "#1b1b1b"], ["#FFFFFF", "#1b1b1b"], ["#911EB4", "#ffffff"],
-    ["#BFEF45", "#1b1b1b"], ["#9A6324", "#ffffff"], ["#FABED4", "#1b1b1b"],
-  ];
-  const LETTERS = "ABCDEFGHIJKL";
+    "#EEFF00", "#00BBFF", "#FF6622", "#22AA44", "#FF00FF",
+    "#00FFEE", "#FF99AA", "#AAAAFF", "#BB8811", "#FFFFFF",
+  ].map((c) => [c, "#1b1b1b"]);
+  const LETTERS = "ABCDEFGHIJ";
   // How long a dot takes from publisher to consumer, and the most dots a
   // burst may queue before older ones are dropped rather than replayed late.
   const DOT_MS = 1700;
@@ -919,6 +918,8 @@ const Diagram = (() => {
   // The last part of a dot's trip, over which it is absorbed by the consumer.
   const ABSORB = 0.12;
   const MOVE_MS = 900;
+  // An order not seen for this long has given up its letter.
+  const QUIET_MS = 15000;
 
   function laneY(box, p) {
     return box.top + PART_HEAD + p * (LANE_H + LANE_GAP);
@@ -970,7 +971,10 @@ const Diagram = (() => {
       // lane -> {node, end: {x, y}} as last drawn
       owners: new Map(),
       letters: new Map(),     // order id -> {i, last}
-      chips: new Map(),       // node id -> [event]
+      homes: new Map(),       // letter -> the partition its orders went to
+      lastUse: new Map(),     // letter -> when it was last drawn
+      chips: new Map(),       // node id -> [event], oldest first
+      drains: new Map(),      // node id -> timer for the next chip to leave
       primed: false,
       clock: 0,               // newest event time already drawn
     };
@@ -1018,23 +1022,49 @@ const Diagram = (() => {
     requestAnimationFrame(step);
   }
 
-  function letterFor(ctx, order) {
-    let got = ctx.letters.get(order);
+  /* The letter (and colour) for an update's order. A letter stands for one
+     order while it is in flight, and orders keep starting, so letters are
+     reused. To keep the picture true, a letter has a home partition, taken
+     from where the broker placed its keyed orders, and a new order reuses
+     a free letter from its own partition (or, before its partition is
+     known, one from the partitions its consumer owns). So in steady
+     running a letter only ever shows at one consumer; one letter at two
+     consumers means one order really did split. An order gives its letter
+     back when it is delivered (releaseIfDone), or when it has been quiet so
+     long it was abandoned (its publisher restarted). */
+  function letterFor(ctx, e, owned) {
+    const now = performance.now();
+    let got = ctx.letters.get(e.order);
     if (!got) {
-      // The letter used longest ago, so a letter is not reused while its
-      // order may still be in flight.
-      const used = new Map([...ctx.letters.values()].map((v) => [v.i, v.last]));
-      let best = 0;
-      for (let i = 0; i < LETTERS.length; i++) {
-        if (!used.has(i)) { best = i; break; }
-        if (used.get(i) < used.get(best)) best = i;
-      }
+      for (const [o, v] of ctx.letters) if (now - v.last > QUIET_MS) ctx.letters.delete(o);
+      const held = new Map([...ctx.letters.values()].map((v) => [v.i, v.last]));
+      const placed = e.partition !== null && e.partition !== undefined;
+      const want = placed ? [e.partition]
+        : (owned || []).filter((o) => o.node === e.node).map((o) => o.partition);
+      const free = [...LETTERS].map((_, i) => i).filter((i) => !held.has(i));
+      const home = (i) => ctx.homes.get(i);
+      const lastUse = (i) => ctx.lastUse.get(i) ?? 0;
+      const byAge = (a, b) => lastUse(a) - lastUse(b);
+      const best = free.filter((i) => want.includes(home(i))).sort(byAge)[0]
+        ?? free.find((i) => home(i) === undefined)
+        ?? free.sort(byAge)[0]
+        ?? [...held.entries()].sort((a, b) => a[1] - b[1])[0][0];
       for (const [o, v] of ctx.letters) if (v.i === best) ctx.letters.delete(o);
       got = { i: best, last: 0 };
-      ctx.letters.set(order, got);
+      ctx.letters.set(e.order, got);
     }
-    got.last = performance.now();
+    if (e.key && e.partition !== null && e.partition !== undefined) ctx.homes.set(got.i, e.partition);
+    got.last = now;
+    ctx.lastUse.set(got.i, now);
     return got.i;
+  }
+
+  /* A delivered order gives its letter back as soon as its last update is
+     read, so the next order in that partition can take it straight away
+     and a few orders in flight keep to a few colours. The update's own dot
+     and chip keep the letter they were given. */
+  function releaseIfDone(ctx, e) {
+    if (e.seq === 5 && ctx.letters.get(e.order)?.i === e.letter) ctx.letters.delete(e.order);
   }
 
   function flagText(e) {
@@ -1074,7 +1104,7 @@ const Diagram = (() => {
   }
 
   function launchDot(ctx, e, owned, delay, onArrive) {
-    const i = letterFor(ctx, e.order);
+    const i = e.letter;
     const d = dotPath(ctx, e, owned);
     if (!d || ctx.reduceMotion) { onArrive(); return; }
     const known = e.partition !== null && e.partition !== undefined;
@@ -1103,42 +1133,84 @@ const Diagram = (() => {
     requestAnimationFrame(step);
   }
 
+  /* A consumer's row works like a queue: an update comes in at the left
+     end of the line, the line is packed against the right end, and updates
+     leave only from the right end, oldest first, sliding the rest along.
+     Each chip keeps its element, so it moves rather than being redrawn. */
+  const CHIP_W = 27;
+
+  function chipSlotX(n, k) {
+    // The oldest (k = 0) sits in the rightmost slot.
+    return n.x + 10 + (CHIPS - 1 - k) * CHIP_W;
+  }
+
   function drawChips(svg, ctx, nodeId) {
     const row = svg.querySelector(`[data-seq="${nodeId}"]`);
     const n = ctx.placed.get(nodeId);
     if (!row || !n) return;
-    row.replaceChildren();
     const list = ctx.chips.get(nodeId) || [];
+    const y = n.y + 55;
     list.forEach((e, k) => {
-      const i = letterFor(ctx, e.order);
-      const flagged = e.flags.includes("gap") || e.flags.includes("order");
-      const x = n.x + 10 + k * 27;
-      const y = n.y + 55;
-      const chip = el("g", { class: `dg-chip${flagged ? " is-flagged" : ""}`,
-        style: `animation-delay: ${Math.max(0, (flagged ? FLAGGED_CHIP_MS : CHIP_MS) - 900 - (performance.now() - e.shown))}ms` });
-      chip.append(el("rect", { x, y, width: 25, height: 15, rx: 4, fill: KEY_COLOURS[i][0] }));
-      chip.append(el("text", { x: x + 12.5, y: y + 11, "text-anchor": "middle",
-        class: "dg-chip__text", fill: KEY_COLOURS[i][1] }, `${LETTERS[i]}${e.seq}${flagged ? "!" : ""}`));
-      if (flagged) indicator(chip, "seq-chip-flagged", eventTip(e, LETTERS[i]));
-      else indicator(chip, "seq-chip", eventTip(e, LETTERS[i]));
-      row.append(chip);
+      const x = chipSlotX(n, k);
+      if (!e.el) {
+        const i = e.letter;
+        const flagged = e.flags.includes("gap") || e.flags.includes("order");
+        const chip = el("g", { class: `dg-chip is-entering${flagged ? " is-flagged" : ""}` });
+        chip.append(el("rect", { x: 0, y: 0, width: 25, height: 15, rx: 4, fill: KEY_COLOURS[i][0] }));
+        chip.append(el("text", { x: 12.5, y: 11, "text-anchor": "middle",
+          class: "dg-chip__text", fill: KEY_COLOURS[i][1] }, `${LETTERS[i]}${e.seq}${flagged ? "!" : ""}`));
+        if (flagged) indicator(chip, "seq-chip-flagged", eventTip(e, LETTERS[i]));
+        else indicator(chip, "seq-chip", eventTip(e, LETTERS[i]));
+        chip.style.transform = `translate(${x - 6}px, ${y}px)`;
+        row.append(chip);
+        e.el = chip;
+        // Next frame, so the browser sees where it started from.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          chip.classList.remove("is-entering");
+          chip.style.transform = `translate(${e.x}px, ${y}px)`;
+        }));
+      } else {
+        e.el.style.transform = `translate(${x}px, ${y}px)`;
+      }
+      e.x = x;
     });
+  }
+
+  function leaveChip(e, n) {
+    const chip = e.el;
+    if (!chip) return;
+    chip.classList.add("is-leaving");
+    // A short slide: the rightmost slot ends a few pixels inside the card.
+    chip.style.transform = `translate(${e.x + 5}px, ${n.y + 55}px)`;
+    setTimeout(() => chip.remove(), 500);
+  }
+
+  /* Updates leave the right end in order once their time is up: a chip
+     whose time has come waits behind an older one still being held (a
+     flagged chip stays longer, so a gap can be pointed at). */
+  function drainChips(svg, ctx, nodeId) {
+    const list = ctx.chips.get(nodeId) || [];
+    const n = ctx.placed.get(nodeId);
+    clearTimeout(ctx.drains.get(nodeId));
+    const now = performance.now();
+    while (list.length && now >= list[0].due) leaveChip(list.shift(), n);
+    drawChips(svg, ctx, nodeId);
+    if (list.length) {
+      ctx.drains.set(nodeId, setTimeout(() => drainChips(svg, ctx, nodeId),
+        Math.max(50, list[0].due - now)));
+    }
   }
 
   function pushChip(svg, ctx, e) {
     const list = ctx.chips.get(e.node) || [];
-    e.shown = performance.now();
-    list.push(e);
-    while (list.length > CHIPS) list.shift();
-    ctx.chips.set(e.node, list);
-    drawChips(svg, ctx, e.node);
     const flagged = e.flags.includes("gap") || e.flags.includes("order");
-    setTimeout(() => {
-      const now = ctx.chips.get(e.node) || [];
-      if (!now.includes(e)) return;
-      ctx.chips.set(e.node, now.filter((x) => x !== e));
-      drawChips(svg, ctx, e.node);
-    }, flagged ? FLAGGED_CHIP_MS : CHIP_MS);
+    e.due = performance.now() + (flagged ? FLAGGED_CHIP_MS : CHIP_MS);
+    list.push(e);
+    ctx.chips.set(e.node, list);
+    const n = ctx.placed.get(e.node);
+    // A full row pushes its oldest out of the right end.
+    while (list.length > CHIPS) leaveChip(list.shift(), n);
+    drainChips(svg, ctx, e.node);
   }
 
   const STATUS = {
@@ -1246,7 +1318,12 @@ const Diagram = (() => {
       ctx.primed = true;
       const cutoff = (data.until || 0) - 2;
       for (const e of events) {
-        if (e.ts <= cutoff) { pushChip(svg, ctx, e); ctx.clock = Math.max(ctx.clock, e.ts); }
+        if (e.ts <= cutoff) {
+          e.letter = letterFor(ctx, e, owned);
+          releaseIfDone(ctx, e);
+          pushChip(svg, ctx, e);
+          ctx.clock = Math.max(ctx.clock, e.ts);
+        }
       }
     }
     const fresh = events.filter((e) => e.ts > ctx.clock);
@@ -1255,6 +1332,8 @@ const Diagram = (() => {
     for (const e of fresh) {
       ctx.clock = Math.max(ctx.clock, e.ts);
       const delay = Math.min(1500, (e.ts - first) * 1000);
+      e.letter = letterFor(ctx, e, owned);
+      releaseIfDone(ctx, e);
       launchDot(ctx, e, owned, delay, () => pushChip(svg, ctx, e));
     }
   }

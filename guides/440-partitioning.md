@@ -11,8 +11,15 @@ parallel.** Here the key is the order id.
 
 Press **Play**. It creates the partitioned queue `q.part.orders` (six
 partitions), starts **Fulfilment 1**, **2** and **3**, then the **Order
-Service**, which moves twelve orders along at a time. Every update carries
-a sequence number, `#1` to `#5`, so a consumer can tell when one is missing.
+Service**, which moves six orders along at a time, one in each partition.
+Every update carries a sequence number, `#1` to `#5`, so a consumer can tell
+when one is missing.
+
+Click the **Order Service** to change its **Pace**. **Clear** (six orders,
+two updates a second) is the easiest to follow: each lane carries one colour
+at a time. **Busy** (ten orders, five a second) is closer to real
+traffic: several keys share most partitions. Changing it restarts the order
+service, so orders in progress at that moment never finish.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
@@ -35,10 +42,13 @@ consumer. Each consumer says which partitions it owns: two each.
 Each coloured dot is one update a consumer handled, drawn a moment later
 along the path it took: from the order service, through its partition, to
 its consumer, where it is consumed. The letter and colour stand for the
-order. Follow one letter: it always takes the same lane to the same
-consumer. Under each consumer, the last few updates it handled show as
-`A3`, `C1` and so on, the order's letter and sequence number, rising one at
-a time.
+order while it is in flight; a finished order's letter goes to the next
+order in the same partition. Follow one letter: it always takes the same
+lane to the same consumer. Under each consumer, the last few updates it
+handled show as `A3`, `C1` and so on, the order's letter and sequence
+number. They come in at the left of the line and leave from the right end,
+oldest first. `A1` to the left of `A5` is one order delivered and the next
+one starting.
 
 Open a consumer's log from its node. Every line names the order, its
 sequence number, its key and `msg`, the broker's number for that message.
@@ -71,10 +81,11 @@ where you would meet it in production.
 
 1. **A consumer crashes, and its partitions move.** One consumer is killed
    (the diagram marks it). Its two lanes say "no owner", and their held
-   counts climb, because for 5 seconds (the rebalance delay) nothing reads
+   counts creep up, because for 5 seconds (the rebalance delay) nothing reads
    them. Then each of the other two consumers takes one, and the lane lines
-   swing over. The card shows one of them picking orders up part way, "picked
-   up O-... at #3". Every order still moves one number at a time. Reset
+   swing over. The card shows one of them, usually picking an order up part
+   way, "picked up O-... at #3"; sometimes the lane it took happens to start
+   a new order. Every order still moves one number at a time. Reset
    starts the crashed consumer, and 5 seconds later two lanes move back to it.
 2. **A fourth consumer joins.** Fulfilment 4 starts. For 5 seconds it owns
    nothing ("no partition: idle"), then the broker takes one lane from one of

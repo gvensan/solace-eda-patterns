@@ -20,7 +20,15 @@ Run with the dashboard's virtualenv, which has httpx and websockets:
 
     ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py [scenario-id ...]
 
-COCKPIT_URL overrides http://localhost:3000.
+COCKPIT_URL overrides http://localhost:3000. --set <name>=<value> chooses a
+scenario setting (for example --set pace=busy) before Play; every scenario
+that has that setting runs with it, and it is put back to its default after.
+
+Two things make a run meaningless, and fail it: another client changing
+something on the dashboard meanwhile (a Break it pressed in an open tab),
+and the machine sleeping, which stops the dashboard's timers while the
+clock this script waits on keeps going. Close the dashboard's tabs, and on
+a laptop run it under `caffeinate -i`.
 """
 
 import asyncio
@@ -43,6 +51,12 @@ RESET_SECONDS = float(os.environ.get("SMOKE_RESET_SECONDS", "12"))
 LOG_TAIL = int(os.environ.get("SMOKE_LOG_TAIL", "12"))
 
 problems: list = []
+
+# Sent with every request, so the dashboard's change log tells this run's
+# requests from anyone else's.
+CLIENT = f"smoke-{os.getpid()}"
+# More than this many seconds of sleep anywhere in the run fails it.
+SLEEP_TOLERANCE = 5.0
 
 
 def say(msg: str) -> None:
@@ -394,19 +408,76 @@ async def smoke(client, scenario) -> None:
         await check_cleanup(client, scenario)
 
 
-async def main(ids) -> int:
-    async with httpx.AsyncClient(base_url=BASE, timeout=30) as client:
+async def watch_for_sleep(slept: list) -> None:
+    """The wall clock runs on while the machine sleeps; the monotonic clock
+    (on macOS) does not, and neither do the dashboard's timers. A gap
+    between the two means the machine slept."""
+    wall, mono = time.time(), time.monotonic()
+    while True:
+        await asyncio.sleep(1)
+        gap = (time.time() - wall) - (time.monotonic() - mono)
+        if gap > SLEEP_TOLERANCE:
+            slept.append(gap)
+        wall, mono = time.time(), time.monotonic()
+
+
+async def check_interference(client, since: float) -> None:
+    changes = (await client.get("/api/activity", params={"since": since})).json()["changes"]
+    others = [c for c in changes if c["client"] != CLIENT]
+    for c in others[:5]:
+        fail(f"another client ({c['client']}) changed something during the run: {c['method']} {c['path']}")
+    if len(others) > 5:
+        fail(f"... and {len(others) - 5} more changes from other clients")
+
+
+async def apply_settings(client, scenarios, chosen: dict, default: bool = False) -> None:
+    for scenario in scenarios:
+        for name, spec in (scenario.get("settings") or {}).items():
+            if name in chosen:
+                value = spec["default"] if default else chosen[name]
+                resp = await client.put(f"/api/scenarios/{scenario['id']}/settings/{name}",
+                                        json={"value": value})
+                if resp.status_code >= 400:
+                    fail(f"{scenario['id']}: setting {name}={value}: {resp.text[:200]}")
+                elif not default:
+                    say(f"  {scenario['id']}: {name} = {value}")
+
+
+async def main(ids, chosen_settings) -> int:
+    started = time.time()
+    slept: list = []
+    sleeper = asyncio.create_task(watch_for_sleep(slept))
+    async with httpx.AsyncClient(base_url=BASE, timeout=30,
+                                 headers={"X-Workshop-Client": CLIENT}) as client:
         scenarios = (await client.get("/api/scenarios")).json()["scenarios"]
         chosen = [s for s in scenarios if not ids or s["id"] in ids]
         missing = set(ids) - {s["id"] for s in chosen}
         for sid in sorted(missing):
             fail(f"no scenario {sid!r}")
-        for scenario in chosen:
-            await smoke(client, scenario)
+        await apply_settings(client, chosen, chosen_settings)
+        try:
+            for scenario in chosen:
+                await smoke(client, scenario)
+        finally:
+            await apply_settings(client, chosen, chosen_settings, default=True)
+        await check_interference(client, started)
+    sleeper.cancel()
+    if slept:
+        fail(f"the machine slept for {sum(slept):.0f}s during the run, so timings are meaningless; "
+             "run it again under caffeinate -i")
 
     say(f"\nSmoke tested {len(chosen)} scenario(s), {len(problems)} problem(s).")
     return 1 if problems else 0
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main(sys.argv[1:])))
+    args, settings = [], {}
+    argv = sys.argv[1:]
+    while argv:
+        arg = argv.pop(0)
+        if arg == "--set" and argv:
+            name, _, value = argv.pop(0).partition("=")
+            settings[name] = value
+        else:
+            args.append(arg)
+    sys.exit(asyncio.run(main(args, settings)))

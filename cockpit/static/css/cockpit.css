@@ -1000,6 +1000,13 @@ a { color: var(--text-link); }
 .checklist__item.is-false { color: var(--text-muted); }
 .checklist__item.is-unknown .checklist__mark { color: var(--orange); }
 
+/* A setting's choices, one button each; the chosen one is filled. */
+.panel__choices {
+  display: flex;
+  gap: var(--space-2, 8px);
+  flex-wrap: wrap;
+}
+
 .panel__actions {
   display: flex;
   gap: var(--space-2);
@@ -1273,9 +1280,12 @@ a { color: var(--text-link); }
    own log is drawn with a red outline and a "!". */
 .dg-chip rect { stroke: #0b1622; stroke-width: 1; }
 .dg-chip.is-flagged rect { stroke: var(--status-danger); stroke-width: 2.25; }
-/* A chip fades out just before it leaves the row (diagram.js sets the delay). */
-.dg-chip { animation: dg-chip-leave 0.9s var(--ease-standard) forwards; }
-@keyframes dg-chip-leave { to { opacity: 0; } }
+/* Chips slide along the row as it drains to the right; a new one fades in
+   at the left end of the line and the oldest slides out of the right end. */
+.dg-chip { transition: transform 0.45s var(--ease-standard), opacity 0.45s var(--ease-standard); }
+.dg-chip.is-entering,
+.dg-chip.is-leaving { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .dg-chip { transition: none; } }
 
 .dg-node[data-idle] .dg-node__sub { fill: var(--orange); }
 .dg-node[data-partitioned="true"][data-status="running"]:not([data-idle]) .dg-node__sub { fill: var(--green-bright); }
