@@ -45,6 +45,7 @@ host with Go, a C toolchain, Terraform and Python (see "Local development").
 ```bash
 python3 cockpit/scripts/check_scenarios.py        # validate every scenario.yaml; run after any change
 ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py <id>   # Play, each Break it and Reset, Cleanup, Clear, Play again
+${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/browser_pass.py <id>   # headless page pass: Play, cards, Cleanup, screenshots
 bash cockpit/apps/build.sh                        # rebuild the Go binary (run.sh also rebuilds when stale)
 ./dev.sh start | stop | restart | status | logs | check <id>   # on a host machine (see Local development)
 pkill -TERM -f "[u]vicorn cockpit.app"; sleep 4; bash cockpit/start_cockpit.sh   # restart inside a container
@@ -204,6 +205,37 @@ names and links); `grep -rn "<old-id>" cockpit guides README.md` finds them.
    well.
 7. Do this on a Standard edition broker of the pinned version
    (`setup_broker.sh`), not only on whatever broker you have locally.
+
+## Working in waves
+
+Scenarios are built in waves, several in a row, without stopping for review
+between them.
+
+**Done, per scenario:**
+
+- `check_scenarios.py` reports 0 problems.
+- `smoke.py <id>` passes, with an `expect:` block on every card (under
+  `caffeinate -i`, with no dashboard tab open).
+- `browser_pass.py <id>` passes: Play, each card's Break it and Reset, and
+  Cleanup, with no console errors, failed requests or API errors.
+- `guides/NNN-<id>.md` has the four parts (Run it, On the broker, Break it,
+  Try this), and any new indicator has hover text and a tagged row in
+  `guides/000-reading-the-dashboard.md`.
+- One commit for the scenario.
+
+**Stop and report** only when a spike contradicts the brief, a change to
+shared code is needed, or a check fails twice for the same reason.
+Otherwise carry on to the next scenario.
+
+**Shared features are frozen during a wave.** No new dashboard or diagram
+features. An idea goes in `docs/polish.md`, one line each.
+
+**Design and build in one pass** for direct-messaging patterns: a half-page
+`DESIGN.md` in the scenario folder, then build. Spike first only where a
+Solace behaviour is uncertain, and record it in `docs/spikes.md`.
+
+**Reports are short:** the commit list, deviations from the design, and
+anything not verified. No recap.
 
 ## Writing style
 

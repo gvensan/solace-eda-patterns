@@ -1,0 +1,3 @@
+# Tools for building the workshop, not for running it: the scripted browser
+# pass (cockpit/scripts/browser_pass.py).
+playwright==1.49.1
