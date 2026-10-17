@@ -175,7 +175,11 @@ async def stop_action(scenario_id: str, action_id: str):
     key = f"{scenario_id}:{action_id}"
     run = manager.get(key)
     if run is None:
-        raise HTTPException(404, f"no run for {key}")
+        # Never started: stopping it is already done. A failure card may
+        # stop several apps, not all of which were running.
+        if registry.get(scenario_id) is None or registry.get(scenario_id).action(action_id) is None:
+            raise HTTPException(404, f"unknown action: {key}")
+        return {"key": key, "state": "idle"}
     await manager.stop(key)
     return run.status()
 
