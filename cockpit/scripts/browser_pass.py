@@ -50,7 +50,12 @@ def badge_of(card) -> str:
 def run(page, sid: str, problems: list) -> None:
     folder = OUT / sid
     folder.mkdir(parents=True, exist_ok=True)
-    shot = lambda name: page.screenshot(path=str(folder / f"{name}.png"), full_page=True)
+    def shot(name: str) -> None:
+        """The page as it stands, and the diagram on its own beside it."""
+        page.screenshot(path=str(folder / f"{name}.png"), full_page=True)
+        figure = page.locator(".dg-figure")
+        if figure.count():
+            figure.first.screenshot(path=str(folder / f"{name}-diagram.png"))
 
     page.goto(f"{BASE}/#{sid}")
     page.wait_for_selector(".dg-figure", timeout=15000)
