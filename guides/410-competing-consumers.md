@@ -70,4 +70,4 @@ log.
   customer is served by different workers, in whatever order they finish.
   Partitioning is the pattern that keeps one customer's messages together.
 
-Next: [Partitioning](440-partitioning.md).
+Next: [Consumer Groups](420-consumer-groups.md).

@@ -1,0 +1,15 @@
+# What the consumer-groups scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.cg	{vpn}/cp-cg
+solacebroker_msg_vpn_acl_profile.cg	{vpn}/acl-cg
+
+solacebroker_msg_vpn_queue.group["search"]	{vpn}/q.cg.search
+solacebroker_msg_vpn_queue.group["alerts"]	{vpn}/q.cg.alerts
+solacebroker_msg_vpn_queue_subscription.group["search"]	{vpn}/q.cg.search/cg%2Fcatalog%2Fprice%2Fchanged%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.group["alerts"]	{vpn}/q.cg.alerts/cg%2Fcatalog%2Fprice%2Fchanged%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.cg["catalog"]	{vpn}/svc-cg-catalog
+solacebroker_msg_vpn_client_username.cg["search"]	{vpn}/svc-cg-search
+solacebroker_msg_vpn_client_username.cg["alerts"]	{vpn}/svc-cg-alerts

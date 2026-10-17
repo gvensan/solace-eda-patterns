@@ -1,0 +1,374 @@
+id: consumer-groups
+# Category 4 of the pattern guide (Consumer Scalability Patterns), second pattern.
+order: 420
+eyebrow: Consumer Scalability Patterns
+title: Consumer Groups
+summary: >
+  A product catalogue. Every price change goes to two teams: search updates
+  the search index, and alerts emails customers watching a product. Each
+  team needs every price change, and within a team the members share the
+  work. Solace has no consumer group object: each group here is its own
+  queue, subscribed to the same topic, shared by the group's members.
+
+objectives:
+  - See every price change reach both groups, and one member of each handle it
+  - See a group that goes offline leave the other untouched, then catch up on everything it missed
+  - See a member beyond its queue's partitions bind without error and receive nothing
+  - Learn how a queue per group stands in for a consumer group
+
+run:
+  - apply
+  - build
+  - search-1
+  - search-2
+  - alerts-1
+  - catalog
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The catalogue publishes each price change once. Two queues subscribe to
+    its topic, one per group, so each group gets its own copy and keeps its
+    own backlog. The members of a group share its queue; each queue has two
+    partitions, so a group of two splits the products between them.
+  duration: 2.4
+  liveWhen: catalog
+  nodes:
+    - id: catalog
+      label: Catalogue
+      sublabel: 4 price changes a second
+      kind: app
+      col: 0
+      action: catalog
+      requires:
+        - label: svc-cg-catalog
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-catalog
+    - id: broker
+      label: Solace Broker
+      sublabel: a queue per group
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: search
+          label: q.cg.search
+          depth: { queue: q.cg.search, unit: waiting }
+        - id: alerts
+          label: q.cg.alerts
+          depth: { queue: q.cg.alerts, unit: waiting }
+      provides:
+        - label: q.cg.search
+          group: search
+          semp: /msgVpns/{vpn}/queues/q.cg.search
+        - label: q.cg.alerts
+          group: alerts
+          semp: /msgVpns/{vpn}/queues/q.cg.alerts
+        - label: cp-cg
+          semp: /msgVpns/{vpn}/clientProfiles/cp-cg
+        - label: acl-cg
+          semp: /msgVpns/{vpn}/aclProfiles/acl-cg
+    - id: search1
+      label: Search 1
+      sublabel: search group
+      kind: app
+      col: 2
+      action: search-1
+      flowOn: { queue: q.cg.search, client: cg-search-1 }
+      requires:
+        - label: svc-cg-search
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-search
+    - id: search2
+      label: Search 2
+      sublabel: search group
+      kind: app
+      col: 2
+      action: search-2
+      flowOn: { queue: q.cg.search, client: cg-search-2 }
+      requires:
+        - label: svc-cg-search
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-search
+    - id: alerts1
+      label: Alerts 1
+      sublabel: alerts group
+      kind: app
+      col: 2
+      action: alerts-1
+      flowOn: { queue: q.cg.alerts, client: cg-alerts-1 }
+      requires:
+        - label: svc-cg-alerts
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-alerts
+    - id: alerts2
+      label: Alerts 2
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: alerts-2
+      flowOn: { queue: q.cg.alerts, client: cg-alerts-2 }
+      requires:
+        - label: svc-cg-alerts
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-alerts
+    - id: alerts3
+      label: Alerts 3
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: alerts-3
+      flowOn: { queue: q.cg.alerts, client: cg-alerts-3 }
+      requires:
+        - label: svc-cg-alerts
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cg-alerts
+  flows:
+    - { from: catalog, to: broker, label: price changes, delay: 0 }
+    - { from: broker, to: search1, via: search, delay: 0.8 }
+    - { from: broker, to: search2, via: search, delay: 0.9 }
+    - { from: broker, to: alerts1, via: alerts, delay: 1.0 }
+    - { from: broker, to: alerts2, via: alerts, delay: 1.1 }
+    - { from: broker, to: alerts3, via: alerts, delay: 1.2 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.cg.search and q.cg.alerts, one queue per group, both
+      subscribed to the price changes and partitioned in two, and the
+      client profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: search-1
+    label: Start search member 1
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, member, --group, search, --role, search-1, --client-name, cg-search-1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A member of the search group: shares q.cg.search with search member 2.
+
+  - id: search-2
+    label: Start search member 2
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, member, --group, search, --role, search-2, --client-name, cg-search-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The second member of the search group.
+
+  - id: alerts-1
+    label: Start alerts member 1
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, member, --group, alerts, --role, alerts-1, --client-name, cg-alerts-1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The alerts group's one member at Play: it reads all of q.cg.alerts.
+
+  - id: alerts-2
+    label: Start alerts member 2
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, member, --group, alerts, --role, alerts-2, --client-name, cg-alerts-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A second alerts member. With two members, each owns one of the
+      queue's two partitions.
+
+  - id: alerts-3
+    label: Start alerts member 3
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, member, --group, alerts, --role, alerts-3, --client-name, cg-alerts-3]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      A third alerts member, one more than q.cg.alerts has partitions.
+
+  - id: wait-alerts-two
+    label: Wait for the alerts group to share its partitions
+    kind: process
+    cmd: [bash, ../../scripts/wait_partitions.sh, q.cg.alerts, "2"]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Waits until the broker has given each of two alerts members one
+      partition, so the next member joins a group that already has as many
+      members as partitions.
+
+  - id: catalog
+    label: Start the catalogue
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cg, catalog]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes four price changes a second across 20 products, each keyed
+      by product.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, consumer-groups]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes both queues and the access control for this scenario. Any
+      price change still on a queue goes with it.
+
+failure_modes:
+  - id: group-offline
+    title: The alerts group goes offline
+    breaks: >
+      Every member of the alerts group stops, so nobody reads q.cg.alerts.
+    watch: >
+      The card shows the search group. It carries on as if nothing had
+      happened: every price change still arrives. In the diagram, the
+      alerts queue starts counting price changes waiting, and the search
+      queue does not: each group has its own copy. Reset starts the alerts
+      member again. It works through everything it missed, in order per
+      product, each change marked "late by" how long it waited. The alerts
+      group misses nothing; it is just late.
+    why: >
+      Both queues subscribe to the same topic, so the broker stores a copy
+      of each price change on each. A queue keeps its messages until its
+      own consumers take them, whatever happens to the other queue. That is
+      what makes the groups independent: one can stop, slow down or fall
+      behind, and the other is not affected.
+    real_world: >
+      A reporting team taking its consumers down for a deploy while the
+      checkout team carries on. Each team's backlog is its own, and its own
+      queue limits decide how long it can be away.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: queues and topic subscriptions"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+    node: {role: active, queue: q.cg.alerts}
+    logs: {role: active, queue: q.cg.search}
+    trigger:
+      - stop: alerts-1
+      - stop: alerts-2
+      - stop: alerts-3
+    reset:
+      - start: alerts-1
+    expect:
+      break:
+        # Long enough for the alerts backlog to be several seconds old.
+        settle: 8
+        within: 10
+        logs:
+          - log: {role: active, queue: q.cg.search}
+            has: ["SKU-\\d+ #\\d+ now"]
+      reset:
+        within: 25
+        logs:
+          - log: {role: active, queue: q.cg.alerts}
+            has: ["alerts group, late by \\d+s"]
+            lacks: ["GAP", "OUT OF ORDER"]
+
+  - id: member-beyond-partitions
+    title: The alerts group adds more members than it has partitions
+    breaks: >
+      Alerts member 2 starts, and once the broker has given it a partition,
+      alerts member 3 starts too: three members on a queue with two
+      partitions.
+    watch: >
+      The card shows alerts member 3. It connects and binds to q.cg.alerts
+      without any error, and then receives nothing. In the diagram it reads
+      "standby", in a dashed box: the broker reports it inactive, because
+      both partitions belong to the other two members. Nothing fails; the
+      third member simply does not help. Reset stops members 2 and 3.
+    why: >
+      Each partition of a partitioned queue belongs to one consumer at a
+      time, so a group can only use as many members as its queue has
+      partitions. A member beyond that binds normally and stands by, and
+      takes over a partition if another member goes away. Members 2 and 3 are
+      started one after the other so the result is the same every time:
+      with the two partitions already taken, the broker has nothing to give
+      the third.
+    real_world: >
+      Scaling a group out to handle more load, and seeing no improvement.
+      Size each group's queue for the most members it will run. Kafka works
+      the same way: consumers in a group beyond its topic's partitions sit
+      idle.
+    docs:
+      - label: "Broker: message distribution with partitioned queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partitioned-Queue-Messaging.htm
+      - label: "Broker: partition rebalancing"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Rebalancing.htm
+    node: alerts3
+    logs: alerts-3
+    trigger:
+      - start: alerts-2
+      - run: wait-alerts-two
+      - start: alerts-3
+    reset:
+      - stop: alerts-3
+      - stop: alerts-2
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: alerts-3
+            has: ["bound to queue q.cg.alerts"]
+            lacks: ["SKU-"]
+          - log: alerts-2
+            has: ["SKU-\\d+ #\\d+ now"]
+      reset:
+        within: 10
+        logs:
+          - log: alerts-3
+            has: ["stopped after handling 0 price changes"]
+
+inspect:
+  - label: Queues, one per group
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.cg.*
+    columns: [queueName, partitionCount, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: The queues are not on the broker. Press Play, or run Apply configuration.
+  - label: Which member owns which partition
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=partitionQueueName==q.cg.*
+    columns: [partitionQueueName, partitionNumber, partitionClientName, spooledMsgCount]
+    ui_hint: Manager → Queues → q.cg.alerts → Partitions
+    empty: The queues are not on the broker, so they have no partitions yet. Press Play.
+  - label: Members of the alerts group
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.cg.alerts/txFlows?count=10
+    # A member that owns no partition reads inactive: a standby.
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount]
+    ui_hint: Manager → Queues → q.cg.alerts → Consumers
+    empty: No member is bound to q.cg.alerts right now. Press Play, or start an alerts member.

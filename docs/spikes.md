@@ -302,8 +302,10 @@ its `flowOn.client`.
 - With 2 partitions and 3 consumers bound, two consumers received 15
   messages each and the third received none: a partition belongs to one
   consumer, so consumers beyond the partition count sit idle.
-- Every consumer on a partitioned queue reports `activityState`
-  `active-consumer`, so the dashboard's roles treat them all as active.
+- Every consumer on a partitioned queue that owns a partition reports
+  `activityState` `active-consumer`. One that owns none reports `inactive`
+  (corrected in section 14; this line first said every consumer reads
+  active).
 - The broker keeps each partition as an internal queue, `#pq/<id>/0000N`,
   listed in the monitor tree with `partitionNumber` and `partitionQueueName`.
   Its `txFlows` are empty, but the partition's own monitor entry names its
@@ -534,4 +536,32 @@ gives the default as drop-latest with a buffer of 50.
 Not measured: what the broker does when a direct subscriber falls so far
 behind that its TCP connection backs up. With a buffer of 20 the API drops
 first, so the scenario never gets there.
+
+## 14. Consumer Groups
+
+Tested on 10.26.0 with the Go API v1.10.0.
+
+**Direct shared subscriptions** (`BuildWithShareName`, which subscribes as
+`#share/<name>/<topic>`). Two receivers sharing the name `grp` and one with
+the name `other`, all on `spk/cgs/>`, while 150 direct messages were
+published: the two `grp` members received 81 and 69, and the `other`
+member all 150. So a share name is a group for direct messages: each
+group gets every message, and its members split them, with nothing
+stored.
+
+**A member beyond the partitions reports `inactive`.** This corrects
+section 9. On `q.cg.alerts` (2 partitions), with alerts-1 and alerts-2
+owning one each, alerts-3 bound and reported `activityState` `inactive`,
+with no acked or unacked counts. The documentation agrees: excess
+consumers "can act as standbys: if an active consumer fails, one of them
+becomes active". So the dashboard's existing reading, standby, is right
+for it.
+
+**A member joining with fewer members than partitions** also reports
+`inactive` until the broker gives it a partition. Polled once a second
+after alerts-2 joined alerts-1 (which owned both partitions): `inactive`
+for 4 seconds; at +4 s it owned a partition and still read `inactive`; at
++5 s `active-consumer`. So `activityState` follows partition ownership, and
+a consumer reading active while owning no partition lasts at most a
+moment.
 

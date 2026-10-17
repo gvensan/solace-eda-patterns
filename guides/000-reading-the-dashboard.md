@@ -36,7 +36,7 @@ name:
 | Label | What it means |
 | --- | --- |
 | active consumer | The broker is delivering the queue's messages to this app. |
-| standby (dashed box) | The app is bound to the queue, but the broker is delivering to another consumer. It gets nothing until that one goes away. |
+| standby (dashed box) | The app is bound to the queue, but the broker is delivering to another consumer. It gets nothing until that one goes away. On a partitioned queue, it is a consumer that owns no partition: one more than the queue has partitions, or one waiting for the broker to give it one. |
 | active, not acking | The broker still treats this app as an active consumer, but it is holding messages and has acknowledged none for several seconds. The broker sends it nothing more, and the messages it holds wait until it disconnects. On a shared queue the other consumers carry on; on an exclusive queue nothing moves. |
 
 ## Partitioned queues
