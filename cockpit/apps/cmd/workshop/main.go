@@ -22,6 +22,7 @@ import (
 	"solace-workshop/apps/scenarios/p2p"
 	"solace-workshop/apps/scenarios/partition"
 	"solace-workshop/apps/scenarios/pubsub"
+	"solace-workshop/apps/scenarios/reqreply"
 	"solace-workshop/apps/scenarios/shock"
 	"solace-workshop/apps/scenarios/streaming"
 	"solace-workshop/apps/scenarios/topics"
@@ -30,6 +31,8 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"rr till":           reqreply.Till,
+	"rr pricing":        reqreply.Pricing,
 	"ht stores":         topics.Stores,
 	"ht team":           topics.Team,
 	"es bikes":          streaming.Bikes,

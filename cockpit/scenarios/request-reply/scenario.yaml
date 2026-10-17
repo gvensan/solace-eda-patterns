@@ -1,0 +1,282 @@
+id: request-reply
+# Category 2 of the pattern guide (Communication Patterns), third pattern.
+order: 230
+eyebrow: Communication Patterns
+title: Request-Reply
+summary: >
+  A supermarket till needs the price of an item before it can ring it up,
+  so it asks and waits for the answer. On Solace that is two direct
+  messages: the request goes to whoever is subscribed to the request topic
+  right now, and the reply comes back on a topic made for the asker. No
+  reply within the timeout is an answer too, and the till is told.
+
+objectives:
+  - See a request answered, and who answered it, in a few milliseconds
+  - See what the asker is told when nobody is there to answer
+  - See a reply that arrives after the asker gave up, and what happens to it
+  - Learn why request-reply on Solace is direct messaging, and what that means
+
+run:
+  - apply
+  - build
+  - pricing
+  - till
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The till publishes a request to rr/pricing/price/request/v1/<sku> and
+    waits up to 2 seconds. The pricing service, subscribed to that topic,
+    replies on a topic the till's API made for the reply. Both are direct
+    messages: nothing is stored on the way.
+  duration: 2.4
+  liveWhen: till
+  nodes:
+    - id: till
+      label: Till
+      sublabel: asks a price a second
+      kind: app
+      col: 0
+      action: till
+      requires:
+        - label: svc-rr-tills
+          semp: /msgVpns/{vpn}/clientUsernames/svc-rr-tills
+    - id: broker
+      label: Solace Broker
+      sublabel: routes request and reply
+      kind: broker
+      col: 1
+      action: apply
+      provides:
+        - label: cp-rr
+          semp: /msgVpns/{vpn}/clientProfiles/cp-rr
+        - label: acl-rr
+          semp: /msgVpns/{vpn}/aclProfiles/acl-rr
+    - id: pricing
+      label: Pricing Service
+      sublabel: answers in 20 ms
+      kind: app
+      col: 2
+      action: pricing
+      requires:
+        - label: svc-rr-pricing
+          semp: /msgVpns/{vpn}/clientUsernames/svc-rr-pricing
+  flows:
+    - { from: till, to: broker, label: request, delay: 0 }
+    - { from: broker, to: pricing, label: rr/pricing/price/request/v1/<sku>, delay: 0.6 }
+    - { from: pricing, to: broker, label: reply, delay: 1.2 }
+    - { from: broker, to: till, label: reply topic, delay: 1.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the client profile, ACL profile and usernames for this
+      scenario. There are no queues: request-reply is direct.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: pricing
+    label: Start the pricing service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, rr, pricing, --client-name, rr-pricing]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to the request topic and replies to each request after
+      about 20 ms.
+
+  - id: pricing-slow
+    label: Start the pricing service, slow
+    kind: process
+    cmd: [bash, ../../apps/run.sh, rr, pricing, --client-name, rr-pricing, --work, 3s]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same service, taking 3 seconds per answer: longer than the till
+      waits. Stop the pricing service first.
+
+  - id: pricing-2
+    label: Start a second pricing service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, rr, pricing, --role, pricing-2, --client-name, rr-pricing-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A second copy, subscribed to the same request topic.
+
+  - id: till
+    label: Start the till
+    kind: process
+    cmd: [bash, ../../apps/run.sh, rr, till, --client-name, rr-till]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Asks the price of a random item once a second and waits up to 2
+      seconds for each reply.
+
+  - id: kill-pricing
+    label: Crash the pricing service
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, rr-pricing, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the pricing service outright (SIGKILL), and returns once it has
+      gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, request-reply]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the access control for this scenario.
+
+failure_modes:
+  - id: pricing-down
+    title: The pricing service goes down
+    breaks: >
+      The pricing service is killed. The till keeps asking.
+    watch: >
+      The card shows the till. Each request now ends, after 2 seconds, with
+      the API's timeout error instead of a price. Nothing is queued for the
+      pricing service: a direct request reaches only a subscriber that is
+      there when it is sent, so the requests made while it was down are
+      simply unanswered. Reset starts the pricing service, and the next
+      request is answered.
+    why: >
+      Request-reply in the Go API is built on direct messages. The request
+      is published to a topic, delivered to whoever is subscribed at that
+      moment, and kept for no one. The API waits for a reply on a topic it
+      made for the asker, and when the timeout passes it calls the handler
+      with an error. The asker decides what to do: retry, fall back, or
+      fail.
+    real_world: >
+      A lookup service restarting, a network partition. The asker always
+      needs a timeout and a plan for it; with direct messaging there is no
+      broker-side retry. For requests that must be served eventually, the
+      request goes on a queue and the reply is a separate event.
+    docs:
+      - label: "Go API: request-reply messaging"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-API-Request-Reply.htm
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+    node: pricing
+    logs: till
+    trigger:
+      - run: kill-pricing
+    reset:
+      - start: pricing
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: pricing
+            has: ["exited with code -9"]
+          - log: till
+            has: ["request #\\d+ for SKU-\\d+: .*(?i:time ?out|timed out)"]
+      reset:
+        within: 15
+        logs:
+          - log: till
+            has: ["answered by pricing in \\d+ ms"]
+
+  - id: pricing-slow
+    title: The pricing service is slow
+    breaks: >
+      The pricing service restarts taking 3 seconds per answer, longer than
+      the till waits.
+    watch: >
+      The card shows the till. Every request times out after 2 seconds. A
+      second later the pricing service's log says it replied: the reply
+      arrived after the till had given up, and the till's API discarded it
+      without a word. Reset restarts the pricing service at normal speed.
+    why: >
+      The timeout is the asker's. Once it passes, the API reports the error
+      and stops waiting for that request; a reply that comes later has no
+      one waiting for it and is dropped. The replier does not know: it
+      published a direct reply, and direct replies are not acknowledged.
+    real_world: >
+      A service whose answers slow down under load, so that every answer
+      is late and every asker retries, which adds load. Timeouts need to
+      match what the replier can do, and the replier should know when it
+      no longer matters.
+    docs:
+      - label: "Go API: request-reply messaging"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-API-Request-Reply.htm
+      - label: "Go API: publishing direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Publish.htm
+    node: pricing
+    logs: till
+    trigger:
+      - stop: pricing
+      - start: pricing-slow
+    reset:
+      - stop: pricing-slow
+      - start: pricing
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: till
+            has: ["request #\\d+ for SKU-\\d+: .*(?i:time ?out|timed out)"]
+          - log: pricing-slow
+            has: ["replied"]
+      reset:
+        settle: 5
+        within: 12
+        logs:
+          - log: till
+            has: ["answered by pricing in \\d+ ms"]
+            lacks: ["(?i:time ?out|timed out)"]
+
+inspect:
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==rr-*
+    # The till's dataRxMsgCount is its requests, dataTxMsgCount the
+    # replies it got; the pricing service's are the other way round.
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
+  - label: What the till subscribed to
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients/rr-till/subscriptions
+    # The reply topic the API made for the till, with its client name in it.
+    columns: [subscriptionTopic]
+    ui_hint: Manager → Clients → rr-till → Subscriptions
+    empty: The till is not connected. Press Play, or start the till.

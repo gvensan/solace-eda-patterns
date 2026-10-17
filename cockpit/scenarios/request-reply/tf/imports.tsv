@@ -1,0 +1,9 @@
+# What the request-reply scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.rr	{vpn}/cp-rr
+solacebroker_msg_vpn_acl_profile.rr	{vpn}/acl-rr
+
+# Client usernames
+solacebroker_msg_vpn_client_username.rr["tills"]	{vpn}/svc-rr-tills
+solacebroker_msg_vpn_client_username.rr["pricing"]	{vpn}/svc-rr-pricing

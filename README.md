@@ -37,6 +37,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 000 | [Reading the dashboard](guides/000-reading-the-dashboard.md) | | What every dot, count and label on the page means |
 | 210 | [Publish-Subscribe](guides/210-publish-subscribe.md) | Communication Patterns | One event, a copy for every subscriber; what a subscriber misses while away; two copies of a subscriber double the work |
 | 220 | [Point-to-Point](guides/220-point-to-point.md) | Communication Patterns | One sender, one named queue, one receiver; what the queue holds while the receiver is away |
+| 230 | [Request-Reply](guides/230-request-reply.md) | Communication Patterns | Ask and wait, with a timeout; nobody there to answer; a reply that comes too late |
 | 240 | [Event Streaming](guides/240-event-streaming.md) | Communication Patterns | A consumer's position and state in an ordered stream; resuming after a crash; joining late with no history |
 | 310 | [Hierarchical Topics](guides/310-hierarchical-topics.md) | Consumption Patterns | Topic levels as a contract; wildcard slices; a subscription that miscounts, a publisher that adds a level |
 | 330 | [Guaranteed Delivery](guides/330-guaranteed-delivery.md) | Consumption Patterns | The broker confirms what it stored; the consumer acknowledges what it handled and skips what it has seen; refused purchases kept and resent |

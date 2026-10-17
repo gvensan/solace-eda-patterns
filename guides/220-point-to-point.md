@@ -68,4 +68,4 @@ where you would meet it in production.
   `cockpit/scenarios/point-to-point/tf/queues.tf` to 5 and press **Play**. The
   same outage now lasts about two minutes before anything is refused.
 
-Next: [Guaranteed Delivery](330-guaranteed-delivery.md).
+Next: [Request-Reply](230-request-reply.md).
