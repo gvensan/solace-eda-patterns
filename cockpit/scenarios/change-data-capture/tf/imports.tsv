@@ -1,0 +1,12 @@
+# What the change-data-capture scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.cdc	{vpn}/cp-cdc
+solacebroker_msg_vpn_acl_profile.cdc	{vpn}/acl-cdc
+
+solacebroker_msg_vpn_queue.search	{vpn}/q.cdc.search
+solacebroker_msg_vpn_queue_subscription.search	{vpn}/q.cdc.search/cdc%2Finventory%2Fstock%2Fchanged%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.cdc["connector"]	{vpn}/svc-cdc-connector
+solacebroker_msg_vpn_client_username.cdc["search"]	{vpn}/svc-cdc-search

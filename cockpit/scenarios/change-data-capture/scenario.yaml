@@ -1,0 +1,309 @@
+id: change-data-capture
+# Category 1 of the pattern guide (Event Generation Patterns), third pattern.
+order: 130
+eyebrow: Event Generation Patterns
+title: Change Data Capture
+summary: >
+  A warehouse's inventory app is old, and nobody wants to change it. It
+  writes stock changes to its own database and knows nothing about events.
+  A change data capture connector reads the database's log of committed
+  changes and publishes an event for each one, and the search index keeps
+  its stock figures from those events. The inventory app is not touched.
+
+objectives:
+  - See every database change become an event, with no change to the app that wrote it
+  - See the connector resume from its saved position after a crash, with nothing missed
+  - See a connector that lost its position publish old changes again, and the consumer ignore them
+  - Learn why change data capture delivers at least once
+
+run:
+  - apply
+  - build
+  - search
+  - connector
+  - inventory
+
+cleanup:
+  - destroy
+  - forget-database
+
+diagram:
+  caption: >
+    The inventory app writes to its database and nothing else. The
+    connector reads the database's change log in order and publishes each
+    change to cdc/inventory/stock/changed/v1/<sku>. q.cdc.search takes them
+    for the search index.
+  duration: 2.4
+  liveWhen: connector
+  nodes:
+    - id: inventory
+      label: Inventory App
+      sublabel: writes to its database only
+      kind: app
+      col: 0
+      action: inventory
+    - id: connector
+      label: CDC Connector
+      sublabel: reads the change log
+      kind: app
+      col: 0
+      action: connector
+      requires:
+        - label: svc-cdc-connector
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cdc-connector
+    - id: broker
+      label: Solace Broker
+      sublabel: one event per change
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: search
+          label: q.cdc.search
+          depth: { queue: q.cdc.search, unit: waiting }
+      provides:
+        - label: q.cdc.search
+          group: search
+          semp: /msgVpns/{vpn}/queues/q.cdc.search
+        - label: cp-cdc
+          semp: /msgVpns/{vpn}/clientProfiles/cp-cdc
+        - label: acl-cdc
+          semp: /msgVpns/{vpn}/aclProfiles/acl-cdc
+    - id: searchapp
+      label: Search Index
+      sublabel: stock per SKU
+      kind: app
+      col: 2
+      action: search
+      flowOn:
+        queue: q.cdc.search
+        client: cdc-search
+      requires:
+        - label: svc-cdc-search
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cdc-search
+  flows:
+    - { from: connector, to: broker, label: stock changed, delay: 0 }
+    - { from: broker, to: searchapp, via: search, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.cdc.search, and the client profile, ACL profile and
+      usernames for the connector and the search index. The inventory app
+      needs none.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: search
+    label: Start the search index
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cdc, search, --client-name, cdc-search]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.cdc.search and keeps the stock per SKU. It applies a change
+      only if it is newer than the last one it applied for that SKU.
+
+  - id: connector
+    label: Start the CDC connector
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cdc, connector, --client-name, cdc-connector]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads the inventory database's change log from its saved position,
+      publishes each change, and saves the position once the broker has
+      accepted it.
+
+  - id: connector-from-start
+    label: Start the CDC connector with no saved position
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cdc, connector, --client-name, cdc-connector, --from-start]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same connector, ignoring its saved position as if it had lost it:
+      it reads the change log from the first change. Stop the connector
+      first.
+
+  - id: inventory
+    label: Start the inventory app
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cdc, inventory]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Sells or restocks something every second and writes each change to its
+      database. It does not connect to the broker.
+
+  - id: kill-connector
+    label: Crash the CDC connector
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, cdc-connector, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the connector outright (SIGKILL), and returns once it has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, change-data-capture]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: forget-database
+    label: Delete the inventory database
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cdc, inventory, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes the inventory database and the connector's saved position, so
+      the next Play starts with a new database.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and access control for this scenario.
+
+failure_modes:
+  - id: connector-crash
+    title: The connector crashes
+    breaks: >
+      The CDC connector is killed. The inventory app keeps writing.
+    watch: >
+      The card shows the connector. Open the inventory app's log: it carries
+      on, change after change, and knows nothing. The search index gets no
+      new changes. Reset starts the connector: "saved position found:
+      resuming after change #N", then every change written while it was
+      down, in order, and the search index catches up with no gap.
+    why: >
+      The database keeps its change log whether or not anyone reads it. The
+      connector saves how far it has got after the broker accepts each
+      change, so after a crash it carries on from there. The source
+      application is not involved at any point, which is why change data
+      capture suits systems nobody wants to modify.
+    real_world: >
+      Debezium and similar tools reading the PostgreSQL write-ahead log or
+      the MySQL binlog. The database keeps its log for a limited time, so a
+      connector down for too long can find the changes it needs already
+      gone, and has to start again from a full snapshot.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Guaranteed messages"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Guaranteed-Messages.htm
+    node: connector
+    logs: connector
+    trigger:
+      - run: kill-connector
+    reset:
+      - start: connector
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: connector
+            has: ["exited with code -9"]
+          - log: inventory
+            has: ["change #\\d+ written to the database"]
+      reset:
+        within: 15
+        logs:
+          - log: connector
+            has: ["saved position found: resuming after change #\\d+", "change #\\d+ published"]
+          - log: search
+            has: ["SKU-\\d+ shows \\d+ in stock"]
+
+  - id: connector-lost-position
+    title: The connector loses its saved position
+    breaks: >
+      The connector restarts without its saved position and reads the
+      change log from the first change.
+    watch: >
+      The card shows the search index. Every change since the start is
+      published again, and the search index says so: "change #12 for SKU-03
+      again: already applied, ignored". Its stock figures do not move
+      backwards, because it compares each change's number with the last one
+      it applied. Reset starts the normal connector, which resumes from the
+      position the other one saved.
+    why: >
+      A connector saves its position after publishing, so after a crash at
+      the wrong moment, or a lost position, it publishes some changes again.
+      Change data capture is at least once. Each change carries the
+      database's own sequence number, which is what lets a consumer tell a
+      repeat from a new change.
+    real_world: >
+      A connector redeployed with its offsets reset, or restored from an
+      old backup, sends hours of changes again. Consumers that apply a
+      change blindly (add 1 to a counter, send an email) do it twice.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Guaranteed messages"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Guaranteed-Messages.htm
+    node: searchapp
+    logs: search
+    trigger:
+      - stop: connector
+      - start: connector-from-start
+    reset:
+      - stop: connector-from-start
+      - start: connector
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: connector-from-start
+            has: ["no saved position: reading the change log from the first change"]
+          - log: search
+            has: ["change #\\d+ for SKU-\\d+ again: already applied, ignored"]
+      reset:
+        within: 15
+        logs:
+          - log: connector
+            has: ["saved position found: resuming after change #\\d+"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.cdc.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==cdc-*
+    # Only the connector and the search index: the inventory app never connects.
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
