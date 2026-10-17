@@ -1,0 +1,16 @@
+# What the event-filtering scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ef	{vpn}/cp-ef
+solacebroker_msg_vpn_acl_profile.ef	{vpn}/acl-ef
+
+solacebroker_msg_vpn_queue.berlin	{vpn}/q.ef.berlin
+solacebroker_msg_vpn_queue_subscription.berlin	{vpn}/q.ef.berlin/ef%2Fplant%2Fberlin%2F%2A%2Ftemp%2F%3E
+
+solacebroker_msg_vpn_queue.alarms	{vpn}/q.ef.alarms
+solacebroker_msg_vpn_queue_subscription.alarms	{vpn}/q.ef.alarms/ef%2Fplant%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ef["sensors"]	{vpn}/svc-ef-sensors
+solacebroker_msg_vpn_client_username.ef["berlin"]	{vpn}/svc-ef-berlin
+solacebroker_msg_vpn_client_username.ef["alarms"]	{vpn}/svc-ef-alarms

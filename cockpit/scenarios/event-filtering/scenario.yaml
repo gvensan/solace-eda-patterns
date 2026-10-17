@@ -1,0 +1,324 @@
+id: event-filtering
+# Category 3 of the pattern guide (Consumption Patterns), second pattern.
+order: 320
+eyebrow: Consumption Patterns
+title: Event Filtering
+summary: >
+  A factory's sensors publish readings on topics that name the site, the
+  line and the kind of sensor. Berlin's temperature desk wants only Berlin
+  temperatures: its queue's subscription says so, and the broker sends it
+  nothing else. The alarm desk wants severity 4 and 5 from anywhere, and
+  severity is not in the topic: it uses a selector, which works, at a cost
+  you can watch grow.
+
+objectives:
+  - Filter by topic, and see that the broker delivers nothing else
+  - Filter by a message property with a selector, and see what it leaves behind
+  - See a selector's leftovers fill its queue until the publisher is refused, for everyone
+  - Learn why topics are the first filter, and selectors the exception
+
+run:
+  - apply
+  - build
+  - berlin
+  - alarms
+  - sensors
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Sensors publish to ef/plant/<site>/<line>/<kind>/reading/v1, with the
+    severity as a message property. q.ef.berlin subscribes to
+    ef/plant/berlin/*/temp/> and gets only those. q.ef.alarms subscribes to
+    every reading; the alarm desk's selector, severity >= 4, takes the
+    alarms and leaves the rest on the queue.
+  duration: 2.4
+  liveWhen: sensors
+  nodes:
+    - id: sensors
+      label: Sensors
+      sublabel: 5 readings a second
+      kind: app
+      col: 0
+      action: sensors
+      requires:
+        - label: svc-ef-sensors
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ef-sensors
+    - id: broker
+      label: Solace Broker
+      sublabel: filters by topic
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: berlinq
+          label: q.ef.berlin
+          depth: { queue: q.ef.berlin, unit: waiting }
+        - id: alarmsq
+          label: q.ef.alarms
+          depth: { queue: q.ef.alarms, unit: left }
+      provides:
+        - label: q.ef.berlin
+          group: berlinq
+          semp: /msgVpns/{vpn}/queues/q.ef.berlin
+        - label: q.ef.alarms
+          group: alarmsq
+          semp: /msgVpns/{vpn}/queues/q.ef.alarms
+        - label: cp-ef
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ef
+        - label: acl-ef
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ef
+    - id: berlin
+      label: Berlin Temperatures
+      sublabel: "topic: ef/plant/berlin/*/temp/>"
+      kind: app
+      col: 2
+      action: berlin
+      flowOn:
+        queue: q.ef.berlin
+        client: ef-berlin
+      requires:
+        - label: svc-ef-berlin
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ef-berlin
+    - id: alarms
+      label: Alarm Desk
+      sublabel: "selector: severity >= 4"
+      kind: app
+      col: 2
+      action: alarms
+      flowOn:
+        queue: q.ef.alarms
+        client: ef-alarms
+      requires:
+        - label: svc-ef-alarms
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ef-alarms
+  flows:
+    - { from: sensors, to: broker, label: readings, delay: 0 }
+    - { from: broker, to: berlin, via: berlinq, delay: 0.8 }
+    - { from: broker, to: alarms, via: alarmsq, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.ef.berlin, subscribed to Berlin temperatures, and
+      q.ef.alarms (10 MB), subscribed to every reading, with the client
+      profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: berlin
+    label: Start Berlin temperatures
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ef, watch, --role, berlin, --user, svc-ef-berlin, --client-name, ef-berlin, --queue, q.ef.berlin]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.ef.berlin with no selector. The topic subscription already
+      did the filtering.
+
+  - id: alarms
+    label: Start the alarm desk
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ef, watch, --role, alarms, --user, svc-ef-alarms, --client-name, ef-alarms, --queue, q.ef.alarms, --selector, "severity >= 4"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.ef.alarms with the selector severity >= 4. The broker checks
+      each reading on the queue against it.
+
+  - id: alarms-typo
+    label: Start the alarm desk with a typo in its selector
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ef, watch, --role, alarms, --user, svc-ef-alarms, --client-name, ef-alarms, --queue, q.ef.alarms, --selector, "severity = = 4"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same app, deployed with the selector severity = = 4. Stop the
+      alarm desk first.
+
+  - id: sensors
+    label: Start the sensors
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ef, sensors, --client-name, ef-sensors]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes 5 readings a second from random sensors. About one in twelve
+      has severity 4 or 5.
+
+  - id: sensors-hires
+    label: Start the sensors in high resolution
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ef, sensors, --client-name, ef-sensors, --rate, "50", --pad, "8000"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The sensors after a firmware update: 50 readings a second, each with
+      8 KB of waveform. Stop the sensors first.
+
+  - id: purge-alarms
+    label: Delete what is waiting on q.ef.alarms
+    kind: process
+    cmd: [bash, ./purge.sh]
+    cwd: .
+    variant: secondary
+    description: >
+      Deletes every reading on q.ef.alarms, the ones the selector left
+      behind.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-filtering]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: leftovers-fill-queue
+    title: Unmatched readings fill the alarm queue
+    breaks: >
+      The sensors switch to high resolution: ten times the readings, each
+      far bigger. Almost none of them are alarms.
+    watch: >
+      The card shows the sensors. q.ef.alarms grows by hundreds of readings
+      a second: everything the selector does not match stays there. Within
+      half a minute it reaches its 10 MB quota, and from then on the broker
+      refuses the readings: "Spool Over Quota". Every reading is refused,
+      not just at the alarm queue: Berlin temperatures stops receiving too,
+      and an alarm sent now reaches nobody. Reset puts the sensors back to
+      normal and deletes what the selector left behind.
+    why: >
+      A selector filters at delivery, not at the queue's door. The queue
+      takes every reading its subscription matches, and the selector only
+      decides which of them this consumer is given. The rest wait for a
+      consumer that will never take them, and use the queue's quota. Once
+      the quota is gone, the broker refuses the message outright, so the
+      publisher is told, and no queue gets it.
+    real_world: >
+      A filter on a field that was not designed into the topic, working fine
+      in testing and filling a queue in production weeks later. Put what
+      consumers filter on into the topic, so a subscription can do it.
+      When a selector cannot be avoided, its queue needs another consumer
+      for the rest, or a time to live on its messages.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Using selectors"
+        url: https://docs.solace.com/API/API-Developer-Guide/Using-Selectors.htm
+    node: sensors
+    logs: sensors-hires
+    trigger:
+      - stop: sensors
+      - start: sensors-hires
+    reset:
+      - stop: sensors-hires
+      - run: purge-alarms
+      - start: sensors
+    expect:
+      break:
+        within: 90
+        logs:
+          - log: sensors-hires
+            has: ["reading #\\d+ .* refused: Spool Over Quota"]
+      reset:
+        within: 30
+        logs:
+          - log: purge-alarms
+            has: ["OK: q.ef.alarms is empty"]
+          - log: berlin
+            has: ["reading #\\d+: berlin line\\d temp"]
+
+  - id: selector-typo
+    title: The alarm desk's selector has a typo
+    breaks: >
+      The alarm desk is redeployed with the selector "severity = = 4".
+    watch: >
+      The card shows the alarm desk. It connects, then cannot bind to its
+      queue: "error while creating receiver flow: Invalid Selector", and
+      exits. The broker checks a selector's syntax when the consumer binds,
+      not when it is written. Reset starts the alarm desk with the right
+      selector, and it takes the alarms that waited.
+    why: >
+      A selector is a small SQL-like expression the broker evaluates for
+      every message. It is a string to the application and to the compiler,
+      so a mistake shows only when the broker parses it, at bind time. The
+      Go API returns the broker's refusal from the receiver's Start.
+    real_world: >
+      A selector built from configuration or user input, wrong after a
+      change nobody tested against a broker. A topic subscription with a
+      mistake is accepted and quietly matches nothing; a selector with a
+      mistake is at least refused loudly.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Using selectors"
+        url: https://docs.solace.com/API/API-Developer-Guide/Using-Selectors.htm
+    node: alarms
+    logs: alarms-typo
+    trigger:
+      - stop: alarms
+      - start: alarms-typo
+    reset:
+      - stop: alarms-typo
+      - start: alarms
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: alarms-typo
+            has: ["Invalid Selector"]
+      reset:
+        within: 40
+        logs:
+          - log: alarms
+            has: ["bound to queue q.ef.alarms with selector: severity >= 4", "severity [45]"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.ef.*
+    # q.ef.alarms keeps growing: msgSpoolUsage is what the selector left behind.
+    columns: [queueName, msgSpoolUsage, maxMsgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: What each queue subscribes to
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.ef.berlin/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.ef.berlin → Subscriptions
+    empty: No queue yet. Press Play.

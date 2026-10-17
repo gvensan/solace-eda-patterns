@@ -91,4 +91,4 @@ and where you would meet it in production.
   will select on into the levels, in a fixed order, and version the
   structure.
 
-Next: [Guaranteed Delivery](330-guaranteed-delivery.md).
+Next: [Event Filtering](320-event-filtering.md).

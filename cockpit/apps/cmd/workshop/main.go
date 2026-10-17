@@ -22,6 +22,7 @@ import (
 	"solace-workshop/apps/scenarios/ecst"
 	"solace-workshop/apps/scenarios/esrc"
 	"solace-workshop/apps/scenarios/exclusive"
+	"solace-workshop/apps/scenarios/filter"
 	"solace-workshop/apps/scenarios/groups"
 	"solace-workshop/apps/scenarios/guaranteed"
 	"solace-workshop/apps/scenarios/p2p"
@@ -36,6 +37,8 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"ef watch":          filter.Watch,
+	"ef sensors":        filter.Sensors,
 	"esrc statements":   esrc.Statements,
 	"esrc ledger":       esrc.Ledger,
 	"cdc search":        cdc.Search,

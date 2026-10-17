@@ -44,6 +44,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 230 | [Request-Reply](guides/230-request-reply.md) | Communication Patterns | Ask and wait, with a timeout; nobody there to answer; a reply that comes too late |
 | 240 | [Event Streaming](guides/240-event-streaming.md) | Communication Patterns | A consumer's position and state in an ordered stream; resuming after a crash; joining late with no history |
 | 310 | [Hierarchical Topics](guides/310-hierarchical-topics.md) | Consumption Patterns | Topic levels as a contract; wildcard slices; a subscription that miscounts, a publisher that adds a level |
+| 320 | [Event Filtering](guides/320-event-filtering.md) | Consumption Patterns | Topic subscriptions filter for free; a selector filters on a property and leaves the rest on the queue until the publisher is refused; a selector typo |
 | 330 | [Guaranteed Delivery](guides/330-guaranteed-delivery.md) | Consumption Patterns | The broker confirms what it stored; the consumer acknowledges what it handled and skips what it has seen; refused purchases kept and resent |
 | 340 | [Backpressure and Push](guides/340-backpressure.md) | Consumption Patterns | A consumer that pauses and a broker that stops at the unacknowledged limit; a direct subscriber that must drop |
 | 350 | [Exclusive Consumer](guides/350-exclusive-consumer.md) | Consumption Patterns | One active consumer and a standby on an exclusive queue, failover, and the hang it cannot detect |
