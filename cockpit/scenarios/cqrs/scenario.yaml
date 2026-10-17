@@ -1,0 +1,348 @@
+id: cqrs
+# Category 1 of the pattern guide (Event Generation Patterns), second pattern.
+order: 120
+eyebrow: Event Generation Patterns
+title: CQRS
+summary: >
+  Command Query Responsibility Segregation: a shop writes orders on one side
+  and answers questions about them on the other. Checkout sends commands to
+  the order service, which publishes an event for every order placed. The
+  order history service builds its own view from those events and answers
+  the account page from it. The two sides share nothing but the events, so
+  each can fail or slow down without stopping the other.
+
+objectives:
+  - See a command handled on the write side and the read side catch up from its event
+  - See reads answered while the write side is down, and commands kept until it is back
+  - See the read side fall behind, and what the account page is told
+  - Learn why the read side is always a little behind the writes
+
+run:
+  - apply
+  - build
+  - history
+  - orders
+  - account
+  - checkout
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Commands go to q.cqrs.commands for the order service (the write side),
+    which publishes an "order placed" event. q.cqrs.view takes those events
+    for the order history service (the read side), which keeps its own view
+    and answers the account page's questions by request-reply.
+  duration: 2.6
+  liveWhen: checkout
+  nodes:
+    - id: checkout
+      label: Checkout
+      sublabel: a command a second
+      kind: app
+      col: 0
+      action: checkout
+      requires:
+        - label: svc-cqrs-checkout
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-checkout
+    - id: account
+      label: Account Page
+      sublabel: asks a question every 2 s
+      kind: app
+      col: 0
+      action: account
+      requires:
+        - label: svc-cqrs-account
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-account
+    - id: broker
+      label: Solace Broker
+      sublabel: commands, events, queries
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: commands
+          label: q.cqrs.commands
+          depth: { queue: q.cqrs.commands, unit: waiting }
+        - id: events
+          label: q.cqrs.view
+          depth: { queue: q.cqrs.view, unit: waiting }
+      provides:
+        - label: q.cqrs.commands
+          group: commands
+          semp: /msgVpns/{vpn}/queues/q.cqrs.commands
+        - label: q.cqrs.view
+          group: events
+          semp: /msgVpns/{vpn}/queues/q.cqrs.view
+        - label: cp-cqrs
+          semp: /msgVpns/{vpn}/clientProfiles/cp-cqrs
+        - label: acl-cqrs
+          semp: /msgVpns/{vpn}/aclProfiles/acl-cqrs
+    - id: orders
+      label: Order Service
+      sublabel: write side
+      kind: app
+      shape: processor
+      col: 2
+      action: orders
+      flowOn:
+        queue: q.cqrs.commands
+        client: cqrs-orders
+      requires:
+        - label: svc-cqrs-write
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-write
+    - id: history
+      label: Order History
+      sublabel: read side, its own view
+      kind: app
+      shape: processor
+      col: 2
+      action: history
+      flowOn:
+        queue: q.cqrs.view
+        client: cqrs-history
+      requires:
+        - label: svc-cqrs-view
+          semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-view
+  flows:
+    - { from: checkout, to: broker, label: place order, delay: 0 }
+    - { from: broker, to: orders, via: commands, delay: 0.5 }
+    - { from: orders, to: broker, label: order placed, delay: 1.0 }
+    - { from: broker, to: history, via: events, source: orders, delay: 1.5 }
+    - { from: account, to: broker, label: query, delay: 0.2 }
+    - { from: history, to: broker, label: answer, source: account, delay: 0.8 }
+    - { from: broker, to: account, label: answer, source: history, delay: 1.3 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.cqrs.commands and q.cqrs.view, and the client profile, ACL
+      profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: history
+    label: Start the order history service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cqrs, view, --client-name, cqrs-history]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The read side. Applies each "order placed" event from q.cqrs.view to
+      its own view, an order count and total per customer, and answers
+      questions from that view.
+
+  - id: orders
+    label: Start the order service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cqrs, write, --client-name, cqrs-orders]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The write side. Takes each command from q.cqrs.commands, gives the
+      order a number, publishes "order placed", then acknowledges the
+      command.
+
+  - id: account
+    label: Start the account page
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cqrs, account, --client-name, cqrs-account]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Asks the order history service about a customer every 2 seconds, and
+      prints the answer with how far behind the writes the view was.
+
+  - id: checkout
+    label: Start checkout
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cqrs, checkout, --client-name, cqrs-checkout]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Sends a "place order" command a second and waits for the broker to
+      store it.
+
+  - id: slow-history
+    label: Slow the order history service down
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, cqrs-history, USR1]
+    cwd: .
+    variant: secondary
+    description: >
+      The order history service takes 2 seconds to apply each event, slower
+      than orders arrive. It keeps answering questions at full speed.
+
+  - id: normal-history
+    label: Put the order history service back to normal speed
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, cqrs-history, USR2]
+    cwd: .
+    variant: secondary
+    description: >
+      The order history service applies events at full speed again.
+
+  - id: kill-orders
+    label: Crash the order service
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, cqrs-orders, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the order service outright (SIGKILL), and returns once it has
+      gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, cqrs]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: read-side-behind
+    title: The read side falls behind
+    breaks: >
+      The order history service slows down to one event every 2 seconds,
+      while checkout places one a second.
+    watch: >
+      The card shows the account page. It is still answered at once, but
+      from an older view: "view as of order #40, 9.0 s behind" and growing.
+      q.cqrs.view fills up. Checkout and the order service carry on as if
+      nothing happened: the write side does not wait for the read side.
+      Reset puts the order history service back to normal speed, and it
+      catches up within a second or two.
+    why: >
+      The read side builds its view from events, after the write side has
+      published them. It is always behind; normally by milliseconds. When it
+      is slow, its queue holds the events it has not applied, and its
+      answers describe the past. Nothing on the write side notices, which
+      is the point of separating them, and also why the read side has to say
+      how old its answer is.
+    real_world: >
+      A search index or reporting view rebuilt from events while a big
+      import runs. Users see "your order is not in your history yet". CQRS
+      systems show the view's age, read their own writes from the write
+      side, or wait for the view to reach a given order number.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Go API: request-reply messaging"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-API-Request-Reply.htm
+    node: history
+    logs: account
+    trigger:
+      - run: slow-history
+    reset:
+      - run: normal-history
+    expect:
+      break:
+        within: 25
+        logs:
+          - log: history
+            has: ["slowed down: 2s to apply each event"]
+          - log: account
+            has: ["view as of order #\\d+, ([5-9]|\\d\\d+)\\.\\d s behind"]
+      reset:
+        within: 30
+        logs:
+          - log: history
+            has: ["back to normal speed"]
+          - log: account
+            has: ["view as of order #\\d+, 0\\.\\d s behind"]
+
+  - id: write-side-down
+    title: The write side goes down
+    breaks: >
+      The order service is killed. Checkout keeps sending commands and the
+      account page keeps asking.
+    watch: >
+      The card shows checkout. Every command is still "accepted by the
+      broker": it is stored on q.cqrs.commands, which fills up, and no order
+      is placed. Open the account page's log: it is still answered, from a
+      view that stopped changing. Reset starts the order service, which
+      places every waiting order in turn, and the view catches up.
+    why: >
+      The write side and the read side are separate services joined only by
+      events. With the write side down, reads carry on from the read side's
+      own view, and commands wait on their queue instead of failing. Nothing
+      is lost; it is late.
+    real_world: >
+      A deploy or a database failover on the write side. Users can still
+      browse and see their history; new orders are taken and processed when
+      the write side returns. Whether checkout should tell the user "order
+      received" or wait for "order placed" is a product decision CQRS makes
+      you take.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+    node: orders
+    logs: checkout
+    trigger:
+      - run: kill-orders
+    reset:
+      - start: orders
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: checkout
+            has: ["command #\\d+: place an order for C-\\d+ .*accepted by the broker"]
+          - log: account
+            has: ["C-\\d+: \\d+ orders?, "]
+      reset:
+        within: 20
+        logs:
+          - log: orders
+            has: ["order #\\d+ placed for C-\\d+, event published"]
+          - log: history
+            has: ["order #\\d+ applied"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.cqrs.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==cqrs-*
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.

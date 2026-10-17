@@ -1,0 +1,17 @@
+# What the cqrs scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.cqrs	{vpn}/cp-cqrs
+solacebroker_msg_vpn_acl_profile.cqrs	{vpn}/acl-cqrs
+
+solacebroker_msg_vpn_queue.commands	{vpn}/q.cqrs.commands
+solacebroker_msg_vpn_queue_subscription.commands	{vpn}/q.cqrs.commands/cqrs%2Fshop%2Fcommand%2Fplace-order%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.view	{vpn}/q.cqrs.view
+solacebroker_msg_vpn_queue_subscription.view	{vpn}/q.cqrs.view/cqrs%2Fshop%2Forder%2Fplaced%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.cqrs["checkout"]	{vpn}/svc-cqrs-checkout
+solacebroker_msg_vpn_client_username.cqrs["write"]	{vpn}/svc-cqrs-write
+solacebroker_msg_vpn_client_username.cqrs["view"]	{vpn}/svc-cqrs-view
+solacebroker_msg_vpn_client_username.cqrs["account"]	{vpn}/svc-cqrs-account

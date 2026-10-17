@@ -79,4 +79,4 @@ and where you would meet it in production.
   everything again" request as here, or a durable copy in the consumer's
   own database so a restart keeps it.
 
-Next: [Publish-Subscribe](210-publish-subscribe.md).
+Next: [CQRS](120-cqrs.md).
