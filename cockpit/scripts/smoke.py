@@ -227,16 +227,19 @@ def judge_boxes(spec, before, now) -> tuple:
     pending, failed = [], []
     for box, want in spec.items():
         for reason, n in want.items():
+            # An exact count, or {min: n, max: n} when the count depends on
+            # timing (how many requests expire while a backlog drains).
+            lo, hi = (n.get("min", 0), n.get("max")) if isinstance(n, dict) else (n, n)
             was = (before.get(box) or {}).get(reason)
             cur = (now.get(box) or {}).get(reason)
             if was is None or cur is None:
                 pending.append(f"{box} {reason!r}: the broker did not report the counter")
                 continue
             rise = cur - was
-            if rise > n:
-                failed.append(f"{box} {reason!r} rose by {rise}, expected {n}")
-            elif rise < n:
-                pending.append(f"{box} {reason!r} rose by {rise}, expected {n}")
+            if hi is not None and rise > hi:
+                failed.append(f"{box} {reason!r} rose by {rise}, expected at most {hi}")
+            elif rise < lo:
+                pending.append(f"{box} {reason!r} rose by {rise}, expected at least {lo}")
     return pending, failed
 
 
@@ -328,7 +331,8 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
     since = snap.get("__partitions__", time.time())
     # A count of 0 can only be shown by waiting the whole window.
     any_lacks = (any(lacks for _, _, lacks in checks) or (parts or {}).get("orders") == "one-consumer"
-                 or any(n == 0 for want in (boxes or {}).values() for n in want.values()))
+                 or any((n.get("max") == 0 if isinstance(n, dict) else n == 0)
+                        for want in (boxes or {}).values() for n in want.values()))
     missing = {}
     pending = []
     while True:

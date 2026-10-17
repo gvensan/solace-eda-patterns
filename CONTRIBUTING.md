@@ -636,9 +636,15 @@ Give it the dashboard to itself:
   sleep. Smoke compares the wall clock with the monotonic clock, which stops
   during sleep, and fails the run if they drift apart by more than 5
   seconds.
-- **Do not save `cockpit/app/` files during a run**, `config.py` included.
-  In development mode a save, even with no change, restarts the dashboard,
+- **Do not save Python under `cockpit/app/` or `cockpit/scripts/` during a
+  run**, `config.py` and `smoke.py` included. In development mode the
+  dashboard watches both, and a save, even with no change, restarts it,
   which stops every app and cuts a smoke run short.
+- **Do not edit Go under `cockpit/apps/` during a run either.** `run.sh`
+  rebuilds the binary whenever an app starts and the source is newer, so a
+  half-written change makes every Play fail at "Build the apps", and a
+  compiling change swaps the binary under a scenario mid-run. Write new Go
+  elsewhere and move it in between runs.
 - The sleep check has not been tested against a real sleep: only the
   clocks it relies on were checked (`time.monotonic` is
   `mach_absolute_time()` on macOS, which stops during sleep).

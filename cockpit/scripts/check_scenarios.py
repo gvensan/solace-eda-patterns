@@ -416,6 +416,7 @@ def check_boxes_expect(where, checks, spec) -> list:
 
         boxes:
           dmq: {expired: 3, failed 3 attempts: 0}
+          dmq: {expired: {min: 100}}     # when the count depends on timing
     """
     bad = []
     arrivals = {c.get("id"): c.get("arrivals") for n in spec.get("diagram", {}).get("nodes", []) or []
@@ -433,7 +434,10 @@ def check_boxes_expect(where, checks, spec) -> list:
         for reason, n in want.items():
             if reason not in spec_arr.get("reasons", {}):
                 bad.append(f"{where} boxes: {box!r} has no reason {reason!r}")
-            if not isinstance(n, int) or n < 0:
+            if isinstance(n, dict):
+                if not n or set(n) - {"min", "max"} or not all(isinstance(v, int) and v >= 0 for v in n.values()):
+                    bad.append(f"{where} boxes: {box!r} {reason!r} must be a count, or min: and max: counts")
+            elif not isinstance(n, int) or n < 0:
                 bad.append(f"{where} boxes: {box!r} {reason!r} must be a count of 0 or more")
     return bad
 
