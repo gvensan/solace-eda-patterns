@@ -1,0 +1,331 @@
+id: guaranteed-delivery
+# Category 3 of the pattern guide (Consumption Patterns), third pattern.
+order: 330
+eyebrow: Consumption Patterns
+title: Guaranteed Delivery
+summary: >
+  A loyalty programme: every purchase at the tills earns points, and the
+  points service awards them. Losing an award cheats a customer; awarding it
+  twice costs the business. The broker confirms each purchase to the tills
+  once it has stored it, the points service acknowledges each one only after
+  awarding it, and it remembers what it has awarded, so a purchase delivered
+  twice is not awarded twice.
+
+objectives:
+  - See the broker confirm each purchase to the tills once it is stored
+  - See a purchase come back after the points service stops before acknowledging it, and be skipped
+  - See purchases the broker refuses kept by the tills and sent again, none lost
+  - Learn why delivery is at least once, and what that asks of a consumer
+
+run:
+  - apply
+  - build
+  - points
+  - tills
+
+cleanup:
+  - destroy
+  - forget-awards
+
+diagram:
+  caption: >
+    The tills publish each purchase as a guaranteed message, and the broker
+    confirms it once it has stored it on q.gd.awards. The points service
+    awards the points, then acknowledges the purchase, and only then does
+    the broker delete it.
+  duration: 2.4
+  liveWhen: tills
+  nodes:
+    - id: tills
+      label: Tills
+      sublabel: a purchase every 0.5 s
+      kind: app
+      col: 0
+      action: tills
+      requires:
+        - label: svc-gd-tills
+          semp: /msgVpns/{vpn}/clientUsernames/svc-gd-tills
+    - id: broker
+      label: Solace Broker
+      sublabel: stores, then confirms
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: awards
+          label: q.gd.awards
+          depth: { queue: q.gd.awards, unit: waiting }
+      provides:
+        - label: q.gd.awards
+          group: awards
+          semp: /msgVpns/{vpn}/queues/q.gd.awards
+        - label: cp-gd
+          semp: /msgVpns/{vpn}/clientProfiles/cp-gd
+        - label: acl-gd
+          semp: /msgVpns/{vpn}/aclProfiles/acl-gd
+    - id: points
+      label: Points Service
+      sublabel: awards, then acks
+      kind: app
+      col: 2
+      action: points
+      flowOn:
+        queue: q.gd.awards
+        client: gd-points
+      requires:
+        - label: svc-gd-points
+          semp: /msgVpns/{vpn}/clientUsernames/svc-gd-points
+  flows:
+    - { from: tills, to: broker, label: purchases, delay: 0 }
+    - { from: broker, to: points, via: awards, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.gd.awards, which refuses a purchase to the tills when it
+      cannot store it, and the client profile, ACL profile and usernames
+      for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: points
+    label: Start the points service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gd, points, --client-name, gd-points]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.gd.awards. For each purchase it writes the award to its record
+      on disk, then acknowledges the purchase. A purchase already on record
+      is acknowledged and skipped.
+
+  - id: points-no-dedupe
+    label: Start the points service without its duplicate check
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gd, points, --client-name, gd-points, --no-dedupe]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The same service, but it awards every purchase it receives, even one
+      already on record. Stop the points service first: only one can read
+      the queue at a time.
+
+  - id: tills
+    label: Start the tills
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gd, tills]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes a purchase every half second as a guaranteed message, and
+      logs the broker's confirmation of each. A purchase the broker refuses
+      is kept in an outbox and sent again, in order.
+
+  - id: stop-after-award
+    label: Make the points service stop after its next award
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, gd-points, USR2, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Sends the points service a signal (SIGUSR2) that asks it to stop
+      itself right after writing its next award, before acknowledging that
+      purchase. Returns once it has stopped.
+
+  - id: ingress-off
+    label: Stop the queue taking messages
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/queues/q.gd.awards", '{"ingressEnabled":false}']
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Turns off ingress on q.gd.awards, over SEMP. The queue keeps what it
+      holds and keeps delivering it, but takes nothing new.
+
+  - id: ingress-on
+    label: Let the queue take messages again
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/queues/q.gd.awards", '{"ingressEnabled":true}']
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Turns ingress on q.gd.awards back on, as tf/queues.tf has it.
+
+  - id: forget-awards
+    label: Clear the record of awards
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gd, points, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes the points service's record of what it has awarded, so the
+      next Play starts with no balances.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, guaranteed-delivery]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and the access control for this scenario. Any
+      purchase still on the queue goes with it.
+
+failure_modes:
+  - id: stop-before-ack
+    title: The points service stops after awarding, before acknowledging
+    breaks: >
+      The points service is asked, with a signal, to stop itself right after
+      its next award, before it acknowledges that purchase. This is not a
+      kill from outside: it puts the stop at the one moment that matters, a
+      crash between doing the work and saying it is done.
+    watch: >
+      The card shows the points service. It writes one more award, says
+      "stopping now: P-... is awarded but not acknowledged", and exits. The
+      broker still holds that purchase, because it was never acknowledged.
+      Press Reset to start the service again: the broker delivers the
+      purchase again, marked redelivered, and the service finds it on its
+      record: "already awarded, skipped (redelivered)". Purchases that were
+      waiting come through too; some may also be marked redelivered,
+      although this service never saw them. No GAP, and no purchase
+      awarded twice.
+    why: >
+      The broker deletes a message only when the consumer acknowledges it.
+      A consumer that stops after doing the work and before acknowledging
+      gets the message again: delivery is at least once. The broker marks
+      it redelivered, but that only says it was sent before, not that the
+      work was done, so the consumer has to check: here, by the purchase id
+      the tills set as the application message id.
+    real_world: >
+      A payment service charges a card, then crashes before acknowledging,
+      and charges it again on restart. Any consumer whose work has an effect
+      outside itself needs to recognise a message it has already handled:
+      by an id, a sequence number, or an operation that is harmless twice.
+    docs:
+      - label: "Go API: consuming persistent messages and acknowledging them"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: guaranteed messages"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Guaranteed-Messages.htm
+    node: points
+    logs: points
+    trigger:
+      - run: stop-after-award
+    reset:
+      - start: points
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: points
+            has: ["stopping now: P-.* is awarded but not acknowledged", "exited with code 3"]
+      reset:
+        within: 20
+        logs:
+          - log: points
+            has: ["already awarded, skipped  \\(redelivered\\)", "awarded P-"]
+            lacks: ["GAP", "awarded again"]
+
+  - id: broker-refuses
+    title: The queue stops taking purchases for a while
+    breaks: >
+      Ingress on q.gd.awards is turned off over SEMP: the queue takes no new
+      messages. Nothing is restarted.
+    watch: >
+      The card shows the tills. Within a second their receipts say the
+      broker refused a purchase, "refused P-...: Endpoint Shutdown", and the
+      tills keep it for retry. New purchases wait in the outbox behind it,
+      and the oldest is tried again every second. The points service runs
+      out of purchases and waits. Reset turns ingress back on: the tills say
+      "resent P-..." for each, in order, then "outbox empty". The points
+      service awards every one, with no GAP.
+    why: >
+      A guaranteed message is only the broker's responsibility once the
+      broker has confirmed it. Until then it is the publisher's: the tills
+      keep each purchase until its receipt says it was stored, and resend
+      one that was refused. This queue is set to refuse
+      (reject_msg_to_sender_on_discard_behavior "always"). With the default,
+      "when-queue-enabled", a purchase sent to it with ingress off is
+      confirmed to the tills and then dropped, without a word.
+    real_world: >
+      A queue disabled for maintenance, or full. A publisher that does not
+      read its receipts loses messages it believes were sent; one that does
+      can hold them and retry. Check what the queue tells publishers when it
+      cannot take a message.
+    docs:
+      - label: "Go API: publishing persistent messages (publish receipts)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: configuring queues (reject messages to sender on discard)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: tills
+    logs: tills
+    trigger:
+      - run: ingress-off
+    reset:
+      - run: ingress-on
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: tills
+            has: ["refused P-.*Endpoint Shutdown", "kept for retry", "waits in the outbox"]
+      reset:
+        within: 25
+        logs:
+          - log: tills
+            has: ["resent P-", "outbox empty"]
+          - log: points
+            has: ["awarded P-"]
+            lacks: ["GAP", "awarded again"]
+
+inspect:
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.gd.*
+    # disabledDiscardedMsgCount counts messages dropped because ingress was
+    # off; with "always", each one was also refused to the tills.
+    columns: [queueName, ingressEnabled, msgSpoolUsage, spooledMsgCount, redeliveredMsgCount, disabledDiscardedMsgCount]
+    ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: What the queue tells publishers
+    kind: semp
+    path: /msgVpns/{vpn}/queues?where=queueName==q.gd.awards
+    columns: [queueName, ingressEnabled, rejectMsgToSenderOnDiscardBehavior, maxDeliveredUnackedMsgsPerFlow]
+    ui_hint: Manager → Queues → q.gd.awards → Settings
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: The points service on q.gd.awards
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.gd.awards/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount, redeliveredMsgCount]
+    ui_hint: Manager → Queues → q.gd.awards → Consumers
+    empty: No consumer is bound to q.gd.awards right now. Press Play, or start the points service.

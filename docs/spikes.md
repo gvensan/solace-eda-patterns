@@ -461,3 +461,44 @@ reports its expiration as the Unix epoch, the same as a message sent
 without one. Dead Message Queue's diagram therefore takes the reason from
 the counters.
 
+## 12. Guaranteed Delivery
+
+Tested on 10.26.0 with the Go API v1.10.0, on a throwaway exclusive queue.
+
+**Publish receipts.** Five messages published with `Publish(msg, topic,
+nil, context)` and a receipt listener: each receipt came back with its
+context and its message's application message id, in publishing order,
+`IsPersisted()` true. Receipts arrive in batches (all five within the same
+millisecond), so a publisher that waits for each receipt before sending the
+next goes at the speed of the broker's acknowledgements, about two a second
+here. Guaranteed Delivery's tills send a backlog all at once, in order:
+messages from one publisher reach the queue in the order they were sent.
+
+**A queue that cannot take a message.** Ingress turned off over SEMP:
+
+| `reject_msg_to_sender_on_discard_behavior` | What the publisher got | What the queue did |
+| --- | --- | --- |
+| `when-queue-enabled` (default) | a normal receipt, `IsPersisted()` true, no error | dropped it; `disabledDiscardedMsgCount` 3 |
+| `always` | `Endpoint Shutdown - Topic '<topic>'` on the receipt | dropped it; `disabledDiscardedMsgCount` 3 |
+
+So with the default, a publisher is told a message was stored when it was
+dropped. [Configuring Queues](https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm)
+says the same in CLI terms: `reject-msg-to-sender-on-discard` is on by
+default, but its `including-when-shutdown` part, for messages published to
+topics, is not. Measured in the scenario too: with the default, the tills
+logged no refusal while ingress was off, and the points service then
+reported "GAP: #121 after #111".
+
+**Application message id** (`WithApplicationMessageID`,
+`GetApplicationMessageID`) survived the broker and a redelivery.
+
+**Exit before acknowledging.** A consumer with client acknowledgement took
+two messages, acknowledged the first, and exited (`os.Exit`) on the second
+without acknowledging it. On restart all four messages on the queue came
+back marked redelivered: the second, as expected; the first, because its
+acknowledgement had not left the process before it exited; and the third and
+fourth, which the broker had sent ahead to the consumer but the app never
+saw. The redelivered flag says a message was sent before, not that the
+application handled it. Guaranteed Delivery's points service therefore
+decides by its own record of purchase ids, not by the flag.
+

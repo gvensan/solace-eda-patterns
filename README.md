@@ -36,6 +36,7 @@ The sidebar follows the eight categories of the pattern guide.
 | --- | --- | --- | --- |
 | 000 | [Reading the dashboard](guides/000-reading-the-dashboard.md) | | What every dot, count and label on the page means |
 | 220 | [Point-to-Point](guides/220-point-to-point.md) | Communication Patterns | One sender, one named queue, one receiver; what the queue holds while the receiver is away |
+| 330 | [Guaranteed Delivery](guides/330-guaranteed-delivery.md) | Consumption Patterns | The broker confirms what it stored; the consumer acknowledges what it handled and skips what it has seen; refused purchases kept and resent |
 | 350 | [Exclusive Consumer](guides/350-exclusive-consumer.md) | Consumption Patterns | One active consumer and a standby on an exclusive queue, failover, and the hang it cannot detect |
 | 410 | [Competing Consumers](guides/410-competing-consumers.md) | Consumer Scalability Patterns | Identical workers share one queue; add one to go faster, lose one and the others carry on |
 | 440 | [Partitioning](guides/440-partitioning.md) | Consumer Scalability Patterns | Same key, same partition, same consumer, in order; partitions moving on a crash or a join; what a missing key does |

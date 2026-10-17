@@ -16,6 +16,7 @@ import (
 	"solace-workshop/apps/scenarios/compete"
 	"solace-workshop/apps/scenarios/dlq"
 	"solace-workshop/apps/scenarios/exclusive"
+	"solace-workshop/apps/scenarios/guaranteed"
 	"solace-workshop/apps/scenarios/p2p"
 	"solace-workshop/apps/scenarios/partition"
 )
@@ -32,6 +33,8 @@ var roles = map[string]func([]string){
 	"dlq watch":         dlq.Watch,
 	"exclusive publish": exclusive.Publish,
 	"exclusive ledger":  exclusive.Ledger,
+	"gd points":         guaranteed.Points,
+	"gd tills":          guaranteed.Tills,
 	"p2p send":          p2p.Send,
 	"p2p print":         p2p.Print,
 	"partition orders":  partition.Orders,

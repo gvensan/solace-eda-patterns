@@ -68,4 +68,4 @@ where you would meet it in production.
   `cockpit/scenarios/point-to-point/tf/queues.tf` to 5 and press **Play**. The
   same outage now lasts about two minutes before anything is refused.
 
-Next: [Exclusive Consumer](350-exclusive-consumer.md).
+Next: [Guaranteed Delivery](330-guaranteed-delivery.md).

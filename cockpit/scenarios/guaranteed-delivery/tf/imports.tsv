@@ -1,0 +1,12 @@
+# What the guaranteed-delivery scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.gd	{vpn}/cp-gd
+solacebroker_msg_vpn_acl_profile.gd	{vpn}/acl-gd
+
+solacebroker_msg_vpn_queue.awards	{vpn}/q.gd.awards
+solacebroker_msg_vpn_queue_subscription.awards	{vpn}/q.gd.awards/gd%2Floyalty%2Fpoints%2Fearned%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.gd["tills"]	{vpn}/svc-gd-tills
+solacebroker_msg_vpn_client_username.gd["points"]	{vpn}/svc-gd-points
