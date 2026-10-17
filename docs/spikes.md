@@ -628,3 +628,77 @@ while waiting. The card asserts on it through the dashboard's box counters
 40 a second), and the workers report how long the requests they did book
 had waited.
 
+
+## 17. Replay log, for Event Sourcing
+
+**Ran on 10.26.0**, Go API 1.10.0: a replay log on `default` with a topic
+filter, an exclusive and a non-exclusive queue subscribed under the filter,
+and receivers built with `WithMessageReplay`.
+
+**Saw:**
+
+- `maxSpoolUsage: 0` with egress enabled is refused: `Cannot enable
+  replay-log while max spool usage is zero`. 1 MB is accepted.
+- One replay log per message VPN: a second is refused, `This message-vpn
+  already has a replay log`. A scenario that owns it owns it for the VPN.
+- With `topicFilterEnabled` and a filter subscription `spike/rl/>`, only
+  messages on matching topics were logged.
+- `ReplayStrategyAllMessages` on an exclusive queue delivered everything the
+  log held. With 3 messages already waiting on the queue, the replay
+  delivered 28 (the 25 logged before plus those 3), not 31: the broker
+  replaced the queue's contents with the replay.
+- On a non-exclusive queue the receiver's start failed:
+  `Client Initiated Replay Not Allowed on Non-Exclusive Queue`.
+- **Bounded.** 60 messages of 30 KB into a 1 MB log: publishing never
+  failed, and afterwards the log held 751,050 bytes and a replay delivered
+  only messages 36 to 60. The oldest were dropped without a word.
+- A time-based replay from before the oldest logged message terminated the
+  receiver: `Replay Start Time Not Available`.
+- `maxSpoolUsage` can be changed on a live replay log.
+
+## 18. Selectors and a full queue, for Event Filtering
+
+**Ran:** two queues on `spike/sel/>`, one of 1 MB with a receiver bound with
+the selector `severity >= 4`, the other of 100 MB with no consumer. Sixty
+20 KB messages with severity 2, then two with severity 5. Queues keep the
+default `rejectMsgToSenderOnDiscardBehavior: when-queue-enabled`.
+
+**Saw:**
+
+- The severity-2 messages stayed on the selector's queue until it was full.
+  From then on every publish matching it was refused at the publisher:
+  `Spool Over Quota. Queue or Topic endpoint limit exceeded - Topic
+  'spike/sel/a'`, the two severity-5 messages included.
+- The refused messages did not reach the other queue either: it held 53
+  messages, the ones accepted before the quota ran out. A full queue refuses
+  the message for every subscriber.
+- A numeric user property (`int32`) matches `severity >= 4`: two of five
+  delivered on a purged queue.
+- `PUT /SEMP/v2/action/msgVpns/{vpn}/queues/{queue}/deleteMsgs` empties a
+  queue.
+- `severity = = 4` fails at bind: `error while creating receiver flow:
+  Invalid Selector` (as in section 2).
+
+## 19. Guaranteed messages over a loopback bridge, for Event Bridge
+
+**Ran:** a second VPN (`internal` authentication, 100 MB spool), a client
+profile with `allowBridgeConnectionsEnabled`, a bridge username, a queue in
+the second VPN subscribed to `spike/br/price/>` and owned by that username,
+and a bridge on `default` whose remote VPN (`127.0.0.1:55555`) binds that
+queue. A queue in `default` subscribed to `spike/br/>`.
+
+**Saw:**
+
+- Bridge `inboundState: ready-in-sync` within seconds.
+- Five guaranteed messages published in the second VPN on
+  `spike/br/price/a` reached the queue in `default`. Three on
+  `spike/br/promo/a` did not: the remote queue does not subscribe to them,
+  and their publisher was told nothing.
+- With the bridge disabled (`enabled: false`, `inboundFailureReason: Bridge
+  disabled`), four more prices waited on the remote queue (564 bytes) and
+  none arrived. Re-enabled, all four arrived.
+- Deleting a VPN that still holds queues or profiles is refused
+  (`contains one or more queues`, `ACL profile ... is still configured`).
+  Terraform deletes children first. The dashboard's Clear broker config
+  deletes only queues, usernames and profiles in the workshop VPN, so it
+  does not remove a scenario's second VPN, bridge or replay log.
