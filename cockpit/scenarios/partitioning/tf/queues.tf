@@ -18,8 +18,10 @@ resource "solacebroker_msg_vpn_queue" "orders" {
   egress_enabled  = true
   permission      = "consume"
 
-  # Four partitions for two consumers, so each owns two.
-  partition_count = 4
+  # Six partitions for three consumers, so each owns two. A fourth consumer
+  # takes one, leaving two, two, one and one: the broker keeps the counts
+  # within one of each other.
+  partition_count = 6
 
   # Short, so partitions move while the attendee is still watching: the
   # broker waits 5 seconds after a consumer comes or goes before it

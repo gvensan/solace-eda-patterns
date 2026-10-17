@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import broker
+from . import broker, partitions
 from .config import (BROKER_UI_URL, DEV, MSG_VPN, SEMP_PORT, STATE_DIR, STATIC_DIR,
                      scenario_state_dir, terraform_env)
 from .processes import RunState, manager
@@ -430,6 +430,20 @@ def _flow_role(flow_on, tx) -> str | None:
     if flow.get("unackedMsgCount", 0) > 0 and now - last[1] >= STALL_SECONDS:
         return "stalled"
     return "active"
+
+
+@app.get("/api/scenarios/{scenario_id}/partitions")
+async def scenario_partitions(scenario_id: str, since: float = 0.0):
+    """A partitioned queue's lanes and the updates its consumers handled
+    after `since` (a time from a previous answer's `until`), for the diagram
+    and for smoke.py. See partitions.py for where each part comes from."""
+    scenario = registry.get(scenario_id)
+    if scenario is None:
+        raise HTTPException(404, f"unknown scenario: {scenario_id}")
+    snap = partitions.snapshot(scenario, since)
+    if snap is None:
+        raise HTTPException(404, f"{scenario_id} draws no partitioned queue")
+    return snap
 
 
 @app.get("/api/scenarios/{scenario_id}/inspect")

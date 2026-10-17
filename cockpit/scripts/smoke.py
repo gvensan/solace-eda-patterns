@@ -9,8 +9,10 @@ and a start of something already running is skipped.
 
 It checks what can be checked mechanically (every Play step reaches running
 or succeeded, Cleanup's steps succeed, Clear reports no failures), checks
-each failure mode's expect: block (log lines that must, and must not, appear
-after Break it and after Reset), and prints the tail of each card's log so a
+the scenario's expect: play: block once Play has finished, checks each
+failure mode's expect: block (log lines that must, and must not, appear
+after Break it and after Reset, and for a partitioned queue what the
+dashboard's /partitions answer shows), and prints the tail of each card's log so a
 person can also read whether the failure and the recovery looked right. Any
 failed check makes it exit non-zero.
 
@@ -191,6 +193,9 @@ async def snapshot(client, sid: str, aids) -> dict:
         run = await run_of(client, sid, aid)
         lines = await history(sid, aid)
         out[aid] = (run or {}).get("startedAt"), max((l["seq"] for l in lines), default=0)
+    # Asking also keeps the dashboard sampling the partitions from now on.
+    if await partitions_since(client, sid, time.time()) is not None:
+        out["__partitions__"] = time.time()
     return out
 
 
@@ -216,11 +221,57 @@ async def settle(client, sid: str, part, watched, snap):
     return await snapshot(client, sid, watched)
 
 
-async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_for, snap) -> None:
-    """One phase of a failure mode's expect: block. Every has: pattern must
-    appear in its log within the window, and no lacks: pattern may appear in
-    it during the window. Without any lacks: the check ends as soon as every
-    has: pattern has been seen."""
+async def partitions_since(client, sid: str, since: float):
+    resp = await client.get(f"/api/scenarios/{sid}/partitions", params={"since": since})
+    return resp.json() if resp.status_code == 200 else None
+
+
+def judge_partitions(spec, data, since, node_for) -> tuple:
+    """(pending, failed) for a partitions: block against one /partitions
+    answer. pending lists checks not met yet; failed lists checks that can
+    no longer pass (an order reached two consumers under one-consumer)."""
+    pending, failed = [], []
+    if data is None:
+        return ["the dashboard has no partition data"], []
+    events = [e for e in data["events"] if e["ts"] > since]
+    consumers = {}
+    for e in events:
+        consumers.setdefault(e["order"], set()).add(e["node"])
+    shared = {o: sorted(n) for o, n in consumers.items() if len(n) > 1}
+    want = spec.get("orders")
+    if want == "one-consumer":
+        if shared:
+            o = next(iter(shared))
+            failed.append(f"order {o} reached {', '.join(shared[o])}, expected one consumer per order")
+        elif len(events) < 10:
+            pending.append(f"only {len(events)} update(s) seen, too few to judge one consumer per order")
+    elif want == "split" and not shared:
+        pending.append(f"no order reached more than one consumer ({len(events)} update(s) seen)")
+    if spec.get("moved") and not [m for m in data["moves"] if m["ts"] > since]:
+        pending.append("no partition changed owner")
+    if spec.get("picked") and not [e for e in events if "picked" in e["flags"]]:
+        pending.append("no consumer picked an order up part way")
+    lanes = data["lanes"]
+    if spec.get("owned") == "all":
+        unowned = [l["partition"] for l in lanes if not l["owner"]]
+        if unowned or not lanes:
+            pending.append(f"partition(s) {unowned or 'all'} have no owner")
+    for entry in spec.get("owns", []):
+        node = node_for(entry["node"])
+        n = sum(1 for l in lanes if l["node"] == node)
+        lo, hi = entry.get("min", 0), entry.get("max", len(lanes))
+        if not lo <= n <= hi:
+            pending.append(f"{node} owns {n} partition(s), expected {lo} to {hi}")
+    return pending, failed
+
+
+async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_for, snap,
+                       node_for=None) -> None:
+    """One phase of an expect: block. Every has: pattern must appear in its
+    log within the window, and no lacks: pattern may appear in it during the
+    window; every partitions: check must hold by the end of it. Without any
+    lacks: or orders: one-consumer, the check ends as soon as everything
+    else has been seen."""
     checks = []
     for entry in part.get("logs", []):
         aid = action_for(entry["log"])
@@ -231,9 +282,19 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
                        [re.compile(p) for p in entry.get("lacks", [])]))
     window = float(part.get("within", 15))
     deadline = time.time() + window
-    any_lacks = any(lacks for _, _, lacks in checks)
+    parts = part.get("partitions")
+    since = snap.get("__partitions__", time.time())
+    any_lacks = any(lacks for _, _, lacks in checks) or (parts or {}).get("orders") == "one-consumer"
     missing = {}
+    pending = []
     while True:
+        if parts:
+            pending, broken = judge_partitions(parts, await partitions_since(client, sid, since),
+                                               since, node_for or (lambda r: r))
+            if broken:
+                for b in broken:
+                    fail(f"{sid}: {mode_id} {phase}: partitions: {b}")
+                return
         missing, found = {}, {}
         for aid, has, lacks in checks:
             text = await lines_since(client, sid, aid, snap)
@@ -245,14 +306,16 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
             for aid, hits in found.items():
                 fail(f"{sid}: {mode_id} {phase}: {aid} printed what it must not: {hits[0]!r}")
             return
-        done = not any(missing.values())
+        done = not any(missing.values()) and not pending
         if (done and not any_lacks) or time.time() >= deadline:
             break
         await asyncio.sleep(1)
     for aid, pats in missing.items():
         for pat in pats:
             fail(f"{sid}: {mode_id} {phase}: {aid} never printed /{pat}/ within {window:g}s")
-    if not any(missing.values()):
+    for p in pending:
+        fail(f"{sid}: {mode_id} {phase}: partitions: {p} within {window:g}s")
+    if not any(missing.values()) and not pending:
         say(f"     expect {phase}: passed")
 
 
@@ -273,6 +336,13 @@ async def smoke(client, scenario) -> None:
     if not await check_play(client, scenario):
         return
 
+    play = (scenario.get("expect") or {}).get("play")
+    if play:
+        node_for, action_for = await roles_now(client, scenario)
+        watched = {action_for(e["log"]) for e in play.get("logs", [])} - {None}
+        snap = await snapshot(client, sid, watched)
+        await check_expect(client, sid, "Play", "after Play", play, action_for, snap, node_for)
+
     for mode in scenario.get("failureModes", []):
         say(f"\n  -- Break it: {mode['title']}")
         # Roles are frozen here, as the page freezes them at Break it, and
@@ -280,6 +350,7 @@ async def smoke(client, scenario) -> None:
         node_for, action_for = await roles_now(client, scenario)
         card_node = node_for(mode.get("node"))
         resolve = lambda ref: action_for(ref, card_node)
+        resolve_node = lambda ref: node_for(ref, card_node)
         bound = {"node": card_node, "logs": resolve(mode.get("logs"))}
         if (mode.get("node") and not bound["node"]) or (mode.get("logs") and not bound["logs"]):
             fail(f"{sid}: {mode['id']}: no app holds the role it names ({bound})")
@@ -293,7 +364,8 @@ async def smoke(client, scenario) -> None:
         await run_steps(client, sid, mode.get("trigger"))
         snap = await settle(client, sid, expect.get("break"), watched, snap)
         if "break" in expect:
-            await check_expect(client, sid, mode["id"], "after Break it", expect["break"], resolve, snap)
+            await check_expect(client, sid, mode["id"], "after Break it", expect["break"], resolve, snap,
+                               resolve_node)
         else:
             await asyncio.sleep(BREAK_SECONDS)
         await show_logs(sid, scenario, bound)
@@ -303,7 +375,8 @@ async def smoke(client, scenario) -> None:
         await run_steps(client, sid, mode.get("reset"))
         snap = await settle(client, sid, expect.get("reset"), watched, snap)
         if "reset" in expect:
-            await check_expect(client, sid, mode["id"], "after Reset", expect["reset"], resolve, snap)
+            await check_expect(client, sid, mode["id"], "after Reset", expect["reset"], resolve, snap,
+                               resolve_node)
         else:
             await asyncio.sleep(RESET_SECONDS)
         await show_logs(sid, scenario, bound)

@@ -20,6 +20,11 @@ import yaml
 
 COCKPIT = pathlib.Path(__file__).resolve().parent.parent
 SCENARIOS = COCKPIT / "scenarios"
+STATIC_JS = COCKPIT / "static" / "js"
+READING_GUIDE = COCKPIT.parent / "guides" / "000-reading-the-dashboard.md"
+
+# Flags a diagram's events: block may define, each drawn by diagram.js.
+EVENT_FLAGS = {"gap", "order", "picked", "redelivered"}
 
 
 def check(path: pathlib.Path) -> list[str]:
@@ -139,6 +144,8 @@ def check(path: pathlib.Path) -> list[str]:
                 bad.append(f"diagram node {node['id']!r} has flowOn client {flow_on['client']!r}, "
                            f"but its action does not pass --client-name {flow_on['client']}")
 
+    bad.extend(check_partitions(spec, here, actions))
+
     live = spec.get("diagram", {}).get("liveWhen")
     if live and live not in node_ids:
         bad.append(f"diagram liveWhen {live!r} is not a node")
@@ -158,6 +165,13 @@ def check(path: pathlib.Path) -> list[str]:
                 target = (here / action.get("cwd", ".") / cmd[1]).resolve()
                 if not target.exists():
                     bad.append(f"action {action['id']!r} runs missing script {cmd[1]}")
+
+    top = spec.get("expect")
+    if top is not None:
+        if not isinstance(top, dict) or set(top) - {"play"}:
+            bad.append("expect: at the top level takes only play:, checked once Play has finished")
+        else:
+            bad.extend(check_expect("(play)", top, actions, spec))
 
     if "reconcile" in actions and not (here / "tf" / "imports.tsv").exists():
         bad.append("offers reconcile but has no tf/imports.tsv")
@@ -185,11 +199,21 @@ def check_expect(mid, expect, actions, spec) -> list:
         return [f"{where} must map break: and/or reset: to checks"]
     flow_nodes = [n for n in spec.get("diagram", {}).get("nodes", []) if n.get("flowOn")]
     for phase, part in expect.items():
-        if phase not in ("break", "reset"):
+        if phase not in (("play",) if mid == "(play)" else ("break", "reset")):
             bad.append(f"{where} has {phase!r}; only break and reset are checked")
             continue
-        if not isinstance(part, dict) or not isinstance(part.get("logs"), list) or not part["logs"]:
-            bad.append(f"{where} {phase} needs a non-empty logs: list")
+        allowed = ("play",) if mid == "(play)" else ("break", "reset")
+        if phase not in allowed:
+            continue
+        if not isinstance(part, dict) or not (part.get("logs") or part.get("partitions")):
+            bad.append(f"{where} {phase} needs a non-empty logs: list, partitions: checks, or both")
+            continue
+        if "partitions" in part:
+            bad.extend(check_partition_expect(f"{where} {phase}", part["partitions"], spec))
+        if not part.get("logs"):
+            continue
+        if not isinstance(part["logs"], list):
+            bad.append(f"{where} {phase} logs: must be a list")
             continue
         within = part.get("within", 15)
         if not isinstance(within, (int, float)) or within <= 0:
@@ -229,11 +253,229 @@ def check_expect(mid, expect, actions, spec) -> list:
     return bad
 
 
+def partition_box(spec):
+    """The (node, child) whose child is drawn as partitions, or None."""
+    for node in spec.get("diagram", {}).get("nodes", []) or []:
+        for child in node.get("contains", []) or []:
+            if child.get("partitions") is not None:
+                return node, child
+    return None
+
+
+def check_partitions(spec, here, actions) -> list:
+    """A box drawn as partition lanes, and the events: that put dots on them.
+
+        contains:
+          - id: partitioned
+            partitions: {queue: <name>, count: <lanes>}
+        events:
+          pattern: <regex with named groups order, seq; optional key, msg, status>
+          flags: {gap|order|picked|redelivered: <regex>}
+    """
+    bad = []
+    diagram = spec.get("diagram", {}) or {}
+    boxes = [c for n in diagram.get("nodes", []) or [] for c in n.get("contains", []) or []
+             if c.get("partitions") is not None]
+    if len(boxes) > 1:
+        bad.append("diagram draws more than one partitioned queue; the lanes support one")
+    for box in boxes:
+        part = box["partitions"]
+        if not isinstance(part, dict) or not part.get("queue") or not isinstance(part.get("count"), int) \
+                or part["count"] < 1:
+            bad.append(f"diagram box {box.get('id')!r} partitions: needs queue: and a count: of 1 or more")
+            continue
+        consumers = [n for n in diagram.get("nodes", []) if (n.get("flowOn") or {}).get("queue") == part["queue"]]
+        if not consumers:
+            bad.append(f"diagram box {box.get('id')!r} draws {part['queue']} as lanes, but no node has a flowOn on it")
+        # The lanes are laid out from count:, so it must match what terraform creates.
+        for tf in sorted((here / "tf").glob("*.tf")):
+            for block in re.findall(r'resource\s+"solacebroker_msg_vpn_queue"\s+"[^"]+"\s*\{(.*?)\n\}', tf.read_text(), re.S):
+                name = re.search(r'queue_name\s*=\s*"([^"]+)"', block)
+                count = re.search(r'partition_count\s*=\s*(\d+)', block)
+                if name and name.group(1) == part["queue"]:
+                    if not count:
+                        bad.append(f"{tf.name}: {part['queue']} has no partition_count, but the diagram draws {part['count']} lanes")
+                    elif int(count.group(1)) != part["count"]:
+                        bad.append(f"diagram draws {part['count']} lanes for {part['queue']}, "
+                                   f"but {tf.name} creates {count.group(1)} partitions")
+    events = diagram.get("events")
+    if events is not None:
+        if not boxes:
+            bad.append("diagram events: needs a box drawn as partitions to put the dots on")
+        if not isinstance(events, dict) or not isinstance(events.get("pattern"), str):
+            bad.append("diagram events: needs a pattern:")
+        else:
+            try:
+                groups = set(re.compile(events["pattern"]).groupindex)
+                for g in ("order", "seq"):
+                    if g not in groups:
+                        bad.append(f"diagram events pattern has no (?P<{g}>...) group")
+            except re.error as exc:
+                bad.append(f"diagram events pattern is not a valid regex: {exc}")
+            for name, pat in (events.get("flags") or {}).items():
+                if name not in EVENT_FLAGS:
+                    bad.append(f"diagram events flag {name!r} is not one of {sorted(EVENT_FLAGS)}")
+                try:
+                    re.compile(pat)
+                except (re.error, TypeError) as exc:
+                    bad.append(f"diagram events flag {name!r} is not a valid regex: {exc}")
+    return bad
+
+
+def check_partition_expect(where, checks, spec) -> list:
+    """partitions: in an expect: phase, which smoke.py checks against the
+    dashboard's /partitions answer:
+
+        partitions:
+          orders: one-consumer | split   # every order seen reached one consumer, or one reached several
+          moved: true                    # some partition changed owner
+          picked: true                   # some consumer picked an order up part way
+          owned: all                     # every partition has an owner at the end
+          owns:                          # how many partitions a node owns at the end
+            - {node: <node id> | {role: active|standby|other}, min: 1, max: 2}
+    """
+    bad = []
+    found = partition_box(spec)
+    if not found:
+        return [f"{where} has partitions: checks, but the diagram draws no partitioned queue"]
+    queue = found[1]["partitions"].get("queue")
+    if not isinstance(checks, dict) or not checks:
+        return [f"{where} partitions: must map checks to values"]
+    for key, value in checks.items():
+        if key == "orders":
+            if value not in ("one-consumer", "split"):
+                bad.append(f"{where} partitions orders: must be one-consumer or split")
+        elif key in ("moved", "picked"):
+            if value is not True:
+                bad.append(f"{where} partitions {key}: can only be true")
+        elif key == "owned":
+            if value != "all":
+                bad.append(f"{where} partitions owned: can only be all")
+        elif key == "owns":
+            if not isinstance(value, list) or not value:
+                bad.append(f"{where} partitions owns: must be a list")
+                continue
+            ids = {n["id"] for n in spec["diagram"]["nodes"] if (n.get("flowOn") or {}).get("queue") == queue}
+            for entry in value:
+                ref = entry.get("node") if isinstance(entry, dict) else None
+                if isinstance(ref, dict):
+                    if ref.get("role") not in ("active", "standby", "other"):
+                        bad.append(f"{where} partitions owns node role must be active, standby or other")
+                elif ref not in ids:
+                    bad.append(f"{where} partitions owns node {ref!r} is not a consumer of {queue}")
+                if not any(isinstance(entry.get(k), int) for k in ("min", "max")):
+                    bad.append(f"{where} partitions owns entry needs min: or max:")
+        else:
+            bad.append(f"{where} partitions: has unknown check {key!r}")
+    return bad
+
+
+def _calls(text: str, name: str):
+    """(offset, [arguments as source text]) for each call of name(...) in
+    JavaScript source, splitting top-level commas outside strings."""
+    for m in re.finditer(rf"(?<![\w.]){name}\(", text):
+        i, depth, quote, args, cur = m.end(), 1, None, [], ""
+        while i < len(text) and depth:
+            c = text[i]
+            if quote:
+                cur += c
+                if c == "\\":
+                    cur += text[i + 1]
+                    i += 1
+                elif c == quote:
+                    quote = None
+            elif c in "\"'`":
+                quote = c
+                cur += c
+            elif c in "([{":
+                depth += 1
+                cur += c
+            elif c in ")]}":
+                depth -= 1
+                if depth:
+                    cur += c
+            elif c == "," and depth == 1:
+                args.append(cur.strip())
+                cur = ""
+            else:
+                cur += c
+            i += 1
+        args.append(cur.strip())
+        yield m.start(), args
+
+
+def _body(text: str, signature: str):
+    """The character range of a function's body, found by its signature."""
+    start = text.find(signature)
+    if start < 0:
+        return None
+    # The body's brace follows the parameter list, which may hold "= {}".
+    i = re.compile(r"\)\s*\{").search(text, start).end() - 1
+    depth = 0
+    for j in range(i, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[j], 0)
+        if depth == 0:
+            return start, j
+    return None
+
+
+def check_indicators() -> list:
+    """Every indicator on the page explains itself.
+
+    Hover text is set only through indicator(node, "<name>", text) in the
+    dashboard's JavaScript (or the indicator: attribute of cockpit.js's h()),
+    and each name needs a row in guides/000-reading-the-dashboard.md tagged
+    <!-- indicator: <name> --> (one comment may list several names). Setting
+    a title any other way, a name with no text anywhere, a name missing from
+    the guide, or a guide tag for a name nothing uses, is a problem."""
+    bad, names = [], {}
+    for js in sorted(STATIC_JS.glob("*.js")):
+        text = js.read_text()
+        exempt = [r for r in (_body(text, "function indicator("), _body(text, "function tip("),
+                              _body(text, "function h(")) if r]
+        inside = lambda pos: any(a <= pos <= b for a, b in exempt)
+        for pat, what in ((r"(?<![\w.])tip\(", "tip()"), (r"\.title\s*=(?!=)", ".title ="),
+                          (r"[\"']title[\"']\s*\)", "a <title> element or title attribute"),
+                          (r"\btitle:\s*[\"'`]", "a title: attribute")):
+            for m in re.finditer(pat, text):
+                if not inside(m.start()):
+                    line = text.count("\n", 0, m.start()) + 1
+                    bad.append(f"{js.name}:{line}: sets hover text with {what}; use indicator(node, name, text)")
+        # The helpers themselves (h() passes its indicator: attribute on)
+        # are not uses.
+        calls = [(pos, args) for pos, args in _calls(text, "indicator")
+                 if not inside(pos) and not text.startswith("function", max(0, pos - 9))]
+        for m in re.finditer(r'indicator:\s*\[\s*"([a-z0-9-]+)"\s*,\s*([^\]]+)\]', text):
+            calls.append((m.start(), ["node", f'"{m.group(1)}"', m.group(2).strip()]))
+        for pos, args in calls:
+            line = text.count("\n", 0, pos) + 1
+            if len(args) != 3 or not re.fullmatch(r'"[a-z0-9-]+"', args[1]):
+                bad.append(f"{js.name}:{line}: indicator() needs (node, \"literal-name\", text)")
+                continue
+            entry = names.setdefault(args[1].strip('"'), {"where": f"{js.name}:{line}", "text": False})
+            if args[2] not in ("null", "undefined", '""', "''"):
+                entry["text"] = True
+    for name, entry in sorted(names.items()):
+        if not entry["text"]:
+            bad.append(f"indicator {name!r} ({entry['where']}) is never given hover text")
+    guide = READING_GUIDE.read_text() if READING_GUIDE.exists() else ""
+    tagged = set()
+    for m in re.finditer(r"<!--\s*indicators?:\s*([a-z0-9,\s-]+?)\s*-->", guide):
+        tagged.update(n.strip() for n in m.group(1).split(",") if n.strip())
+    for name in sorted(set(names) - tagged):
+        bad.append(f"indicator {name!r} ({names[name]['where']}) has no row in {READING_GUIDE.name} "
+                   f"tagged <!-- indicator: {name} -->")
+    for name in sorted(tagged - set(names)):
+        bad.append(f"{READING_GUIDE.name} has a row for indicator {name!r}, which the page does not use")
+    return [f"indicators: {m}" for m in bad]
+
+
 def main() -> int:
     problems = []
     found = sorted(SCENARIOS.glob("*/scenario.yaml"))
     for path in found:
         problems.extend(check(path))
+    problems.extend(check_indicators())
 
     for p in problems:
         print(p)

@@ -292,8 +292,9 @@ its `flowOn.client`.
   `active-consumer`, so the dashboard's roles treat them all as active.
 - The broker keeps each partition as an internal queue, `#pq/<id>/0000N`,
   listed in the monitor tree with `partitionNumber` and `partitionQueueName`.
-  Its `txFlows` are empty, so which consumer owns a partition is not
-  visible that way. The queue reports `partitionRebalanceStatus`.
+  Its `txFlows` are empty, but the partition's own monitor entry names its
+  owner in `partitionClientName` (section 10). The queue reports
+  `partitionRebalanceStatus`.
 - After a consumer is killed, the survivor received the crashed consumer's
   keys part way through their sequence within the rebalance delay (5 s) plus
   handoff time (3 s), still in order per key.
@@ -315,3 +316,85 @@ its `flowOn.client`.
 - A queue's default `dead_msg_queue` is `#DEAD_MSG_QUEUE`, which does not
   exist on a fresh broker. A message that reached its redelivery limit on such
   a queue was removed and counted in `maxRedeliveryExceededToDmqFailedMsgCount`.
+
+## 10. Partition distribution, for the Partitioning rework
+
+Tested on 10.26.0 with the Go API v1.10.0, on a throwaway queue with six
+partitions, `partition_rebalance_delay` 5 and
+`partition_rebalance_max_handoff_time` 3. The probe tool and scripts are not
+kept in the repo.
+
+**What the documentation says.**
+[Message Distribution with Partitioned Queues](https://docs.solace.com/Messaging/Guaranteed-Msg/Partitioned-Queue-Messaging.htm)
+says the broker hashes the key and maps it to a partition, that a message
+without a key "is randomly assigned a partition", and that consumers beyond
+the partition count take no load.
+[Partition Rebalancing](https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Rebalancing.htm)
+says the broker aims for every consumer to own the same number of
+partitions, plus or minus one, and moves partitions from the most loaded
+flow to the least loaded. [Queues](https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm)
+gives `partition = partition-key-hash MOD partition-count`. No page names
+the hash.
+
+**Who owns what.** Each partition's monitor entry (`#pq/<id>/0000N`, found
+with `where=partitionQueueName==<queue>`) has `partitionClientName`, the
+client name of its owner, empty while it has none. Measured as consumers
+came and went (time after the change):
+
+| Change | Owners after it |
+| --- | --- |
+| c1 binds (first) | c1: 0 to 5, after 0.9 s |
+| c2 binds | c1: 3, 4, 5; c2: 0, 1, 2, after 5.3 s |
+| c3 binds | c1: 4, 5; c2: 1, 2; c3: 0, 3, after 5.7 s |
+| c4 binds | c1: 4, 5; c2: 1, 2; c3: 3; c4: 0, after 6.0 s |
+| c2 killed (SIGKILL), 4 bound | 1 and 2 owned by nobody at once; after 5.6 s c3: 2, 3; c4: 0, 1 |
+| c4 killed, 3 bound | 0 and 1 owned by nobody; after 5.6 s c1: 1, 4, 5; c3: 0, 2, 3 |
+| c2 binds again | after 5.7 s c1: 4, 5; c2: 0, 1; c3: 2, 3 |
+| c5 binds (4th) | after 5.5 s c2 gives up 0 to c5: 2, 2, 1, 1 |
+| c1 and c3 stop | 2, 3, 4, 5 owned by nobody; after 5.6 s c2: 1, 3, 5; c5: 0, 2, 4 |
+
+So: the spread is even to within one; the first consumer gets everything at
+once, but every later change waits the rebalance delay
+(`partitionRebalanceStatus` `holddown`); only the partitions that must move
+do; and a crashed consumer's partitions stay unowned for the delay, with
+their messages waiting.
+
+**Which partition a key lands on.** Publishing order ids one at a time to
+a queue with no consumers, and reading which partition's
+`spooledMsgCount` went up, gave the partition of each id. It is
+deterministic (the same 60 ids landed the same way twice) and the same on
+a second queue with six partitions. Ids `O-0001` to `O-1200` landed 196,
+197, 187, 201, 200 and 219 per partition. It matched none of FNV-1 or
+FNV-1a (32 and 64 bit), CRC-32, Adler-32, Murmur3, Java's `hashCode`, MD5 or
+SHA-1 (with and without a trailing NUL), each modulo 6. So nothing in the
+workshop computes partitions from keys. The order service uses the measured
+table only to choose ids that keep all six partitions busy (two orders
+each); the broker still does the placing.
+
+**No key, and an empty key.** Sixty messages without a key went round the
+six partitions in turn, ten each, not at random as the documentation says.
+Sixty messages whose key was the empty string all went to one partition:
+an empty key is still a key.
+
+**Which partition a message came from.** The Go API does not say. But the
+replication group message id a consumer gets
+(`GetReplicationGroupMessageID`, `rmid1:xxxxx-xxxxxxxxxxx-xxxxxxxx-<hex>`)
+ends in the broker's own message id in hex: for 50 of 50 messages it equalled
+the `msgId` the broker reported as that partition's `lastSpooledMsgId`. That
+layout is not documented. Each partition's `msgs` collection lists the ids it
+holds now, and its `meta.count` is how many (waiting, or delivered and not
+yet acknowledged). The dashboard polls these (a list every 0.25 s, each
+partition's messages every 0.5 s) and places an update by its id, or by its
+key once another update with that key has been placed. In a 30 second
+window with three consumers, 88 of 133 updates were placed (the sampler
+had only just started); none disagreed with the measured table, and none
+sat in a lane its consumer did not own.
+
+**Crash and join, with traffic.** After a SIGKILL, the two orphaned
+partitions went one to each survivor after 5.3 s, and the first update
+through each was an order part way through (`#2`, `#3`), with no gap. With
+one order in flight per partition, a moved partition sometimes started with
+a new order's `#1`, so nothing showed a pickup; with two orders per
+partition that is rare, which is why the order service keeps twelve in
+flight.
+

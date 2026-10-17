@@ -59,6 +59,7 @@
       if (value === null || value === undefined || value === false) continue;
       if (key === "class") node.className = value;
       else if (key === "text") node.textContent = value;
+      else if (key === "indicator") indicator(node, ...value);
       else if (key.startsWith("on")) node.addEventListener(key.slice(2).toLowerCase(), value);
       else node.setAttribute(key, value === true ? "" : value);
     }
@@ -105,6 +106,28 @@
     idle: "Idle",
   };
 
+  /* Hover text for anything the page shows as a symbol, a count, a colour
+     or a short label. Named, so check_scenarios.py can make sure each one
+     has a row in guides/000-reading-the-dashboard.md. An HTML element gets
+     a title; an SVG one gets a <title> child, which is what browsers show. */
+  function indicator(node, name, text) {
+    if (!node) return;
+    node.setAttribute("data-indicator", name);
+    if (node instanceof SVGElement) {
+      let t = node.querySelector(":scope > title");
+      if (!text) { t?.remove(); return; }
+      if (!t) {
+        t = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        node.prepend(t);
+      }
+      t.textContent = text;
+    } else if (text) {
+      node.title = text;
+    } else {
+      node.removeAttribute("title");
+    }
+  }
+
   /* ------------------------------------------------------- broker status */
 
   async function pollBroker() {
@@ -113,21 +136,21 @@
       if (health.ready) {
         el.brokerDot.className = "dot dot--ready";
         el.brokerText.textContent = `Ready · ${health.msgVpn}`;
-        el.brokerText.parentElement.title =
-          `The dashboard can reach the broker, and message VPN ${health.msgVpn} is the one it configures`;
+        indicator(el.brokerText.parentElement, "broker-status",
+          `The dashboard can reach the broker, and message VPN ${health.msgVpn} is the one it configures`);
       } else {
         /* Almost always the 30-60s container boot, so say that rather than
            showing a raw connection error an attendee cannot act on. */
         el.brokerDot.className = "dot dot--wait";
         el.brokerText.textContent = "Starting…";
-        el.brokerText.parentElement.title =
-          "The broker answers but is not ready yet. A new broker takes about a minute to start";
+        indicator(el.brokerText.parentElement, "broker-status",
+          "The broker answers but is not ready yet. A new broker takes about a minute to start");
       }
     } catch (err) {
       el.brokerDot.className = "dot dot--down";
       el.brokerText.textContent = "Unreachable";
-      el.brokerText.parentElement.title =
-        "The dashboard cannot reach the broker's management port. Check the broker container is running";
+      indicator(el.brokerText.parentElement, "broker-status",
+        "The dashboard cannot reach the broker's management port. Check the broker container is running");
     }
   }
 
@@ -136,8 +159,8 @@
       const { activeCount, sequences, runs, sequenceErrors } = await API.runs();
       el.activeBadge.classList.toggle("hidden", activeCount === 0);
       el.activeBadge.textContent = `${activeCount} running`;
-      el.activeBadge.title =
-        `${activeCount} app(s) or step(s) running, across every scenario. Stop everything ends them all`;
+      indicator(el.activeBadge, "running-count",
+        `${activeCount} app(s) or step(s) running, across every scenario. Stop everything ends them all`);
 
       /* Drive the transport from what is actually running: a sequence in
          flight means busy, a live process means Pause is available. */
@@ -208,7 +231,7 @@
     if (card) {
       card.dataset.state = stateName;
       // The dot's colour is the state; say it in words on hover.
-      card.title = `${status ? label : "Not run yet"}. Click to see what this step does, run it or stop it`;
+      indicator(card, "step-dot", `${status ? label : "Not run yet"}. Click to see what this step does, run it or stop it`);
     }
 
     const running = stateName === "running";
@@ -589,7 +612,7 @@
       }[cardState];
       badge.className = `badge badge--${cls} fm__badge`;
       badge.textContent = text;
-      badge.title = {
+      indicator(badge, "card-badge", {
         broken: "This failure is in effect now. Press Reset to put things back",
         locked: mode.needs === "applied"
           ? "Apply this scenario's configuration first (press Play)"
@@ -597,7 +620,7 @@
         waiting: "Another failure on this page is in effect. Reset that one first",
         recovered: "Reset is done. The log shows the recovery. You can break it again",
         ready: "Press Break it to cause this failure on purpose",
-      }[cardState];
+      }[cardState]);
 
       // A recovered card can be broken again straight away: try again.
       card.querySelector(".fm__break").disabled = cardState !== "ready" && cardState !== "recovered";
@@ -644,18 +667,14 @@
   function markDiagramNode(nodeId, broken) {
     for (const n of document.querySelectorAll(".dg-node.is-faulted")) {
       n.classList.remove("is-faulted");
-      n.querySelector(":scope > .dg-node__box > title")?.remove();
+      indicator(n.querySelector(":scope > .dg-node__box"), "faulted-border", null);
     }
     if (broken && nodeId) {
       const node = document.querySelector(`.dg-node[data-node="${nodeId}"]`);
       node?.classList.add("is-faulted");
       // The red border needs saying in words: it is the failure, not an error.
-      const box = node?.querySelector(":scope > .dg-node__box");
-      if (box) {
-        const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        t.textContent = "A Break it card is in effect on this app. See the card below";
-        box.prepend(t);
-      }
+      indicator(node?.querySelector(":scope > .dg-node__box"), "faulted-border",
+        "A Break it card is in effect on this app. See the card below");
     }
   }
 
@@ -836,7 +855,7 @@
       const asof = document.getElementById("inspect-asof");
       if (asof) {
         asof.textContent = `Updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
-        asof.title = "Read from the broker every 5 seconds while this page is open. Refresh reads it now.";
+        indicator(asof, "inspect-updated", "Read from the broker every 5 seconds while this page is open. Refresh reads it now.");
       }
     } catch (err) {
       host.dataset.seen = "";
@@ -905,6 +924,7 @@
         onLogs: (id) => selectNode(scenario, id, "logs"),
       });
       refreshDiagramState(scenario);
+      watchPartitions(scenario, diagramHost);
     }
 
     const stats = h("section", { class: "stats", id: "stats" });
@@ -974,7 +994,7 @@
         h("button", {
           class: "btn btn--secondary btn--sm",
           text: "Refresh",
-          title: "Read the broker again now",
+          indicator: ["refresh-button", "Read the broker again now"],
           onClick: () => refreshInspect(scenario.id),
         })
       ),
@@ -1106,7 +1126,7 @@
       h("div", { class: "panel__titles" },
         h("p", { class: "panel__eyebrow", text: spec.kind || "node" }),
         h("h4", { class: "panel__title", text: spec.label })),
-      h("button", { class: "panel__close", text: "\u00d7", title: "Close",
+      h("button", { class: "panel__close", text: "\u00d7", indicator: ["close-panel", "Close this panel"],
         onClick: closePanel })
     );
 
@@ -1275,6 +1295,31 @@
       (scenario.actions || []).filter((a) => a.longRunning).map((a) => a.id));
     return new Set((scenario.diagram?.nodes || [])
       .filter((n) => longRunning.has(n.action)).map((n) => n.id));
+  }
+
+  /* A diagram with a partitioned queue reads its lanes and the updates the
+     consumers handled about once a second, for as long as it is on screen.
+     Each answer carries `until`, where the next one picks up. */
+  function watchPartitions(scenario, host) {
+    const hasLanes = (scenario.diagram?.nodes || [])
+      .some((n) => (n.contains || []).some((c) => c.partitions));
+    if (!hasLanes) return;
+    let since = 0;
+    const tick = async () => {
+      if (state.activeId !== scenario.id || !host.isConnected) return;
+      if (document.visibilityState === "visible") {
+        try {
+          const data = await API.partitions(scenario.id, since);
+          since = data.until;
+          Diagram.paintPartitions(host, data);
+        } catch (_) {
+          /* transient; the next tick will catch up */
+        }
+      }
+      setTimeout(tick, 1000);
+    };
+    // The host is put on the page after this returns.
+    setTimeout(tick, 0);
   }
 
   async function refreshDiagramState(scenario) {

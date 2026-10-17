@@ -101,6 +101,9 @@ class Scenario:
     # cause it and the steps that put things back. Passed to the browser
     # as-is; the cockpit drives them with the ordinary start and stop calls.
     failure_modes: list = field(default_factory=list)
+    # What smoke.py checks once Play has finished (`play:`), in the same
+    # form as a failure mode's expect: block.
+    expect: dict = field(default_factory=dict)
 
     @property
     def run_sequence(self) -> list:
@@ -181,6 +184,7 @@ class Scenario:
             "cleanupSequence": [a.id for a in self.cleanup_sequence],
             "diagram": self.diagram,
             "failureModes": self.failure_modes,
+            "expect": self.expect,
         }
 
 
@@ -201,6 +205,7 @@ def _load_one(path: Path) -> Scenario:
         cleanup=raw.get("cleanup", []),
         diagram=raw.get("diagram", {}) or {},
         failure_modes=raw.get("failure_modes", []) or [],
+        expect=raw.get("expect", {}) or {},
     )
 
 

@@ -1216,6 +1216,70 @@ a { color: var(--text-link); }
   .dg-packet { opacity: 0.6; }
 }
 
+/* A partitioned queue: one lane per partition, each naming its owner and
+   its counts, all read from the broker. A lane with no owner is drawn as
+   waiting; a lane that just moved flashes once. */
+.dg-part__status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--orange);
+}
+.dg-part__status[data-state="absent"] { fill: var(--text-muted); }
+
+.dg-lane__box {
+  fill: color-mix(in srgb, var(--surface-raised) 85%, transparent);
+  stroke: var(--border-strong);
+  stroke-width: 0.75;
+}
+.dg-lane[data-owned="false"] .dg-lane__box { stroke: var(--orange); stroke-dasharray: 3 3; }
+.dg-lane[data-owned="absent"] { opacity: 0.45; }
+.dg-lane.is-moved .dg-lane__box { animation: dg-lane-moved 2.4s var(--ease-standard); }
+
+@keyframes dg-lane-moved {
+  0%, 40% { stroke: var(--green-bright); stroke-width: 2; }
+  100%    { stroke: var(--border-strong); stroke-width: 0.75; }
+}
+
+.dg-lane__num,
+.dg-lane__owner,
+.dg-lane__held,
+.dg-lane__in {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  fill: var(--text-default);
+}
+.dg-lane__num { fill: var(--text-muted); }
+.dg-lane[data-owned="false"] .dg-lane__owner { fill: var(--orange); }
+.dg-lane__held { fill: var(--text-muted); }
+.dg-lane__held[data-busy="true"] { fill: var(--orange); font-weight: var(--fw-semibold); }
+.dg-lane__in { fill: var(--text-muted); }
+
+/* A lane's line to the consumer that owns it. Solid, unlike the dashed
+   lines of other diagrams, because it is drawn from broker data. */
+.dg-lane-edge { stroke-dasharray: none; stroke-width: 1.5; }
+.dg-lane-edge.is-unowned { stroke: var(--orange); stroke-dasharray: 2 3; }
+
+/* One real update. Hollow when the dashboard did not catch its partition. */
+.dg-dot circle { stroke: #0b1622; stroke-width: 1.75; }
+.dg-dot.is-unplaced circle { fill-opacity: 0.35; stroke: var(--text-default); stroke-dasharray: 2 2; }
+.dg-dot__letter,
+.dg-chip__text {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: var(--fw-bold);
+}
+
+/* The last updates a consumer handled. A gap or a step backwards in its
+   own log is drawn with a red outline and a "!". */
+.dg-chip rect { stroke: #0b1622; stroke-width: 1; }
+.dg-chip.is-flagged rect { stroke: var(--status-danger); stroke-width: 2.25; }
+/* A chip fades out just before it leaves the row (diagram.js sets the delay). */
+.dg-chip { animation: dg-chip-leave 0.9s var(--ease-standard) forwards; }
+@keyframes dg-chip-leave { to { opacity: 0; } }
+
+.dg-node[data-idle] .dg-node__sub { fill: var(--orange); }
+.dg-node[data-partitioned="true"][data-status="running"]:not([data-idle]) .dg-node__sub { fill: var(--green-bright); }
+
 /* ---------------------------------------------------------------- transport */
 
 /* Play / Pause / Cleanup and the steps behind them. This is the primary way to

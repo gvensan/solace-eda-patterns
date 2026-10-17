@@ -266,15 +266,61 @@ name (`solace.ConnectAs`).
         client: excl-ledger-a
 ```
 
-Every mark on the diagram explains itself on hover: the status dot, the
+Every mark on the page explains itself on hover: the status dot, the
 `1/1` count, the counts inside the broker, `logs`, the active or standby
-label and the red border of a failure in effect. A new kind of indicator
-needs the same: hover text (`tip()` in `diagram.js`, or `title` in
-`cockpit.js`) and a row in `guides/000-reading-the-dashboard.md`.
+label, the red border of a failure in effect, and so on. Hover text is set
+only through `indicator(node, "<name>", text)` (in `diagram.js` or
+`cockpit.js`; `h()` in `cockpit.js` takes `indicator: ["<name>", text]`).
+Each name needs a row in `guides/000-reading-the-dashboard.md` tagged
+`<!-- indicator: <name> -->` (one tag may list several names, comma
+separated). `check_scenarios.py` fails on hover text set any other way
+(`tip()`, `.title =`, a `title` attribute), on a name never given text, on
+a name with no tagged row, and on a tagged row for a name nothing uses.
 
 A node with `flowOn` is labelled "active, not acking" when it is the active
 consumer, holds unacknowledged messages, and its acked count on the broker
 has not moved for 5 seconds (`STALL_SECONDS` in `cockpit/app/main.py`).
+
+#### Partitioned queues: lanes and real events
+
+A box inside the broker can be drawn as one lane per partition of a
+partitioned queue, and a diagram can put one dot on the page for each real
+update its consumers report handling. Partitioning uses both.
+
+```yaml
+diagram:
+  events:                    # each line a consumer prints for an update it handled
+    pattern: '\] (?P<order>O-\d+) #(?P<seq>\d+) (?P<status>\w+) \((?:key (?P<key>[^,)]+)|no key)(?:, msg (?P<msg>\d+))?\)'
+    flags:                   # optional; gap, order, picked, redelivered
+      gap: 'GAP: '
+      order: 'OUT OF ORDER: '
+  nodes:
+    - id: broker
+      contains:
+        - id: partitioned
+          label: q.part.orders
+          partitions: { queue: q.part.orders, count: 6 }
+```
+
+- `count:` must equal the queue's `partition_count` in the scenario's
+  terraform (the checker compares them), because the lanes are laid out
+  before the broker is asked.
+- Each lane shows the partition's owner (`partitionClientName`), the
+  messages it holds now and how many it has taken in, read by
+  `cockpit/app/partitions.py` over SEMP several times a second while the
+  page is open. A line from each lane runs to its owner's node, and swings
+  when the broker moves the partition. Lines `via:` the box are not drawn.
+- Every node with a `flowOn` on that queue is a consumer: its sublabel says
+  which partitions it owns, and a row shows the last updates it handled.
+- `events:` reads the stdout of those consumers' actions. Named groups:
+  `order` and `seq` (required), `status`, `key` and `msg` (optional). `msg`
+  is the broker's message id (`solace.SpoolID`), which is how an update is
+  placed in a partition: the dashboard matches it against the ids it saw in
+  each partition. With `events:`, the diagram draws no looping packets at
+  all: only real updates move.
+- `GET /api/scenarios/<id>/partitions?since=<time>` returns the lanes,
+  recent ownership moves and the parsed events, for the page and for
+  `smoke.py`.
 
 A flow that carries only the odd message (from a queue to its dead message
 queue's reader, say) can set `animate: false`. It is drawn, but never shows
@@ -383,9 +429,26 @@ block.
 - With any `lacks:` the check always waits the full window, since absence
   can only be shown by waiting. Without, it ends as soon as every `has:`
   pattern has been seen.
-- `check_scenarios.py` validates the block: known phases, a non-empty
-  `logs:` list, a valid `log:` reference, at least one of `has:` or `lacks:`,
-  and patterns that compile.
+- A diagram with partition lanes can also check the dashboard's
+  `/partitions` answer, alone or beside `logs:`:
+
+  ```yaml
+        partitions:
+          orders: one-consumer     # or split: some order reached two consumers
+          moved: true              # some partition changed owner
+          picked: true             # some consumer picked an order up part way
+          owned: all               # every partition has an owner by the end
+          owns:                    # partitions a node owns by the end
+            - { node: {role: active}, max: 0 }
+            - { node: fulfil4, min: 1, max: 1 }
+  ```
+
+  `orders: one-consumer` waits the full window, like `lacks:`.
+- A scenario can also say what must hold once Play has finished, before any
+  card, with the same checks under a top-level `expect: play:`.
+- `check_scenarios.py` validates the block: known phases, a `logs:` list or
+  `partitions:` checks, a valid `log:` reference, at least one of `has:` or
+  `lacks:`, and patterns that compile.
 
 Write expectations from the card's own `watch:` text, so the words a card
 promises are the words the test checks.

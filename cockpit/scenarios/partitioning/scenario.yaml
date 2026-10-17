@@ -6,14 +6,15 @@ title: Partitioning
 summary: >
   Each order moves through created, paid, packed, shipped and delivered, and
   fulfilment must see one order's updates in that order. Many orders are in
-  flight at once, so two consumers share the work. The order id travels as
-  the partition key: every update for one order goes to the same consumer,
-  in order, while different orders are handled in parallel.
+  flight at once, so three consumers share the work. The order id travels
+  as the partition key: every update for one order goes to the same
+  partition, and so to the same consumer, in order, while different orders
+  are handled in parallel.
 
 objectives:
-  - See every update for one order reach the same consumer, in order
-  - See different orders handled by different consumers at the same time
-  - Crash a consumer and watch its orders move to the other one, still in order
+  - See every update for one order go through one partition to one consumer, in order
+  - See the broker share six partitions between the consumers, two each
+  - Crash a consumer, and add a fourth, and watch partitions move
   - Publish without a partition key and see one order's updates split between consumers
 
 run:
@@ -21,19 +22,43 @@ run:
   - build
   - fulfilment-1
   - fulfilment-2
+  - fulfilment-3
   - orders
 
 cleanup:
   - destroy
 
+# Checked by smoke.py once Play has finished, before any Break it card.
+expect:
+  play:
+    within: 20
+    partitions:
+      orders: one-consumer
+      owned: all
+      owns:
+        - { node: fulfil1, min: 2, max: 2 }
+        - { node: fulfil2, min: 2, max: 2 }
+        - { node: fulfil3, min: 2, max: 2 }
+
 diagram:
   caption: >
     The order service publishes each update with the order id as its
-    partition key. The queue has four partitions; the key picks one, and
-    each partition belongs to one consumer. So one order always reaches the
-    same consumer, and the two consumers work on different orders at once.
+    partition key. The queue has six partitions, drawn as lanes; the key
+    picks the lane, and each lane belongs to one consumer. Each dot is one
+    update a consumer has handled, coloured and lettered by its order, drawn
+    through the partition the broker held it in.
   duration: 2.4
   liveWhen: orders
+  # Each line a consumer prints for an update it handled. The dashboard
+  # reads the order, its sequence number, its key and the broker's number
+  # for the message, and places the update in a partition from broker data.
+  events:
+    pattern: '\] (?P<order>O-\d+) #(?P<seq>\d+) (?P<status>\w+) \((?:key (?P<key>[^,)]+)|no key)(?:, msg (?P<msg>\d+))?\)'
+    flags:
+      gap: 'GAP: '
+      order: 'OUT OF ORDER: '
+      picked: 'picked up '
+      redelivered: '\(redelivered\)'
   nodes:
     - id: orders
       label: Order Service
@@ -46,13 +71,16 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-part-orders
     - id: broker
       label: Solace Broker
-      sublabel: one key, one consumer
+      sublabel: one key, one partition
       kind: broker
       col: 1
       action: apply
       contains:
         - id: partitioned
-          label: q.part.orders (4 partitions)
+          label: q.part.orders
+          partitions:
+            queue: q.part.orders
+            count: 6
       provides:
         - label: q.part.orders
           group: partitioned
@@ -85,10 +113,36 @@ diagram:
       requires:
         - label: svc-part-fulfilment
           semp: /msgVpns/{vpn}/clientUsernames/svc-part-fulfilment
+    - id: fulfil3
+      label: Fulfilment 3
+      sublabel: its own orders
+      kind: app
+      col: 2
+      action: fulfilment-3
+      flowOn:
+        queue: q.part.orders
+        client: part-fulfilment-3
+      requires:
+        - label: svc-part-fulfilment
+          semp: /msgVpns/{vpn}/clientUsernames/svc-part-fulfilment
+    - id: fulfil4
+      label: Fulfilment 4
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: fulfilment-4
+      flowOn:
+        queue: q.part.orders
+        client: part-fulfilment-4
+      requires:
+        - label: svc-part-fulfilment
+          semp: /msgVpns/{vpn}/clientUsernames/svc-part-fulfilment
   flows:
     - { from: orders, to: broker, label: order updates, delay: 0 }
     - { from: broker, to: fulfil1, via: partitioned, delay: 0.8 }
     - { from: broker, to: fulfil2, via: partitioned, delay: 1.0 }
+    - { from: broker, to: fulfil3, via: partitioned, delay: 1.2 }
+    - { from: broker, to: fulfil4, via: partitioned, delay: 1.4 }
 
 actions:
   - id: apply
@@ -98,7 +152,7 @@ actions:
     tf_dir: tf
     variant: primary
     description: >
-      Creates the partitioned queue q.part.orders (four partitions), its
+      Creates the partitioned queue q.part.orders (six partitions), its
       topic subscription, and the client profile, ACL profile and usernames
       for this scenario.
 
@@ -121,7 +175,7 @@ actions:
     variant: secondary
     description: >
       Binds the partitioned queue and handles order updates, checking that
-      each order moves one step at a time.
+      each order's sequence numbers arrive one at a time.
 
   - id: fulfilment-2
     label: Start fulfilment 2
@@ -134,6 +188,28 @@ actions:
       The same consumer again. The broker gives it partitions of its own, so
       it handles different orders.
 
+  - id: fulfilment-3
+    label: Start fulfilment 3
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, fulfil, --role, fulfilment-3, --client-name, part-fulfilment-3]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A third copy. Six partitions over three consumers: two each.
+
+  - id: fulfilment-4
+    label: Start fulfilment 4
+    kind: process
+    cmd: [bash, ../../apps/run.sh, partition, fulfil, --role, fulfilment-4, --client-name, part-fulfilment-4]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      A fourth copy, which Play does not start. The broker takes a partition
+      from one of the others and gives it to this one.
+
   - id: orders
     label: Publish order updates
     kind: process
@@ -142,8 +218,9 @@ actions:
     long_running: true
     variant: primary
     description: >
-      Publishes status updates for eight orders at a time, five a second,
-      each with its order id as the partition key.
+      Publishes status updates for twelve orders at a time, five a second,
+      each with its order id as the partition key and a sequence number,
+      #1 to #5.
 
   - id: orders-no-key
     label: Publish without a key
@@ -190,31 +267,37 @@ actions:
 
 failure_modes:
   - id: consumer-crashes
-    title: A consumer crashes, and its orders move
+    title: A consumer crashes, and its partitions move
     breaks: >
       One fulfilment consumer is killed while it handles its orders.
     watch: >
-      The card shows the other consumer's log. A few seconds later it
-      starts receiving orders it has never seen, part way through their
-      lives: "picked up O-... at paid". Those are the crashed consumer's
-      partitions, handed over. Every order still moves one step at a time:
-      no SPLIT and no OUT OF ORDER. Reset starts the crashed consumer again,
-      and after the rebalance delay the partitions are shared out again.
+      In the diagram, the crashed consumer's two lanes lose their owner and
+      say "no owner". For 5 seconds nothing reads them, so their held counts
+      climb. Then the broker gives one lane to each of the other consumers,
+      and the lane lines swing over. The card shows one of them: it starts
+      receiving orders it has never seen, part way through their lives,
+      "picked up O-... at #3" (now and then a moved partition happens to
+      start with a new order instead). Every order still moves one number
+      at a time: no GAP and no OUT OF ORDER. Reset starts the crashed consumer
+      again, and after 5 seconds two lanes move back to it.
     why: >
       Each partition belongs to one consumer at a time. When a consumer
-      goes, the broker waits the rebalance delay (5 seconds here) and gives
-      its partitions to the consumers that are left. Updates it had taken
-      but not acknowledged come back first, in their original order, so
+      goes, the broker waits the rebalance delay (5 seconds here), then
+      gives its partitions to the consumers that are left, keeping their
+      counts within one of each other. Updates it had taken but not
+      acknowledged are delivered again first, in their original order, so
       each order stays in sequence across the move.
     real_world: >
       A consumer crashes, or is scaled down or redeployed. Partitioning
-      keeps per-key order through that, at the cost of a short pause for
-      the moved keys while the broker rebalances.
+      keeps per-key order through that, at the cost of a pause for the
+      moved keys while the broker waits and rebalances.
     docs:
       - label: "Go API: publishing persistent messages (partition keys)"
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
-      - label: "Broker: queues and partitioned queues"
-        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+      - label: "Broker: partition rebalancing"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Rebalancing.htm
+      - label: "Broker: partition handoff"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Handoff.htm
     node: {role: active}
     logs: {role: other}
     trigger:
@@ -222,6 +305,7 @@ failure_modes:
     reset:
       - start: fulfilment-1
       - start: fulfilment-2
+      - start: fulfilment-3
     expect:
       break:
         within: 25
@@ -229,14 +313,85 @@ failure_modes:
           - log: {role: active}
             has: ["exited with code -9"]
           - log: {role: other}
-            has: ["picked up O-"]
-            lacks: ["SPLIT", "OUT OF ORDER"]
+            has: ["#\\d \\w+ \\(key O-"]
+            lacks: ["GAP", "OUT OF ORDER"]
+        partitions:
+          moved: true
+          picked: true
+          owned: all
+          owns:
+            - { node: {role: active}, max: 0 }
       reset:
         within: 25
         logs:
           - log: {role: active}
-            has: ["(created|paid|packed|shipped|delivered) \\(key O-"]
-            lacks: ["SPLIT", "OUT OF ORDER"]
+            has: ["#\\d \\w+ \\(key O-"]
+            lacks: ["GAP", "OUT OF ORDER"]
+        partitions:
+          moved: true
+          owned: all
+          owns:
+            - { node: {role: active}, min: 2, max: 2 }
+
+  - id: fourth-consumer
+    title: A fourth consumer joins
+    breaks: >
+      Fulfilment 4 starts and binds the same queue, while the other three
+      are busy.
+    watch: >
+      Fulfilment 4 binds at once, but for 5 seconds it owns nothing. Then
+      the broker takes one lane from one of the other consumers and gives
+      it to Fulfilment 4: the lane line swings over, and the counts on the
+      consumers read two, two, one and one. Six partitions do not share out
+      evenly over four. The card shows Fulfilment 4's log: it usually picks
+      orders up part way, "picked up O-... at #2", and they still move one
+      number at a time. Reset stops it, and 5 seconds later its lane goes
+      back.
+    why: >
+      A consumer joining a queue that has fewer consumers than partitions
+      starts a rebalance, after the same delay. The broker moves as few
+      partitions as it can: one here, from a consumer that had two. The old
+      owner is given time to acknowledge what it holds (the handoff), so
+      the order's next update reaches the new owner in sequence.
+    real_world: >
+      Scaling out a consumer group. It only helps up to the partition
+      count: a seventh consumer here would own nothing and sit idle. Pick a
+      partition count with room to grow, and changing it later moves keys.
+    docs:
+      - label: "Go API: consuming persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Broker: partition rebalancing"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Rebalancing.htm
+      - label: "Broker: partition handoff"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partition-Handoff.htm
+    node: fulfil4
+    logs: fulfilment-4
+    trigger:
+      - start: fulfilment-4
+    reset:
+      - stop: fulfilment-4
+    expect:
+      break:
+        within: 25
+        logs:
+          - log: fulfilment-4
+            has: ["#\\d \\w+ \\(key O-"]
+            lacks: ["GAP", "OUT OF ORDER"]
+        partitions:
+          moved: true
+          owned: all
+          owns:
+            - { node: fulfil4, min: 1, max: 1 }
+      reset:
+        within: 20
+        logs:
+          - log: fulfilment-4
+            has: ["stopped after \\d+ update"]
+        partitions:
+          moved: true
+          owned: all
+          owns:
+            - { node: fulfil4, max: 0 }
 
   - id: no-key
     title: The publisher forgets the partition key
@@ -244,17 +399,19 @@ failure_modes:
       The order service restarts without setting the partition key on its
       updates.
     watch: >
-      Within seconds both consumers print SPLIT: one order's updates now
-      arrive at both, so each sees gaps, for example "went created to
-      packed; paid was handled by another consumer". The log lines say "no
-      key". Reset restarts the order service with the key and the SPLIT
+      In the diagram, one order's dots (the same letter and colour) now go
+      down different lanes to different consumers. The consumers print
+      GAP: one order's updates arrive at more than one of them, so each
+      sees numbers missing, for example "O-... #1 then #3 (#2 went to
+      another consumer)", and the consumer card flags it. The log lines say
+      "no key". Reset restarts the order service with the key and the GAP
       lines stop.
     why: >
-      The partition key is what ties an order to one partition. A message
-      without one is placed on a partition with no relation to its order,
-      so successive updates for the same order land on different
-      partitions, and so on different consumers, which handle them in
-      parallel, in no particular order.
+      The partition key is what ties an order to one partition. Without
+      one, the broker places each message itself (here, it went round the
+      partitions in turn), so successive updates for the same order land
+      on different partitions, and so on different consumers, which handle
+      them in parallel, in no particular order.
     real_world: >
       A new publisher, a library upgrade or a refactor that drops the key
       property. Nothing fails: messages still flow and every consumer stays
@@ -263,8 +420,8 @@ failure_modes:
     docs:
       - label: "Go API: publishing persistent messages (partition keys)"
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
-      - label: "Broker: queues and partitioned queues"
-        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Queues.htm
+      - label: "Broker: message distribution with partitioned queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Partitioned-Queue-Messaging.htm
     node: orders
     logs: {role: active}
     trigger:
@@ -278,7 +435,9 @@ failure_modes:
         within: 30
         logs:
           - log: {role: active}
-            has: ["SPLIT: ", "no key"]
+            has: ["GAP: ", "no key"]
+        partitions:
+          orders: split
       reset:
         # Updates already on the queue without a key still arrive for a
         # moment after the reset.
@@ -287,7 +446,9 @@ failure_modes:
         logs:
           - log: {role: active}
             has: ["\\(key O-"]
-            lacks: ["SPLIT", "OUT OF ORDER"]
+            lacks: ["GAP", "OUT OF ORDER"]
+        partitions:
+          orders: one-consumer
 
 inspect:
   - label: Queue
@@ -298,12 +459,13 @@ inspect:
     columns: [queueName, accessType, partitionCount, partitionRebalanceStatus, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
     ui_hint: Manager → Queues
     empty: The queue is not on the broker. Press Play, or run Apply configuration.
-  # The broker keeps each partition as an internal queue of its own.
+  # The broker keeps each partition as an internal queue of its own, and
+  # names the client that owns it.
   - label: Partitions of q.part.orders
     kind: semp
     api: monitor
     path: /msgVpns/{vpn}/queues?count=20&where=partitionQueueName==q.part.orders
-    columns: [partitionNumber, queueName, msgSpoolUsage, lastSpooledMsgId, highestAckedMsgId]
+    columns: [partitionNumber, partitionClientName, spooledMsgCount, txUnackedMsgCount, lastSpooledMsgId, highestAckedMsgId]
     ui_hint: Manager → Queues → q.part.orders → Partitions
     empty: The queue is not on the broker, so it has no partitions yet. Press Play.
   - label: Consumers on q.part.orders

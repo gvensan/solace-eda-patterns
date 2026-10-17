@@ -1,9 +1,11 @@
 /* Scenario diagram renderer.
 
    Turns the `diagram:` block in a scenario.yaml into an animated SVG that shows
-   what the scenario does. It is representative, not live: packets loop on a
-   timer rather than tracking real broker traffic, so the picture reads the same
-   before anyone presses Run as it does afterwards.
+   what the scenario does. Usually it is representative, not live: packets loop
+   on a timer while the apps that send them run, rather than tracking real
+   broker traffic. A diagram with `events:` is the exception: there every dot
+   is one real update, drawn after a consumer reports handling it, through the
+   partition the broker held it in (see "Partitioned queues" below).
 
    Scenarios declare nodes and flows; layout is computed here so every scenario
    looks like it belongs to the same workshop.
@@ -64,6 +66,15 @@ const Diagram = (() => {
     if (t.textContent !== text) t.textContent = text;
   }
 
+  /* Every indicator goes through here, named. check_scenarios.py finds each
+     name and fails unless guides/000-reading-the-dashboard.md has a row
+     tagged with it, so nothing new appears on the page unexplained. */
+  function indicator(node, name, text) {
+    if (!node) return;
+    node.setAttribute("data-indicator", name);
+    tip(node, text);
+  }
+
   /* Place every node on a grid: x from its column, y from its position within
      that column, with each column centred vertically against the tallest one so
      a single broker sits level with three subscribers rather than at the top. */
@@ -84,12 +95,29 @@ const Diagram = (() => {
     return isProcessor(a) || isProcessor(b) ? PROC_GAP : ROW_GAP;
   }
 
+  /* A partitioned queue is drawn as a box of lanes, one per partition, with
+     a header line for the queue's name and its rebalance state. */
+  const LANE_H = 19;
+  const LANE_GAP = 3;
+  const PART_HEAD = 24;
+  const PART_PAD = 7;
+  const NODE_W_LANES = 300;
+  // A consumer of a partitioned queue has a row for the updates it handled.
+  const SEQ_ROW = 22;
+
+  function childHeight(c) {
+    if (!c.partitions) return CHILD_H;
+    const k = Number(c.partitions.count) || 1;
+    return PART_HEAD + k * LANE_H + (k - 1) * LANE_GAP + PART_PAD;
+  }
+
   function nodeHeight(n) {
     // A point above and below the usual box, so the text keeps its room.
     if (isProcessor(n)) return NODE_H + HEX_POINT * 2;
-    const kids = n.contains?.length ?? 0;
-    if (!kids) return NODE_H;
-    return CHILD_TOP + kids * CHILD_H + (kids - 1) * CHILD_GAP + CHILD_BOTTOM;
+    const kids = n.contains || [];
+    if (!kids.length) return NODE_H + (n.seqRow ? SEQ_ROW : 0);
+    return CHILD_TOP + kids.reduce((t, c) => t + childHeight(c), 0)
+      + (kids.length - 1) * CHILD_GAP + CHILD_BOTTOM;
   }
 
   /* A node holding configuration grows to fit its longest child label, so a
@@ -102,7 +130,8 @@ const Diagram = (() => {
   function nodeWidth(n) {
     if (!n.contains?.length) return NODE_W;
     const longest = Math.max(...n.contains.map((c) => (c.label || "").length));
-    return Math.max(NODE_W_WIDE, Math.ceil(CHILD_CHROME_W + longest * CHILD_CHAR_W));
+    const lanes = n.contains.some((c) => c.partitions) ? NODE_W_LANES : 0;
+    return Math.max(NODE_W_WIDE, lanes, Math.ceil(CHILD_CHROME_W + longest * CHILD_CHAR_W));
   }
 
   /* A flow label sits between two columns, so a long one (a full topic
@@ -252,16 +281,19 @@ const Diagram = (() => {
     /* Configuration this node holds, drawn as dotted boxes inside it. Nesting
        is the whole point: an object on the broker is part of the broker, not
        a separate destination something is sent to. */
-    (n.contains || []).forEach((child, i) => {
+    let slot = n.y + CHILD_TOP;
+    (n.contains || []).forEach((child) => {
       const box = n.childBoxes?.get(child.id);
-      const cyTop = box ? box.y : n.y + CHILD_TOP + i * (CHILD_H + CHILD_GAP);
+      const cyTop = box ? box.y : slot;
+      slot += childHeight(child) + CHILD_GAP;
       const kid = el("g", { class: "dg-node__child", "data-child": child.id || "" });
 
       kid.append(el("rect", {
         x: n.x + CHILD_INSET, y: cyTop,
-        width: n.w - CHILD_INSET * 2, height: box ? box.h : CHILD_H,
+        width: n.w - CHILD_INSET * 2, height: box ? box.h : childHeight(child),
         rx: 5, class: "dg-node__child-box",
       }));
+      if (child.partitions) drawLanes(kid, n, child, cyTop);
       kid.append(el("text", {
         x: n.x + CHILD_INSET + 8, y: cyTop + 17,
         class: "dg-node__child-label", "text-anchor": "start",
@@ -277,6 +309,13 @@ const Diagram = (() => {
 
       g.append(kid);
     });
+
+    /* A consumer of a partitioned queue keeps a row of the last updates it
+       handled, filled from its log (see paintPartitions). */
+    if (n.seqRow) {
+      g.setAttribute("data-partitioned", "true");
+      g.append(el("g", { class: "dg-seq", "data-seq": n.id }));
+    }
 
     /* Bottom row: how much of this node's config exists, and a way into its
        logs. Both are per-node so nothing has to live further down the page. */
@@ -298,7 +337,7 @@ const Diagram = (() => {
         x: n.x + n.w - 26, y: n.y + n.h - 10 - base,
         class: "dg-node__logbtn-text", "text-anchor": "middle",
       }, "logs"));
-      tip(btn, "Show what this step printed, in the side panel");
+      indicator(btn, "logs-button", "Show what this step printed, in the side panel");
       btn.addEventListener("click", (e) => {
         // Never let the log button also trigger the node's start/stop.
         e.stopPropagation();
@@ -461,8 +500,10 @@ const Diagram = (() => {
     if (!kids.some((c) => flows.some((f) => f.via === c.id))) return null;
 
     if (![...placed.values()].some(isProcessor)) {
-      kids.forEach((c, k) => {
-        const mid = broker.y + CHILD_TOP + k * (CHILD_H + CHILD_GAP) + CHILD_H / 2;
+      let top = broker.y + CHILD_TOP;
+      kids.forEach((c) => {
+        const mid = top + childHeight(c) / 2;
+        top += childHeight(c) + CHILD_GAP;
         flows.forEach((f, i) => {
           if (f.via === c.id && f.from === broker.id && ports[i][0]) ports[i][0].y = mid;
         });
@@ -511,8 +552,12 @@ const Diagram = (() => {
 
   function render(host, diagram, handlers = {}) {
     host.replaceChildren();
-    const nodes = diagram.nodes || [];
     const flows = diagram.flows || [];
+    /* A consumer of a partitioned queue is a little taller, for the row of
+       updates it handled. Copies, so the scenario's own data is untouched. */
+    const lanesOf = partitionBox(diagram);
+    const nodes = (diagram.nodes || []).map((n) => (lanesOf
+      && n.flowOn?.queue === lanesOf.child.partitions.queue ? { ...n, seqRow: true } : n));
     if (!nodes.length) return;
 
     const { placed, canvasW, canvasH } = layout(nodes, flows);
@@ -548,6 +593,9 @@ const Diagram = (() => {
       // A flow naming a node that does not exist is a typo in the scenario, not
       // something to crash the page over; skip it and draw the rest.
       if (!from || !to) return;
+      // Lines out of a partitioned queue are drawn per lane, from broker
+      // data, by paintPartitions.
+      if (lanesOf && f.via === lanesOf.child.id) return;
 
       const back = isBack(from, to);
       const routed = isProcessor(from) || isProcessor(to) ? processorPath(from, to) : null;
@@ -595,6 +643,8 @@ const Diagram = (() => {
       /* The moving part. Each flow's packet is offset in time so a fan-out
          reads as one message being copied outward rather than three unrelated
          dots, and `dur` is uniform so speed stays consistent across scenarios. */
+      // In a diagram drawn from real events, only real events move.
+      if (diagram.events) return;
       const packet = el("circle", { r: 5, class: "dg-packet", "data-flow": i });
 
       /* SMIL animation is not controlled by CSS, so honouring reduced motion
@@ -628,6 +678,12 @@ const Diagram = (() => {
 
     const nodeLayer = el("g", { class: "dg-nodes" });
     for (const n of placed.values()) nodeLayer.append(drawNode(n, handlers));
+
+    if (lanesOf) {
+      const pub = flows.findIndex((f) => f.to === lanesOf.node.id && !isBack(placed.get(f.from) || {}, placed.get(f.to) || {}));
+      svg.__parts = partsContext(placed, lanesOf, edges, packets,
+        pub >= 0 ? ports[pub][0] : null, reduceMotion);
+    }
 
     // Edges beneath nodes, packets above, so a packet passing a box is visible
     // but a line never crosses a label.
@@ -739,7 +795,7 @@ const Diagram = (() => {
       // The broker's action is applying configuration, so its states read
       // as that rather than as an app's.
       const holder = node.classList.contains("is-broker");
-      tip(node.querySelector(".dg-node__dot"), {
+      indicator(node.querySelector(".dg-node__dot"), "status-dot", {
         running: holder ? "Applying configuration" : "Running",
         failed: "Stopped with an error. Open its logs to see why",
         done: holder ? "Configuration applied" : "Finished successfully",
@@ -754,13 +810,15 @@ const Diagram = (() => {
       const flow = s.running ? s.flow : null;
       node.setAttribute("data-flow", flow || "");
       const sub = node.querySelector(".dg-node__sub");
-      if (sub) {
+      // Every consumer of a partitioned queue is "active" to the broker;
+      // what it owns is the useful part, and paintPartitions says that.
+      if (sub && !node.hasAttribute("data-partitioned")) {
         if (sub.dataset.text === undefined) sub.dataset.text = sub.textContent;
         sub.textContent = flow === "active" ? "active consumer"
           : flow === "stalled" ? "active, not acking"
           : flow === "standby" ? "standby"
           : sub.dataset.text;
-        tip(sub, flow === "active"
+        indicator(sub, "flow-role", flow === "active"
           ? "The broker is delivering this queue's messages to this app"
           : flow === "stalled"
           ? "The broker still treats this app as an active consumer, but it is holding messages and has acknowledged none for several seconds. The broker sends it nothing more, and the messages it holds wait until it disconnects"
@@ -776,7 +834,7 @@ const Diagram = (() => {
         const present = list.filter((c) => c.present).length;
         check.textContent = list.length ? `${present}/${list.length}` : "";
         check.setAttribute("data-complete", String(list.length > 0 && present === list.length));
-        tip(check, list.length ? configTip(present, list, holder) : null);
+        indicator(check, "config-count", list.length ? configTip(present, list, holder) : null);
       }
 
       /* Contained configuration gets its own count, so each dotted box says
@@ -791,7 +849,7 @@ const Diagram = (() => {
         const present = mine.filter((c) => c.present).length;
         countEl.textContent = `${present}/${mine.length}`;
         countEl.setAttribute("data-complete", String(present === mine.length));
-        tip(countEl, configTip(present, mine, holder));
+        indicator(countEl, "config-count", configTip(present, mine, holder));
       }
     }
 
@@ -807,5 +865,399 @@ const Diagram = (() => {
     }
   }
 
-  return { render, paint };
+  /* ------------------------------------------------- Partitioned queues
+
+     A box in the broker with `partitions: {queue, count}` is drawn as one
+     lane per partition. Everything on it comes from the dashboard's
+     /partitions answer (cockpit/app/partitions.py), never from a timer:
+
+     - each lane's owner, from the broker (partitionClientName), with a line
+       from the lane to that consumer, which swings across when the broker
+       moves the partition;
+     - each lane's counts, from the broker: messages it holds now, and how
+       many it has taken in;
+     - one dot per update a consumer reported handling, coloured and
+       lettered by its order, run along the path it took: from the
+       publisher, through the partition the broker held it in, to the
+       consumer that logged it. It is drawn a moment after it happened;
+     - the last few updates each consumer handled, with their sequence
+       numbers, flagged when its own log says there was a gap or a step
+       backwards. */
+
+  function partitionBox(diagram) {
+    for (const node of diagram.nodes || []) {
+      for (const child of node.contains || []) {
+        if (child.partitions) return { node, child };
+      }
+    }
+    return null;
+  }
+
+  /* Twelve colours chosen to be as far apart as possible (from Sasha
+     Trubetskoy's list of distinct colours), each with the text colour that
+     reads on it. They are ordered so that letters handed out one after
+     another look nothing alike, and a dark ring keeps each one apart from
+     the background. A letter goes with each, so nothing depends on telling
+     two colours apart. Twelve, for the twelve orders Partitioning keeps in
+     flight. */
+  const KEY_COLOURS = [
+    ["#FFE119", "#1b1b1b"], ["#4363D8", "#ffffff"], ["#E6194B", "#ffffff"],
+    ["#3CB44B", "#ffffff"], ["#F032E6", "#ffffff"], ["#42D4F4", "#1b1b1b"],
+    ["#F58231", "#1b1b1b"], ["#FFFFFF", "#1b1b1b"], ["#911EB4", "#ffffff"],
+    ["#BFEF45", "#1b1b1b"], ["#9A6324", "#ffffff"], ["#FABED4", "#1b1b1b"],
+  ];
+  const LETTERS = "ABCDEFGHIJKL";
+  // How long a dot takes from publisher to consumer, and the most dots a
+  // burst may queue before older ones are dropped rather than replayed late.
+  const DOT_MS = 1700;
+  const CHIPS = 5;
+  /* A handled update leaves the consumer's row after a while, so the row
+     shows recent work and never reads as a backlog. A flagged one stays
+     longer, so a gap is still there to point at. */
+  const CHIP_MS = 6000;
+  const FLAGGED_CHIP_MS = 20000;
+  // The last part of a dot's trip, over which it is absorbed by the consumer.
+  const ABSORB = 0.12;
+  const MOVE_MS = 900;
+
+  function laneY(box, p) {
+    return box.top + PART_HEAD + p * (LANE_H + LANE_GAP);
+  }
+
+  function drawLanes(kid, n, child, cyTop) {
+    const count = Number(child.partitions.count) || 1;
+    const x = n.x + CHILD_INSET + 6;
+    const w = n.w - CHILD_INSET * 2 - 12;
+    kid.append(el("text", {
+      x: n.x + n.w - CHILD_INSET - 40, y: cyTop + 17,
+      class: "dg-part__status", "text-anchor": "end", "data-part-status": "",
+    }, ""));
+    for (let p = 0; p < count; p++) {
+      const y = cyTop + PART_HEAD + p * (LANE_H + LANE_GAP);
+      const lane = el("g", { class: "dg-lane", "data-lane": p });
+      lane.append(el("rect", { x, y, width: w, height: LANE_H, rx: 4, class: "dg-lane__box" }));
+      lane.append(el("text", { x: x + 6, y: y + 13, class: "dg-lane__num" }, `P${p}`));
+      lane.append(el("text", { x: x + 30, y: y + 13, class: "dg-lane__owner", "data-lane-owner": p }, ""));
+      lane.append(el("text", { x: x + w - 52, y: y + 13, class: "dg-lane__held",
+        "text-anchor": "end", "data-lane-held": p }, ""));
+      lane.append(el("text", { x: x + w - 6, y: y + 13, class: "dg-lane__in",
+        "text-anchor": "end", "data-lane-in": p }, ""));
+      kid.append(lane);
+    }
+  }
+
+  /* Geometry and memory for one rendered diagram, kept on the svg so a
+     re-render starts clean. */
+  function partsContext(placed, lanesOf, edges, packets, pubPort, reduceMotion) {
+    const broker = placed.get(lanesOf.node.id);
+    let top = broker.y + CHILD_TOP;
+    for (const c of lanesOf.node.contains) {
+      if (c === lanesOf.child) break;
+      top += childHeight(c) + CHILD_GAP;
+    }
+    const count = Number(lanesOf.child.partitions.count) || 1;
+    const laneEdges = el("g", { class: "dg-lane-edges" });
+    const paths = [];
+    for (let p = 0; p < count; p++) {
+      const path = el("path", { class: "dg-edge dg-lane-edge", "data-lane-edge": p, d: "" });
+      laneEdges.append(path);
+      paths.push(path);
+    }
+    edges.append(laneEdges);
+    return {
+      placed, broker, box: { top, count }, packets, pubPort, reduceMotion,
+      queue: lanesOf.child.partitions.queue, paths,
+      // lane -> {node, end: {x, y}} as last drawn
+      owners: new Map(),
+      letters: new Map(),     // order id -> {i, last}
+      chips: new Map(),       // node id -> [event]
+      primed: false,
+      clock: 0,               // newest event time already drawn
+    };
+  }
+
+  // Where a lane's line meets a consumer: its owned lanes spread down its
+  // left edge, in lane order.
+  function consumerPort(ctx, nodeId, lane, owned) {
+    const n = ctx.placed.get(nodeId);
+    const mine = owned.filter((o) => o.node === nodeId).map((o) => o.partition);
+    const k = Math.max(0, mine.indexOf(lane));
+    const span = Math.min(n.h - 30, (mine.length - 1) * 12);
+    return { x: n.x, y: n.y + n.h / 2 - span / 2 + (mine.length > 1 ? k * span / (mine.length - 1) : 0) };
+  }
+
+  function laneEdgePath(ctx, lane, end) {
+    const y = laneY(ctx.box, lane) + LANE_H / 2;
+    return flowPath({ x: ctx.broker.x + ctx.broker.w, y, nx: 1, ny: 0 }, { ...end, nx: -1, ny: 0 });
+  }
+
+  function stubEnd(ctx, lane) {
+    return { x: ctx.broker.x + ctx.broker.w + 22, y: laneY(ctx.box, lane) + LANE_H / 2 };
+  }
+
+  /* Swing a lane's line from where it was drawn to where it belongs now. */
+  function moveEdge(ctx, lane, to, owned) {
+    const path = ctx.paths[lane];
+    const before = ctx.owners.get(lane);
+    const end = to ? consumerPort(ctx, to, lane, owned) : stubEnd(ctx, lane);
+    path.classList.toggle("is-unowned", !to);
+    ctx.owners.set(lane, { node: to, end });
+    const from = before?.end;
+    if (!from || ctx.reduceMotion || (before.node === to)) {
+      path.setAttribute("d", laneEdgePath(ctx, lane, end));
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / MOVE_MS);
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      path.setAttribute("d", laneEdgePath(ctx, lane,
+        { x: from.x + (end.x - from.x) * e, y: from.y + (end.y - from.y) * e }));
+      if (t < 1 && ctx.owners.get(lane)?.end === end) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function letterFor(ctx, order) {
+    let got = ctx.letters.get(order);
+    if (!got) {
+      // The letter used longest ago, so a letter is not reused while its
+      // order may still be in flight.
+      const used = new Map([...ctx.letters.values()].map((v) => [v.i, v.last]));
+      let best = 0;
+      for (let i = 0; i < LETTERS.length; i++) {
+        if (!used.has(i)) { best = i; break; }
+        if (used.get(i) < used.get(best)) best = i;
+      }
+      for (const [o, v] of ctx.letters) if (v.i === best) ctx.letters.delete(o);
+      got = { i: best, last: 0 };
+      ctx.letters.set(order, got);
+    }
+    got.last = performance.now();
+    return got.i;
+  }
+
+  function flagText(e) {
+    if (e.flags.includes("gap")) return "Gap: this consumer's log says it saw this order's sequence numbers jump, so an update went to another consumer.";
+    if (e.flags.includes("order")) return "Out of order: this consumer's log says this update came after a later one for the same order.";
+    return "";
+  }
+
+  function eventTip(e, letter) {
+    const where = e.partition === null || e.partition === undefined
+      ? "The dashboard did not catch which partition the broker held it in."
+      : `Through partition P${e.partition}.`;
+    const extra = [];
+    if (e.flags.includes("picked")) extra.push("This consumer picked the order up part way: earlier updates went to another consumer.");
+    if (e.flags.includes("redelivered")) extra.push("Delivered again after a consumer went away without acknowledging it.");
+    const flag = flagText(e);
+    return [`${letter} is order ${e.order}, update #${e.seq} (${e.status}), ${e.key ? `key ${e.key}` : "no partition key"}. ${where}`,
+      flag, ...extra, `Log line: ${e.text.trim()}`].filter(Boolean).join("\n");
+  }
+
+  function dotPath(ctx, e, owned) {
+    const handler = ctx.placed.get(e.node);
+    if (!handler || !ctx.pubPort) return null;
+    const known = e.partition !== null && e.partition !== undefined && e.partition < ctx.box.count;
+    const y = known ? laneY(ctx.box, e.partition) + LANE_H / 2
+      : ctx.box.top + childHeight({ partitions: { count: ctx.box.count } }) / 2;
+    const bx1 = ctx.broker.x;
+    const bx2 = ctx.broker.x + ctx.broker.w;
+    const p = ctx.pubPort;
+    const k = Math.max(28, (bx1 - p.x) / 2);
+    const end = known && owned.some((o) => o.partition === e.partition && o.node === e.node)
+      ? consumerPort(ctx, e.node, e.partition, owned)
+      : { x: handler.x, y: handler.y + handler.h / 2 };
+    const k2 = Math.max(28, (end.x - bx2) / 2);
+    return `M ${p.x} ${p.y} C ${p.x + k} ${p.y}, ${bx1 - k} ${y}, ${bx1} ${y} L ${bx2} ${y} `
+      + `C ${bx2 + k2} ${y}, ${end.x - k2} ${end.y}, ${end.x} ${end.y}`;
+  }
+
+  function launchDot(ctx, e, owned, delay, onArrive) {
+    const i = letterFor(ctx, e.order);
+    const d = dotPath(ctx, e, owned);
+    if (!d || ctx.reduceMotion) { onArrive(); return; }
+    const known = e.partition !== null && e.partition !== undefined;
+    const g = el("g", { class: `dg-dot${known ? "" : " is-unplaced"}` });
+    g.append(el("circle", { r: 7, fill: KEY_COLOURS[i][0] }));
+    g.append(el("text", { class: "dg-dot__letter", "text-anchor": "middle", y: 3, fill: KEY_COLOURS[i][1] }, LETTERS[i]));
+    if (known) indicator(g, "event-dot", eventTip(e, LETTERS[i]));
+    else indicator(g, "event-dot-unplaced", eventTip(e, LETTERS[i]));
+    g.setAttribute("visibility", "hidden");
+    ctx.packets.append(g);
+    const path = el("path", { d });
+    const len = path.getTotalLength();
+    const t0 = performance.now() + delay;
+    const step = (now) => {
+      const t = (now - t0) / DOT_MS;
+      if (t < 0) { requestAnimationFrame(step); return; }
+      if (t >= 1 || !g.isConnected) { g.remove(); onArrive(); return; }
+      const pt = path.getPointAtLength(len * t);
+      // Consumed: it shrinks and fades into the consumer as it arrives.
+      const left = Math.min(1, (1 - t) / ABSORB);
+      g.setAttribute("transform", `translate(${pt.x} ${pt.y}) scale(${0.3 + 0.7 * left})`);
+      g.setAttribute("opacity", String(left));
+      g.setAttribute("visibility", "visible");
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function drawChips(svg, ctx, nodeId) {
+    const row = svg.querySelector(`[data-seq="${nodeId}"]`);
+    const n = ctx.placed.get(nodeId);
+    if (!row || !n) return;
+    row.replaceChildren();
+    const list = ctx.chips.get(nodeId) || [];
+    list.forEach((e, k) => {
+      const i = letterFor(ctx, e.order);
+      const flagged = e.flags.includes("gap") || e.flags.includes("order");
+      const x = n.x + 10 + k * 27;
+      const y = n.y + 55;
+      const chip = el("g", { class: `dg-chip${flagged ? " is-flagged" : ""}`,
+        style: `animation-delay: ${Math.max(0, (flagged ? FLAGGED_CHIP_MS : CHIP_MS) - 900 - (performance.now() - e.shown))}ms` });
+      chip.append(el("rect", { x, y, width: 25, height: 15, rx: 4, fill: KEY_COLOURS[i][0] }));
+      chip.append(el("text", { x: x + 12.5, y: y + 11, "text-anchor": "middle",
+        class: "dg-chip__text", fill: KEY_COLOURS[i][1] }, `${LETTERS[i]}${e.seq}${flagged ? "!" : ""}`));
+      if (flagged) indicator(chip, "seq-chip-flagged", eventTip(e, LETTERS[i]));
+      else indicator(chip, "seq-chip", eventTip(e, LETTERS[i]));
+      row.append(chip);
+    });
+  }
+
+  function pushChip(svg, ctx, e) {
+    const list = ctx.chips.get(e.node) || [];
+    e.shown = performance.now();
+    list.push(e);
+    while (list.length > CHIPS) list.shift();
+    ctx.chips.set(e.node, list);
+    drawChips(svg, ctx, e.node);
+    const flagged = e.flags.includes("gap") || e.flags.includes("order");
+    setTimeout(() => {
+      const now = ctx.chips.get(e.node) || [];
+      if (!now.includes(e)) return;
+      ctx.chips.set(e.node, now.filter((x) => x !== e));
+      drawChips(svg, ctx, e.node);
+    }, flagged ? FLAGGED_CHIP_MS : CHIP_MS);
+  }
+
+  const STATUS = {
+    ready: ["", "The broker has given every partition to a consumer and nothing is waiting to move."],
+    holddown: ["waiting to rebalance", "A consumer came or went. The broker waits the rebalance delay (5 seconds here) before it moves any partition, in case the consumer comes straight back."],
+    rebalancing: ["moving partitions", "The broker is handing partitions from one consumer to another. Each old owner gets a few seconds to acknowledge what it holds first."],
+  };
+
+  function nodeLabel(ctx, id) {
+    return ctx.placed.get(id)?.label || id;
+  }
+
+  function ownedText(parts) {
+    if (!parts.length) return "no partition: idle";
+    const names = parts.map((p) => `P${p}`);
+    return `${parts.length === 1 ? "partition" : "partitions"} ${names.length > 1
+      ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}`;
+  }
+
+  /* Apply one /partitions answer. Called about once a second. */
+  function paintPartitions(host, data) {
+    const svg = host.querySelector(".dg");
+    const ctx = svg?.__parts;
+    if (!ctx || !data) return;
+
+    const status = svg.querySelector("[data-part-status]");
+    if (status) {
+      const [text, why] = data.present ? (STATUS[data.status] || [data.status || "", ""])
+        : ["not on the broker", "The queue does not exist yet. Press Play, or run Apply configuration."];
+      status.textContent = text;
+      status.setAttribute("data-state", data.present ? data.status || "" : "absent");
+      indicator(status, "partition-status", why || `The broker reports the queue's rebalance state as ${data.status}.`);
+    }
+
+    const owned = (data.lanes || []).filter((l) => l.node).map((l) => ({ partition: l.partition, node: l.node }));
+    const byLane = new Map((data.lanes || []).map((l) => [l.partition, l]));
+    for (let p = 0; p < ctx.box.count; p++) {
+      const l = byLane.get(p);
+      const lane = svg.querySelector(`[data-lane="${p}"]`);
+      const owner = svg.querySelector(`[data-lane-owner="${p}"]`);
+      const held = svg.querySelector(`[data-lane-held="${p}"]`);
+      const taken = svg.querySelector(`[data-lane-in="${p}"]`);
+      lane?.setAttribute("data-owned", l ? String(Boolean(l.owner)) : "absent");
+      if (!l) {
+        owner.textContent = data.present ? "not on the broker" : "";
+        held.textContent = "";
+        taken.textContent = "";
+        indicator(owner, "lane-owner", data.present
+          ? `The broker reports fewer partitions than the ${ctx.box.count} this diagram draws, so P${p} does not exist. Check partition_count in the scenario's terraform.`
+          : "The queue is not on the broker yet. Press Play.");
+        ctx.paths[p].setAttribute("d", "");
+        ctx.owners.delete(p);
+        continue;
+      }
+      const name = l.node ? nodeLabel(ctx, l.node) : l.owner ? l.owner : "no owner";
+      owner.textContent = name;
+      indicator(owner, "lane-owner", l.owner
+        ? `Partition P${p} belongs to ${name} (client ${l.owner}): the broker delivers everything in it to that consumer, and to no other. Read from the broker every second.`
+        : `Partition P${p} has no owner right now. Its consumer went away, and the broker has not given it to another yet, so its messages wait.`);
+      held.textContent = `${l.held} held`;
+      held.setAttribute("data-busy", String(l.held > 0));
+      indicator(held, "lane-held", `${l.held} message(s) in partition P${p} right now: waiting, or delivered and not yet acknowledged. It climbs when nothing is reading the partition.`);
+      taken.textContent = `${l.spooled} in`;
+      indicator(taken, "lane-in", `${l.spooled} message(s) have gone into partition P${p} since the queue was created. Keys are hashed onto partitions, so the counts differ.`);
+      const was = ctx.owners.get(p);
+      if (!was || was.node !== (l.node || null)) {
+        if (was && was.node && l.node) {
+          lane?.classList.add("is-moved");
+          setTimeout(() => lane?.classList.remove("is-moved"), 2500);
+        }
+        moveEdge(ctx, p, l.node || null, owned);
+      }
+      indicator(ctx.paths[p], "lane-edge", l.node
+        ? `Partition P${p} is delivered to ${name}. When the broker moves the partition, this line swings to its new owner.`
+        : `Partition P${p} has no owner, so nothing is delivered from it.`);
+    }
+    // Owners that kept their lane still re-spread when a neighbour moved.
+    for (const [p, o] of ctx.owners) {
+      if (!o.node) continue;
+      const end = consumerPort(ctx, o.node, p, owned);
+      if (Math.abs(end.y - o.end.y) > 0.5) moveEdge(ctx, p, o.node, owned);
+    }
+
+    // Each consumer says which partitions it owns.
+    for (const g of svg.querySelectorAll('.dg-node[data-partitioned="true"]')) {
+      const id = g.dataset.node;
+      const sub = g.querySelector(".dg-node__sub");
+      if (!sub) continue;
+      if (sub.dataset.text === undefined) sub.dataset.text = sub.textContent;
+      const running = g.getAttribute("data-status") === "running";
+      const mine = owned.filter((o) => o.node === id).map((o) => o.partition);
+      sub.textContent = running && data.present ? ownedText(mine) : sub.dataset.text;
+      g.toggleAttribute("data-idle", running && data.present && !mine.length);
+      indicator(sub, "consumer-partitions", running && data.present
+        ? (mine.length
+          ? `The broker gives this consumer ${ownedText(mine)}: every update with a key in them comes here.`
+          : "Bound to the queue, but the broker has given it no partition, so it receives nothing. With more consumers than partitions, the extra ones sit idle; it can also be the few seconds before a rebalance.")
+        : null);
+    }
+
+    // New events: a dot each, spaced as they happened, then a chip.
+    const events = data.events || [];
+    if (!ctx.primed) {
+      // History from before the page opened: chips only, no replay.
+      ctx.primed = true;
+      const cutoff = (data.until || 0) - 2;
+      for (const e of events) {
+        if (e.ts <= cutoff) { pushChip(svg, ctx, e); ctx.clock = Math.max(ctx.clock, e.ts); }
+      }
+    }
+    const fresh = events.filter((e) => e.ts > ctx.clock);
+    if (!fresh.length) return;
+    const first = fresh[0].ts;
+    for (const e of fresh) {
+      ctx.clock = Math.max(ctx.clock, e.ts);
+      const delay = Math.min(1500, (e.ts - first) * 1000);
+      launchDot(ctx, e, owned, delay, () => pushChip(svg, ctx, e));
+    }
+  }
+
+  return { render, paint, paintPartitions };
 })();

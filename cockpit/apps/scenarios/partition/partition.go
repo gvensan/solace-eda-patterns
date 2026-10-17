@@ -3,10 +3,13 @@
 // Each order moves through created, paid, packed, shipped and delivered, and
 // fulfilment must see an order's updates in that order: packing an order
 // that has not been paid for is a real mistake. Many orders are in flight at
-// once, so one consumer is too slow and the work is spread over two. The
+// once, so one consumer is too slow and the work is spread over three. The
 // order id travels as the partition key: the broker sends every update for
 // one order to the same partition, and so to the same consumer, in order,
 // while different orders are handled in parallel.
+//
+// Every update carries a per-order sequence number (#1 to #5), and the
+// consumer reports it, so a gap or a step backwards shows in its log.
 package partition
 
 import (
@@ -14,7 +17,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,9 +24,41 @@ import (
 	"solace.dev/go/messaging/pkg/solace/message"
 )
 
-// steps is an order's life. A consumer checks each order moves through them
-// one at a time.
+// steps is an order's life. Update #n carries steps[n-1].
 var steps = []string{"created", "paid", "packed", "shipped", "delivered"}
+
+// measured is the partition that order id O-0001, O-0002 and so on up to
+// O-1200 lands on in a queue of six partitions, one digit per id. The broker
+// hashes the key to pick a partition and does not document the hash, so
+// this was measured on broker 10.26.0 (docs/spikes.md, section 10). It only
+// steers which ids the order service picks, so that every partition has
+// orders in flight; the broker still does the placing. On a broker that
+// hashes differently, some partitions just get less traffic.
+const measured = "" +
+	"10304414354553435115011210544402451052512135435110433233155150052325155333442132" +
+	"51333250111033254150454103530201255504312514133024402250052314410340425012251033" +
+	"01543234431530350233124341543421431102223453312354051503523534403055513210401014" +
+	"15255234213305025443531522224340350051554051510115040423035115035450240425105330" +
+	"22131512534235203101140510415354512225505555005040305050301335513141251114511144" +
+	"14215131101332451045044521523305514214512045302141003211122450112311555343333502" +
+	"41442013512515443123001334202510002100304513050050132335010354353112204424322022" +
+	"24555541000545340450244234540042011345202305254355510553522425022220143255450553" +
+	"45405501445211515034412345154354345010121233312504513204450451010524540052521113" +
+	"22104130232211422140011322534235144115322331140234201234000000105221341335410354" +
+	"52513025310114143031231305335051454334143455043403432211214532003102214152102243" +
+	"03002004201152333440312450040400340344044343535532245120140210501003232322145423" +
+	"02251201222142340205422153422000222243222545343342551354430550323452304055510101" +
+	"52353354525454123154545250230413133030145314444353153404530323402133042201035141" +
+	"22134401554405152301100143224442232015535555530421502444345340413434104352242045"
+
+// idsFor lists the order numbers that land on each of the six partitions.
+func idsFor() [6][]int {
+	var by [6][]int
+	for i, c := range measured {
+		by[c-'0'] = append(by[c-'0'], i+1)
+	}
+	return by
+}
 
 // Orders publishes status updates for several orders at once, interleaved,
 // each keyed by its order id unless --no-key is given.
@@ -33,7 +67,7 @@ func Orders(args []string) {
 	user := fs.String("user", "svc-part-orders", "client username to connect as")
 	role := fs.String("role", "orders", "label for log lines")
 	clientName := fs.String("client-name", "part-orders", "client name the broker reports this app by")
-	inFlight := fs.Int("in-flight", 8, "orders in progress at any time")
+	inFlight := fs.Int("in-flight", 12, "orders in progress at any time")
 	rate := fs.Float64("rate", 5, "updates per second")
 	noKey := fs.Bool("no-key", false, "publish without a partition key")
 	fs.Parse(args)
@@ -54,21 +88,30 @@ func Orders(args []string) {
 	stop := make(chan struct{})
 	go func() { solace.WaitForStop(); close(stop) }()
 
-	// Order ids carry this run, so a restarted publisher never reuses an id
-	// a consumer has already seen finish.
-	runTag := time.Now().Unix() % 1000
-	next := 0
-	newOrder := func() string {
-		next++
-		return fmt.Sprintf("O-%03d-%04d", runTag, next)
+	// Order k in flight always takes its next id from the ids measured to
+	// land on partition k mod 6, so all six partitions stay busy with two
+	// orders each. Two, so that a partition handed to another consumer
+	// almost always holds an order part way through its life. Each run
+	// starts at a random point in the list, so a restarted order service
+	// does not reuse the ids a consumer saw a moment ago.
+	by := idsFor()
+	cursor := [6]int{}
+	for p := range cursor {
+		cursor[p] = rand.Intn(len(by[p]))
+	}
+	newOrder := func(slot int) string {
+		p := slot % 6
+		id := by[p][cursor[p]%len(by[p])]
+		cursor[p]++
+		return fmt.Sprintf("O-%04d", id)
 	}
 	type progress struct {
-		id   string
-		step int
+		id  string
+		seq int // the update to send next, from 1
 	}
 	orders := make([]progress, *inFlight)
 	for i := range orders {
-		orders[i] = progress{id: newOrder()}
+		orders[i] = progress{id: newOrder(i), seq: 1}
 	}
 
 	every := time.Duration(float64(time.Second) / *rate)
@@ -80,18 +123,19 @@ func Orders(args []string) {
 		if *noKey {
 			key = ""
 		}
-		topic := fmt.Sprintf("part/shop/order/%s/v1/%s", steps[o.step], o.id)
-		payload := fmt.Sprintf(`{"order":"%s","step":%d,"status":"%s"}`, o.id, o.step+1, steps[o.step])
+		status := steps[o.seq-1]
+		topic := fmt.Sprintf("part/shop/order/%s/v1/%s", status, o.id)
+		payload := fmt.Sprintf(`{"order":"%s","seq":%d,"status":"%s"}`, o.id, o.seq, status)
 		if err := solace.PublishKeyed(svc, pub, topic, payload, key); err != nil {
 			solace.Errf(*role, "publish failed: %s", err)
 		} else {
 			sent++
 			if sent%10 == 0 {
-				solace.Logf(*role, "%d updates published (latest %s %s)", sent, o.id, steps[o.step])
+				solace.Logf(*role, "%d updates published (latest %s #%d %s)", sent, o.id, o.seq, status)
 			}
 		}
-		if o.step++; o.step == len(steps) {
-			*o = progress{id: newOrder()}
+		if o.seq++; o.seq > len(steps) {
+			*o = progress{id: newOrder(i), seq: 1}
 		}
 
 		select {
@@ -103,13 +147,17 @@ func Orders(args []string) {
 	}
 }
 
-// Fulfil consumes order updates from the partitioned queue and checks that
-// each order's updates arrive one step at a time.
+// Fulfil consumes order updates from the partitioned queue and checks each
+// order's sequence numbers arrive one at a time.
 //
 // It can only see its own share. An order it first meets part way through
-// was handled elsewhere until now (it took the order over); an order whose
-// updates skip a step had that step handled by another consumer, which is
-// what happens when updates are not keyed.
+// was handled elsewhere until now (it picked the order up); an order whose
+// sequence skips a number had that update handled by another consumer,
+// which is what happens when updates are not keyed.
+//
+// Each line also gives the broker's number for the message (msg), which is
+// what the dashboard matches against the partitions' message lists to draw
+// which partition the update came through.
 func Fulfil(args []string) {
 	fs := flag.NewFlagSet("partition fulfil", flag.ExitOnError)
 	role := fs.String("role", "", "label for log lines, e.g. fulfilment-1")
@@ -135,12 +183,12 @@ func Fulfil(args []string) {
 
 	var mu sync.Mutex
 	last := map[string]int{}
-	handled, splits, disorders := 0, 0, 0
+	handled, gaps, disorders := 0, 0, 0
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		time.Sleep(*work)
 		payload := solace.PayloadOf(msg)
 		order := solace.FieldString(payload, "order")
-		step, _ := solace.FieldInt(payload, "step")
+		seq, _ := solace.FieldInt(payload, "seq")
 		status := solace.FieldString(payload, "status")
 		key, keyed := solace.MessageKey(msg)
 
@@ -148,18 +196,23 @@ func Fulfil(args []string) {
 		prev, seen := last[order]
 		note := ""
 		switch {
-		case !seen && step > 1:
-			note = fmt.Sprintf("  picked up %s at %s (its earlier updates went elsewhere)", order, status)
-		case seen && step <= prev:
+		case seq == 1:
+			// A new order. Ids are reused after a long while, never in flight.
+		case !seen:
+			note = fmt.Sprintf("  picked up %s at #%d (its earlier updates went to another consumer)", order, seq)
+		case seq <= prev:
 			disorders++
-			note = fmt.Sprintf("  OUT OF ORDER: %s %s after %s", order, status, steps[prev-1])
-		case seen && step > prev+1:
-			splits++
-			note = fmt.Sprintf("  SPLIT: %s went %s to %s; %s was handled by another consumer",
-				order, steps[prev-1], status, strings.Join(steps[prev:step-1], ", "))
+			note = fmt.Sprintf("  OUT OF ORDER: %s #%d after #%d", order, seq, prev)
+		case seq > prev+1:
+			gaps++
+			missed := fmt.Sprintf("#%d", prev+1)
+			if seq > prev+2 {
+				missed = fmt.Sprintf("#%d to #%d", prev+1, seq-1)
+			}
+			note = fmt.Sprintf("  GAP: %s #%d then #%d (%s went to another consumer)", order, prev, seq, missed)
 		}
-		last[order] = step
-		if step == len(steps) {
+		last[order] = seq
+		if seq == len(steps) {
 			delete(last, order)
 		}
 		handled++
@@ -169,7 +222,10 @@ func Fulfil(args []string) {
 		if keyed {
 			keyText = "key " + key
 		}
-		line := fmt.Sprintf("[%s] %s %s (%s)", *role, order, status, keyText)
+		if id, ok := solace.SpoolID(msg); ok {
+			keyText += fmt.Sprintf(", msg %d", id)
+		}
+		line := fmt.Sprintf("[%s] %s #%d %s (%s)", *role, order, seq, status, keyText)
 		if msg.IsRedelivered() {
 			line += "  (redelivered)"
 		}
@@ -186,5 +242,5 @@ func Fulfil(args []string) {
 	mu.Lock()
 	defer mu.Unlock()
 	fmt.Println()
-	solace.Logf(*role, "stopped after %d update(s): %d split, %d out of order.", handled, splits, disorders)
+	solace.Logf(*role, "stopped after %d update(s): %d gap(s), %d out of order.", handled, gaps, disorders)
 }

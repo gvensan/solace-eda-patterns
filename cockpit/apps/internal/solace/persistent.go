@@ -2,6 +2,8 @@ package solace
 
 import (
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"solace.dev/go/messaging/pkg/solace"
@@ -167,4 +169,25 @@ func MessageKey(msg message.InboundMessage) (string, bool) {
 	}
 	s, ok := v.(string)
 	return s, ok
+}
+
+// SpoolID returns the broker's own number for a guaranteed message: the
+// msgId that SEMP lists under a queue's msgs and reports as a queue's
+// lastSpooledMsgId. The Go API does not hand it over directly, but it is
+// the last field of the message's replication group message id
+// (rmid1:xxxxx-xxxxxxxxxxx-xxxxxxxx-<msgId in hex>). That layout is not
+// documented; it was measured on broker 10.26.0 (docs/spikes.md), so a
+// caller treats a false return as "not known", never as an error.
+func SpoolID(msg message.InboundMessage) (int64, bool) {
+	rgmid, ok := msg.GetReplicationGroupMessageID()
+	if !ok || rgmid == nil {
+		return 0, false
+	}
+	s := rgmid.String()
+	i := strings.LastIndexByte(s, '-')
+	if !strings.HasPrefix(s, "rmid1:") || i < 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s[i+1:], 16, 64)
+	return n, err == nil
 }

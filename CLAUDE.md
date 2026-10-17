@@ -149,9 +149,10 @@ of them.
   count, a colour or a short label (a dot, `1/1`, a badge, a border, a node
   sublabel) gets hover text that says what it means and what to do about it,
   updated with the value it describes. Add it in the same change that adds the
-  indicator (`tip()` in `diagram.js`, `title` in `cockpit.js`), and add a row
-  to `guides/000-reading-the-dashboard.md`. Scenario text uses the same words
-  the indicator shows.
+  indicator (`indicator(node, "<name>", text)` in `diagram.js` or
+  `cockpit.js`), and add a row to `guides/000-reading-the-dashboard.md` tagged
+  `<!-- indicator: <name> -->`. The checker fails if either is missing.
+  Scenario text uses the same words the indicator shows.
 - **The page never shows something the system is not doing.** If a label or
   an animation could be read as work happening when it is not (packets into a
   stuck consumer, "active" on a frozen one), fix the picture from broker data
