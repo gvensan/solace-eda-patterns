@@ -260,6 +260,20 @@ scenarios.
 `#P2P/QUE/<queue>`. Publishing a guaranteed message to it delivers to that
 queue, which needs no topic subscription. Point-to-Point uses this.
 
+What the documentation says, and does not say:
+
+- [ACL Configuration](https://docs.solace.com/Configuring-and-Managing/Managing-Access-Control-Lists.htm)
+  states that "the topic pattern for a queue is `#P2P/QUE/<queueName>`", that
+  ACLs can allow or deny publishing to it, and refers to "client applications
+  that are publishing to durable queues by name".
+- [Protocol Metadata and Payload Encoding Interactions](https://docs.solace.com/API/Protocol-Metadata-Payload-Encoding.htm)
+  says an MQTT topic "can be prefixed with `_P2P/QUE/<queue>` to publish to a
+  queue", "as with SMF".
+- No docs.solace.com page we found describes publishing a guaranteed message
+  to `#P2P/QUE/<queue>` from an SMF API such as Go, or what the publisher
+  sees. That behaviour (delivery to the queue, `No Subscription Match` for a
+  queue that does not exist) is what we measured, not documented.
+
 **A message that reaches no queue.** Published to `#P2P/QUE/` of a queue that
 does not exist, or to a topic nothing subscribes to, a guaranteed message is
 acknowledged and dropped without an error. With the client profile's

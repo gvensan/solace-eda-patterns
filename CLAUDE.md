@@ -121,7 +121,8 @@ of them.
   `watch`, `why` and `real_world` text, not in the app's output. Each mode has
   `docs` links: the Go API page first, then the broker documentation. Only use
   URLs you have confirmed exist.
-- **Name roles, not instances.** When several instances of one app share a
+- **Role-based where instances are interchangeable, a named app where there
+  is only one.** When several instances of one app share a
   job and the broker decides who does what (the active consumer and the
   standby on an exclusive queue, and the like), a failure card acts on the
   role, never on a named instance: "the active ledger crashes", not "Ledger A
