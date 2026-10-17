@@ -1,0 +1,333 @@
+id: hierarchical-topics
+# Category 3 of the pattern guide (Consumption Patterns), first pattern.
+order: 310
+eyebrow: Consumption Patterns
+title: Hierarchical Topics
+summary: >
+  A retail chain publishes every sale on a topic that says where it
+  happened and what was sold, level by level: region, store, department.
+  Each team subscribes with wildcards to the slice it needs, a department
+  across every store, a region, or everything. The broker does the routing;
+  nobody filters what it receives. The levels are a contract, and the cards
+  show what happens when one side miscounts them.
+
+objectives:
+  - See a topic carry the facts about an event, one per level
+  - See three subscriptions pick three slices of the same sales, with the stores none the wiser
+  - See a subscription with the wrong number of levels match nothing, silently
+  - See a publisher add a level, and which subscriptions survive it
+
+run:
+  - apply
+  - build
+  - electronics
+  - eu
+  - audit
+  - stores
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Every sale goes to ht/retail/<region>/<store>/<department>/sale/v1/<sale>.
+    Electronics subscribes with * for the region and the store, so it gets
+    one department from every store. EU subscribes with > after its
+    region, so it gets everything in the region. Audit takes everything.
+  duration: 2.4
+  liveWhen: stores
+  nodes:
+    - id: stores
+      label: Stores
+      sublabel: four sales a second
+      kind: app
+      col: 0
+      action: stores
+      requires:
+        - label: svc-ht-stores
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ht-stores
+    - id: broker
+      label: Solace Broker
+      sublabel: matches topics to subscriptions
+      kind: broker
+      col: 1
+      action: apply
+      provides:
+        - label: cp-ht
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ht
+        - label: acl-ht
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ht
+    - id: electronics
+      label: Electronics
+      sublabel: one department, every store
+      kind: app
+      col: 2
+      action: electronics
+      requires:
+        - label: svc-ht-teams
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ht-teams
+    - id: eu
+      label: EU
+      sublabel: one region, everything
+      kind: app
+      col: 2
+      action: eu
+      requires:
+        - label: svc-ht-teams
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ht-teams
+    - id: audit
+      label: Audit
+      sublabel: everything
+      kind: app
+      col: 2
+      action: audit
+      requires:
+        - label: svc-ht-teams
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ht-teams
+    - id: eusales
+      label: EU Sales
+      sublabel: started by Break it
+      kind: app
+      col: 2
+      action: eu-sales
+      requires:
+        - label: svc-ht-teams
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ht-teams
+  flows:
+    - { from: stores, to: broker, label: ht/retail/<region>/<store>/<dept>/sale/v1/<sale>, delay: 0 }
+    - { from: broker, to: electronics, label: ".../*/*/electronics/sale/v1/>", delay: 0.8 }
+    - { from: broker, to: eu, label: ".../eu/>", delay: 0.9 }
+    - { from: broker, to: audit, label: "ht/retail/>", delay: 1.0 }
+    - { from: broker, to: eusales, label: ".../eu/*/sale/v1/>", delay: 1.1 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the client profile, ACL profile and usernames for this
+      scenario. There are no queues: everything here is direct.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: electronics
+    label: Start the electronics team
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, team, --role, electronics, --topic, "ht/retail/*/*/electronics/sale/v1/>", --client-name, ht-electronics]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to electronics sales in every region and every store: a *
+      for the region and a * for the store.
+
+  - id: eu
+    label: Start the EU team
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, team, --role, eu, --topic, "ht/retail/eu/>", --client-name, ht-eu]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to everything in the EU region: a > after the region
+      takes whatever follows.
+
+  - id: audit
+    label: Start audit
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, team, --role, audit, --topic, "ht/retail/>", --client-name, ht-audit]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to every sale.
+
+  - id: eu-sales
+    label: Start the EU sales team, one level short
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, team, --role, eu-sales, --topic, "ht/retail/eu/*/sale/v1/>", --client-name, ht-eu-sales]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      Subscribes to ht/retail/eu/*/sale/v1/>, which has no level for the
+      department.
+
+  - id: stores
+    label: Start the stores
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, stores, --client-name, ht-stores]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes four sales a second from twelve stores in three regions and
+      four departments, direct.
+
+  - id: stores-till
+    label: Start the stores with a new till system
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ht, stores, --client-name, ht-stores, --extra-level, till]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same stores, publishing with one more level, till, after the
+      store. Stop the stores first.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, hierarchical-topics]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the access control for this scenario.
+
+failure_modes:
+  - id: level-short
+    title: A subscription miscounts the levels
+    breaks: >
+      A new EU sales team subscribes to ht/retail/eu/*/sale/v1/>, with no
+      level for the department.
+    watch: >
+      The card shows the new team. It connects and subscribes without any
+      error, and then gets nothing: every 5 seconds it says "nothing has
+      matched ht/retail/eu/*/sale/v1/> in the last 5 s", while the EU team
+      next to it receives every EU sale. Nothing on the broker says the
+      subscription is wrong. Reset stops the team.
+    why: >
+      A * matches exactly one level. The sale topics have a department
+      level between the store and sale, so after ht/retail/eu/* the next
+      level is a department, not sale, and no topic matches. The broker
+      accepts any well-formed subscription; whether it matches anything is
+      the subscriber's problem, and it fails silently.
+    real_world: >
+      A team copies a subscription from a wiki page that is one version
+      out of date. Publish the topic structure as part of the event's
+      contract, with each level's meaning, and test a new subscription
+      against live traffic before relying on it.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Broker: wildcard characters in topic subscriptions"
+        url: https://docs.solace.com/Messaging/Wildcard-Charaters-Topic-Subs.htm
+    node: eusales
+    logs: eu-sales
+    trigger:
+      - start: eu-sales
+    reset:
+      - stop: eu-sales
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: eu-sales
+            has: ["subscribed to ht/retail/eu/\\*/sale/v1/>", "nothing has matched"]
+            lacks: ["got ht/"]
+          - log: eu
+            has: ["got ht/retail/eu/"]
+      reset:
+        within: 10
+        logs:
+          - log: eu-sales
+            has: ["exited with code"]
+
+  - id: extra-level
+    title: The stores add a level
+    breaks: >
+      The stores restart with a new till system that puts a till level
+      after the store: ht/retail/<region>/<store>/till/<department>/sale/v1/<sale>.
+    watch: >
+      The card shows the electronics team. It stops receiving anything:
+      "nothing has matched ht/retail/*/*/electronics/sale/v1/>". Its
+      subscription counted the levels with *, and the new topics have one
+      more. EU and audit carry on: their > takes whatever follows, so
+      audit's log now shows topics with till in them. Reset restarts the
+      stores without the level, and electronics receives sales again.
+    why: >
+      A subscription that spells out the levels with * depends on the
+      publisher keeping exactly those levels. One that ends in > survives
+      levels being added after the point it stops at. Neither is simply
+      right: the precise one picks a department out of the middle of the
+      topic, which > cannot do. Changing a topic's levels is a change to
+      the contract, and every subscriber has to be checked against it.
+    real_world: >
+      A new version of a producer adds a level for a good reason, and a
+      consumer two teams away goes quiet without an error. Version the
+      topic (the v1 level is for that), and treat a change to the levels as
+      a breaking change.
+    docs:
+      - label: "Go API: publishing direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Publish.htm
+      - label: "Broker: wildcard characters in topic subscriptions"
+        url: https://docs.solace.com/Messaging/Wildcard-Charaters-Topic-Subs.htm
+    node: stores
+    logs: electronics
+    trigger:
+      - stop: stores
+      - start: stores-till
+    reset:
+      - stop: stores-till
+      - start: stores
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: electronics
+            has: ["nothing has matched"]
+          - log: audit
+            has: ["got ht/retail/[^/]+/[^/]+/till/"]
+      reset:
+        within: 15
+        logs:
+          - log: electronics
+            has: ["got ht/retail/[^/]+/[^/]+/electronics/sale/v1/"]
+
+inspect:
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==ht-*
+    # dataTxMsgCount is what the broker sent each team: audit gets every
+    # sale, EU about a third, electronics about a quarter.
+    columns: [clientName, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
+  - label: What the electronics team subscribed to
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients/ht-electronics/subscriptions
+    columns: [subscriptionTopic]
+    ui_hint: Manager → Clients → ht-electronics → Subscriptions
+    empty: The electronics team is not connected. Press Play, or start it.
+  - label: What the EU team subscribed to
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients/ht-eu/subscriptions
+    columns: [subscriptionTopic]
+    ui_hint: Manager → Clients → ht-eu → Subscriptions
+    empty: The EU team is not connected. Press Play, or start it.

@@ -1,0 +1,9 @@
+# What the hierarchical-topics scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ht	{vpn}/cp-ht
+solacebroker_msg_vpn_acl_profile.ht	{vpn}/acl-ht
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ht["stores"]	{vpn}/svc-ht-stores
+solacebroker_msg_vpn_client_username.ht["teams"]	{vpn}/svc-ht-teams
