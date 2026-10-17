@@ -1,0 +1,25 @@
+# What the event-bridge scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.br	{vpn}/cp-br
+solacebroker_msg_vpn_acl_profile.br	{vpn}/acl-br
+
+solacebroker_msg_vpn_queue.store	{vpn}/q.br.store
+solacebroker_msg_vpn_queue_subscription.store	{vpn}/q.br.store/br%2Fhq%2F%3E
+
+# Head office's VPN and what is in it. Clear broker config does not delete
+# these: it deletes queues, usernames and profiles in the workshop VPN only.
+solacebroker_msg_vpn.hq	br-hq
+solacebroker_msg_vpn_client_profile.hq	br-hq/cp-br-hq
+solacebroker_msg_vpn_acl_profile.hq	br-hq/acl-br-hq
+solacebroker_msg_vpn_client_username.hq["pricing"]	br-hq/svc-br-pricing
+solacebroker_msg_vpn_client_username.hq["bridge"]	br-hq/svc-br-bridge
+solacebroker_msg_vpn_queue.to_stores	br-hq/q.br.to-stores
+solacebroker_msg_vpn_queue_subscription.to_stores	br-hq/q.br.to-stores/br%2Fhq%2Fprice%2F%3E
+
+# The bridge, in the workshop VPN
+solacebroker_msg_vpn_bridge.hq	{vpn}/br-hq-link/auto
+solacebroker_msg_vpn_bridge_remote_msg_vpn.hq	{vpn}/br-hq-link/auto/br-hq/127.0.0.1:55555/
+
+# Client usernames
+solacebroker_msg_vpn_client_username.br["store"]	{vpn}/svc-br-store

@@ -1,0 +1,318 @@
+id: event-bridge
+# Category 5 of the pattern guide (Deployment Patterns), first pattern.
+order: 510
+eyebrow: Deployment Patterns
+title: Event Bridge
+summary: >
+  A retailer's head office and its stores run separate messaging domains,
+  each with its own users, topics and queues. Head office publishes price
+  changes in its domain. A bridge carries them into the stores' domain,
+  where the store's till reads them from its own queue. Here the two domains
+  are two message VPNs on one broker; between two brokers the bridge is set
+  up the same way, with the other broker's address.
+
+objectives:
+  - See events published in one VPN arrive in another, through a bridge, with neither app aware of it
+  - See prices wait in head office's VPN while the bridge is down, and arrive when it is back
+  - See an event type nobody added to the bridge never arrive, with no error anywhere
+  - Learn that a bridge carries only what its configuration says
+
+run:
+  - apply
+  - build
+  - store
+  - hq
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Head office publishes in VPN br-hq to br/hq/price/changed/v1/<sku>.
+    q.br.to-stores, in br-hq, collects the prices for the stores. The bridge
+    br-hq-link, in the stores' VPN, consumes that queue and publishes what it
+    takes in the stores' VPN, where q.br.store holds it for the till.
+  duration: 2.6
+  liveWhen: hq
+  nodes:
+    - id: hq
+      label: Head Office Pricing
+      sublabel: in VPN br-hq
+      kind: app
+      col: 0
+      action: hq
+      requires:
+        - label: svc-br-pricing
+          semp: /msgVpns/br-hq/clientUsernames/svc-br-pricing
+    - id: promos
+      label: Head Office Promotions
+      sublabel: in VPN br-hq
+      kind: app
+      col: 0
+      action: promos
+      requires:
+        - label: svc-br-pricing
+          semp: /msgVpns/br-hq/clientUsernames/svc-br-pricing
+    - id: broker
+      label: Solace Broker
+      sublabel: two VPNs and a bridge
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: tostores
+          label: "br-hq: q.br.to-stores"
+        - id: link
+          label: bridge br-hq-link
+        - id: storeq
+          label: q.br.store
+          depth: { queue: q.br.store, unit: waiting }
+      provides:
+        - label: VPN br-hq
+          group: tostores
+          semp: /msgVpns/br-hq
+        - label: q.br.to-stores
+          group: tostores
+          semp: /msgVpns/br-hq/queues/q.br.to-stores
+        - label: br-hq-link
+          group: link
+          semp: /msgVpns/{vpn}/bridges/br-hq-link,auto
+        - label: q.br.store
+          group: storeq
+          semp: /msgVpns/{vpn}/queues/q.br.store
+        - label: cp-br-hq
+          semp: /msgVpns/br-hq/clientProfiles/cp-br-hq
+        - label: cp-br
+          semp: /msgVpns/{vpn}/clientProfiles/cp-br
+    - id: store
+      label: Store Till
+      sublabel: in the stores' VPN
+      kind: app
+      col: 2
+      action: store
+      flowOn:
+        queue: q.br.store
+        client: br-store
+      requires:
+        - label: svc-br-store
+          semp: /msgVpns/{vpn}/clientUsernames/svc-br-store
+  flows:
+    - { from: hq, to: broker, label: prices, delay: 0 }
+    - { from: promos, to: broker, label: promotions, delay: 0 }
+    - { from: broker, to: store, via: storeq, delay: 1.0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates head office's VPN br-hq with its users and q.br.to-stores,
+      the bridge br-hq-link in the stores' VPN, q.br.store, and the stores'
+      client profile, ACL profile and username.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: store
+    label: Start the store till
+    kind: process
+    cmd: [bash, ../../apps/run.sh, br, store, --client-name, br-store]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Connects to the stores' VPN and reads q.br.store. Prints each price
+      with how long ago head office published it.
+
+  - id: hq
+    label: Start head office pricing
+    kind: process
+    cmd: [env, SOLACE_MSG_VPN=br-hq, bash, ../../apps/run.sh, br, hq, --client-name, br-hq-pricing]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Connects to head office's VPN, br-hq, and publishes a price change
+      every second.
+
+  - id: promos
+    label: Start head office promotions
+    kind: process
+    cmd: [env, SOLACE_MSG_VPN=br-hq, bash, ../../apps/run.sh, br, hq, --client-name, br-hq-promos, --promos, --every, 2s]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Connects to br-hq and publishes a promotion every 2 seconds, to
+      br/hq/promo/v1/<sku>. The stores' queue subscribes to it; the bridge
+      was never told to carry it.
+
+  - id: bridge-down
+    label: Disable the bridge
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/bridges/br-hq-link,auto", '{"enabled":false}']
+    cwd: .
+    variant: secondary
+    description: >
+      Disables br-hq-link, as a network failure or a maintenance window
+      between two brokers would. Apply enables it again.
+
+  - id: bridge-up
+    label: Enable the bridge
+    kind: process
+    cmd: [bash, ../../scripts/semp.sh, PATCH, "/msgVpns/{vpn}/bridges/br-hq-link,auto", '{"enabled":true}']
+    cwd: .
+    variant: secondary
+    description: >
+      Enables br-hq-link again.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-bridge]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the bridge, head office's VPN with everything in it, the
+      stores' queue and the stores' access control.
+
+failure_modes:
+  - id: bridge-down
+    title: The bridge goes down
+    breaks: >
+      The bridge is disabled. Head office keeps publishing prices.
+    watch: >
+      The card shows the store till, which receives nothing more. Head
+      office's log carries on, "published", as if nothing happened: in its
+      own VPN, nothing did. The prices wait on q.br.to-stores in br-hq (see
+      Head office's queue for the stores). The line into the store till
+      still moves on the diagram: it shows that the till is bound and
+      active, not that prices arrive; the till's log is the truth. Reset
+      enables the bridge, and every waiting price arrives at once, in order,
+      "sent by head office 12.0 s ago".
+    why: >
+      The bridge is a consumer of q.br.to-stores like any other. While it is
+      down, the queue keeps the guaranteed messages, as a queue does for any
+      consumer that is away. Head office publishes into its own VPN and is
+      never told whether anything crosses.
+    real_world: >
+      A link between a data centre and a cloud region, or between head office
+      and a store, that drops. With guaranteed messages and a queue on the
+      far side, an outage is a delay, not a loss, as long as the queue is big
+      enough for the outage.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Message VPN bridges"
+        url: https://docs.solace.com/Features/VPN/Message-VPN-Bridges-Overview.htm
+    node: store
+    logs: store
+    trigger:
+      - run: bridge-down
+    reset:
+      - run: bridge-up
+    expect:
+      break:
+        settle: 2
+        within: 10
+        logs:
+          - log: hq
+            has: ["price #\\d+: SKU-\\d+ now \\d+\\.99, published"]
+          - log: store
+            lacks: ["price #\\d+"]
+      reset:
+        within: 15
+        logs:
+          - log: store
+            has: ["sent by head office ([4-9]|\\d\\d+)\\.\\d s ago"]
+
+  - id: not-bridged
+    title: Head office publishes something the bridge does not carry
+    breaks: >
+      Head office starts publishing promotions. The store's queue subscribes
+      to them; the bridge's queue in head office's VPN does not.
+    watch: >
+      The card shows the store till. Promotions never arrive, and nothing
+      says why: head office's promotions log says "published", the store
+      sees only prices, and no error appears anywhere. In br-hq nothing
+      subscribes to br/hq/promo/v1/>, so the broker discards each
+      promotion there. Reset stops the promotions.
+    why: >
+      A bridge carries only what its configuration asks for, here the
+      subscriptions on q.br.to-stores. The store's own subscription, br/hq/>,
+      is in the stores' VPN, and head office's VPN knows nothing about it. A
+      guaranteed message that matches no subscription is not an error for
+      its publisher.
+    real_world: >
+      A new event type launched in one region and never added to the
+      bridge, or a topic renamed on one side. Bridges and mesh links need to
+      be part of the change, and someone has to check the far side.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Configuring VPN bridges"
+        url: https://docs.solace.com/Features/VPN/Configuring-VPN-Bridges.htm
+    node: promos
+    logs: promos
+    trigger:
+      - start: promos
+    reset:
+      - stop: promos
+    expect:
+      break:
+        within: 12
+        logs:
+          - log: promos
+            has: ["promotion #\\d+: SKU-\\d+ \\d+% off, published"]
+          - log: store
+            has: ["price #\\d+"]
+            lacks: ["promotion #"]
+      reset:
+        within: 10
+        logs:
+          - log: store
+            has: ["price #\\d+"]
+
+inspect:
+  - label: The bridge
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/bridges
+    # inboundState is ready-in-sync while it works; inboundFailureReason says why not.
+    columns: [bridgeName, remoteMsgVpnName, inboundState, inboundFailureReason]
+    ui_hint: Manager → Bridges
+    empty: No bridge yet. Press Play.
+  - label: Head office's queue for the stores
+    kind: semp
+    api: monitor
+    path: /msgVpns/br-hq/queues/q.br.to-stores
+    # Grows while the bridge is down.
+    columns: [msgVpnName, queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → (VPN br-hq) → Queues
+    empty: Head office's VPN does not exist yet. Press Play.
+  - label: What crosses the bridge
+    kind: semp
+    path: /msgVpns/br-hq/queues/q.br.to-stores/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → (VPN br-hq) → Queues → q.br.to-stores → Subscriptions
+    empty: Head office's VPN does not exist yet. Press Play.

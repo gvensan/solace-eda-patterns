@@ -15,6 +15,7 @@ import (
 
 	"solace-workshop/apps/scenarios/access"
 	"solace-workshop/apps/scenarios/backpressure"
+	"solace-workshop/apps/scenarios/bridge"
 	"solace-workshop/apps/scenarios/cdc"
 	"solace-workshop/apps/scenarios/compete"
 	"solace-workshop/apps/scenarios/cqrs"
@@ -37,6 +38,8 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"br store":          bridge.Store,
+	"br hq":             bridge.HQ,
 	"ef watch":          filter.Watch,
 	"ef sensors":        filter.Sensors,
 	"esrc statements":   esrc.Statements,

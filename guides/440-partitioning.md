@@ -110,4 +110,4 @@ where you would meet it in production.
   lanes and marks the missing three as not on the broker. Set it back to 6
   when you are done.
 
-Next: [Dead Message Queue](610-dead-letter-queue.md).
+Next: [Event Bridge](510-event-bridge.md).
