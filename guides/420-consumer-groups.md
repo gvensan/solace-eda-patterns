@@ -94,4 +94,4 @@ and where you would meet it in production.
   group split 150 messages (81 and 69), and the one member of another share
   group received all 150 (`docs/spikes.md`, section 14).
 
-Next: [Partitioning](440-partitioning.md).
+Next: [Shock Absorber](430-shock-absorber.md).

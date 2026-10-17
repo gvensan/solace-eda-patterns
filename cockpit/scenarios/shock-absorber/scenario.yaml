@@ -1,0 +1,345 @@
+id: shock-absorber
+# Category 4 of the pattern guide (Consumer Scalability Patterns), third pattern.
+order: 430
+eyebrow: Consumer Scalability Patterns
+title: Shock Absorber
+summary: >
+  Concert ticket sales. When tickets go on sale, 1,500 purchase requests
+  arrive in a couple of seconds; otherwise they trickle in. Two booking
+  workers reserve seats at a steady 20 a second each. The queue between
+  them is the shock absorber: it takes the burst at the speed the on-sale
+  page sends it, and the workers drain it at theirs. The queue has limits,
+  in space and in time, and the cards show both.
+
+objectives:
+  - See a burst of 1,500 requests stored in seconds and booked over the next minute, with the on-sale page never slowed
+  - See how far behind the workers fall and how long a request waits
+  - See a burst bigger than the queue refused to the publisher, and what that costs
+  - See requests go stale while they wait, and where they end up
+
+run:
+  - apply
+  - build
+  - booking-1
+  - booking-2
+  - onsale
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The on-sale page publishes purchase requests as guaranteed messages:
+    a trickle, and a burst of 1,500 every minute. q.sa.purchases stores
+    them as fast as they come; the two booking workers share the queue and
+    drain it at 40 a second between them. A request whose seat hold lapses
+    while it waits is moved to q.sa.purchases.dmq.
+  duration: 2.4
+  liveWhen: onsale
+  nodes:
+    - id: onsale
+      label: On-Sale Page
+      sublabel: a trickle, then bursts
+      kind: app
+      col: 0
+      action: onsale
+      requires:
+        - label: svc-sa-onsale
+          semp: /msgVpns/{vpn}/clientUsernames/svc-sa-onsale
+    - id: broker
+      label: Solace Broker
+      sublabel: takes the burst
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: purchases
+          label: q.sa.purchases
+          depth: { queue: q.sa.purchases, unit: waiting }
+        - id: dmq
+          label: q.sa.purchases.dmq
+          depth: { queue: q.sa.purchases.dmq, unit: stale }
+          arrivals:
+            from: purchases
+            queue: q.sa.purchases
+            reasons:
+              expired: maxTtlExpiredToDmqMsgCount
+      provides:
+        - label: q.sa.purchases
+          group: purchases
+          semp: /msgVpns/{vpn}/queues/q.sa.purchases
+        - label: q.sa.purchases.dmq
+          group: dmq
+          semp: /msgVpns/{vpn}/queues/q.sa.purchases.dmq
+        - label: cp-sa
+          semp: /msgVpns/{vpn}/clientProfiles/cp-sa
+        - label: acl-sa
+          semp: /msgVpns/{vpn}/aclProfiles/acl-sa
+    - id: booking1
+      label: Booking 1
+      sublabel: 20 a second
+      kind: app
+      col: 2
+      action: booking-1
+      flowOn:
+        queue: q.sa.purchases
+        client: sa-booking-1
+      requires:
+        - label: svc-sa-booking
+          semp: /msgVpns/{vpn}/clientUsernames/svc-sa-booking
+    - id: booking2
+      label: Booking 2
+      sublabel: 20 a second
+      kind: app
+      col: 2
+      action: booking-2
+      flowOn:
+        queue: q.sa.purchases
+        client: sa-booking-2
+      requires:
+        - label: svc-sa-booking
+          semp: /msgVpns/{vpn}/clientUsernames/svc-sa-booking
+  flows:
+    - { from: onsale, to: broker, label: purchase requests, delay: 0 }
+    - { from: broker, to: booking1, via: purchases, delay: 0.8 }
+    - { from: broker, to: booking2, via: purchases, delay: 1.0 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.sa.purchases, sized for a normal burst and respecting each
+      request's time to live, its dead message queue, and the client
+      profile, ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: booking-1
+    label: Start booking worker 1
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, booking, --role, booking-1, --client-name, sa-booking-1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Books about 20 requests a second from q.sa.purchases, and says how
+      long each waited when that is more than a few seconds.
+
+  - id: booking-2
+    label: Start booking worker 2
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, booking, --role, booking-2, --client-name, sa-booking-2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      The second worker, sharing the queue.
+
+  - id: onsale
+    label: Start the on-sale page
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, onsale, --client-name, sa-onsale]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes a request every half second, and a burst of 1,500 every
+      minute or when told to (Fire a burst).
+
+  - id: fire-burst
+    label: Fire a burst now
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, sa-onsale, USR1]
+    cwd: .
+    variant: secondary
+    description: >
+      Tells the on-sale page (SIGUSR1) to send a burst of 1,500 requests
+      now.
+
+  - id: big-burst
+    label: Release 6,000 tickets at once
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, onsale, --client-name, sa-onsale-big, --role, onsale-big, --once, --burst, "6000", --prefix, B]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      A one-off burst of 6,000 requests, four times the usual, from a
+      second on-sale page. Exits once the broker has answered for each.
+
+  - id: held-burst
+    label: Release 1,500 tickets with a 20-second seat hold
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, onsale, --client-name, sa-onsale-held, --role, onsale-held, --once, --burst, "1500", --ttl, 20s, --prefix, H]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      A one-off burst of 1,500 requests, each with a 20-second time to
+      live, from a second on-sale page.
+
+  - id: drain
+    label: Clear the backlog
+    kind: process
+    cmd: [bash, ../../apps/run.sh, sa, booking, --role, drain, --client-name, sa-drain, --drain]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Takes every request left on q.sa.purchases without booking it, until
+      the queue is empty, then exits.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, shock-absorber]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes both queues and the access control for this scenario. Any
+      request still waiting goes with them.
+
+failure_modes:
+  - id: burst-too-big
+    title: The burst is bigger than the queue
+    breaks: >
+      A second on-sale page releases 6,000 tickets at once: four times the
+      burst the queue was sized for.
+    watch: >
+      The card shows that page. The first few thousand requests are
+      stored, and then the broker refuses the rest, "refused: Spool Over
+      Quota", one receipt at a time, and the page sums it up: "the broker
+      refused N request(s): those customers got no booking". The workers
+      carry on booking what was stored; the count on q.sa.purchases in the
+      diagram is as high as it can go. Reset clears the backlog, which
+      would otherwise take the workers over a minute.
+    why: >
+      A queue absorbs a burst up to its size (max_msg_spool_usage), and
+      not beyond. Past that, the broker refuses each message back to the
+      publisher, with the default reject_msg_to_sender_on_discard_behavior,
+      and the publisher decides what to do: keep it and retry, or drop it.
+      The absorber's size is a decision, made from the biggest burst you
+      expect, with the broker's whole spool as the ceiling.
+    real_world: >
+      Ticket releases, product drops, the morning's batch upload, a retry
+      storm from a client. Size the queue for the worst burst you will
+      take, and decide what the producer does when even that is not
+      enough. Point-to-Point showed the same refusal from a receiver being
+      away; here the receivers are there and simply slower than the burst.
+    docs:
+      - label: "Go API: publishing persistent messages (publish receipts)"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: configuring queues (max message spool usage)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+    node: onsale
+    logs: big-burst
+    trigger:
+      - run: big-burst
+    reset:
+      - run: drain
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: big-burst
+            has: ["refused: .*Spool Over Quota", "the broker refused \\d+ request\\(s\\)"]
+          - log: {role: active}
+            has: ["\\d+ booked"]
+      reset:
+        within: 60
+        logs:
+          - log: drain
+            has: ["cleared \\d+ request\\(s\\) in \\d+ s; the queue is empty"]
+
+  - id: requests-expire
+    title: Requests go stale while they wait
+    breaks: >
+      A second on-sale page releases 1,500 tickets whose seat holds lapse
+      after 20 seconds: each request is sent with a 20-second time to live.
+    watch: >
+      The card shows a booking worker. The burst takes the two workers
+      about 40 seconds to get through, so the requests at the back of it
+      are still waiting when their 20 seconds run out. The broker moves
+      each of those to q.sa.purchases.dmq: dots hop across in the diagram,
+      labelled "expired", and the DMQ's count climbs. The workers book the
+      ones that were still valid, each saying how long it waited. Reset
+      clears whatever is left on both queues.
+    why: >
+      Absorbing a burst costs time: a request that waits is a request
+      handled late. A time to live on the message says how late is too
+      late. q.sa.purchases respects it (respect_ttl_enabled) and names a
+      dead message queue, so a lapsed request is moved aside and counted
+      (maxTtlExpiredToDmqMsgCount), instead of being booked after its hold
+      is gone.
+    real_world: >
+      Seat holds, price quotes, one-time codes, anything with a deadline.
+      Without a time to live, a backlog is worked through long after the
+      answer stopped mattering; with one and no dead message queue, the
+      stale requests vanish without trace. A DMQ keeps them, so someone can
+      see how many customers waited too long.
+    docs:
+      - label: "Go API: publishing persistent messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Broker: configuring queues (respect TTL, max TTL)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
+      - label: "Broker: dead message queues"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Setting-Dead-Msg-Queues.htm
+    node: broker
+    logs: {role: active}
+    trigger:
+      - run: held-burst
+    reset:
+      - run: drain
+    expect:
+      break:
+        within: 60
+        logs:
+          - log: {role: active}
+            has: ["booked request H-\\d+, which waited \\d+ s"]
+        boxes:
+          dmq: { expired: { min: 100 } }
+      reset:
+        within: 60
+        logs:
+          - log: drain
+            has: ["cleared \\d+ request\\(s\\)"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=10&where=queueName==q.sa.*
+    # maxMsgSpoolUsageExceededDiscardedMsgCount is what a burst too big
+    # for the queue cost; maxTtlExpiredToDmqMsgCount is what waited too long.
+    columns: [queueName, msgSpoolUsage, maxMsgSpoolUsage, spooledMsgCount, maxMsgSpoolUsageExceededDiscardedMsgCount, maxTtlExpiredToDmqMsgCount]
+    ui_hint: Manager → Queues
+    empty: The queues are not on the broker. Press Play, or run Apply configuration.
+  - label: The workers on q.sa.purchases
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues/q.sa.purchases/txFlows?count=10
+    columns: [clientName, activityState, ackedMsgCount, unackedMsgCount]
+    ui_hint: Manager → Queues → q.sa.purchases → Consumers
+    empty: No worker is bound to q.sa.purchases right now. Press Play, or start a booking worker.

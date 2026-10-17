@@ -565,3 +565,33 @@ for 4 seconds; at +4 s it owned a partition and still read `inactive`; at
 a consumer reading active while owning no partition lasts at most a
 moment.
 
+## 16. Shock Absorber
+
+Tested on 10.26.0 with the Go API v1.10.0, on the scenario's own queue
+(`q.sa.purchases`, `max_msg_spool_usage` 1, no consumer bound).
+
+**Sizing.** A purchase request of about 60 bytes took 63 bytes of spool
+each (1,500 in 94,500 bytes), so a 1 MB queue would hold about 16,600 and
+no burst in the scenario would fill it. The requests now carry seat choices
+and customer details, about 400 bytes, as a real one would: 1,500 took
+624,000 bytes (416 each). With the queue at 1 MB:
+
+| Burst | Stored | Refused (`Spool Over Quota`) | Time to hand to the API |
+| --- | --- | --- | --- |
+| 1,500 | 1,500 | 0 | 7 ms |
+| 6,000 | 2,521 | 3,479 (`maxMsgSpoolUsageExceededDiscardedMsgCount` 3,479) | 30 ms |
+
+The broker never slowed the publisher down: every refusal came back as a
+receipt, after the burst had been handed over.
+
+**Stale requests: assert on the counter, not on a worker.** The brief
+weighed having a worker report a gap in the request numbers when expired
+requests never reach it. With two workers sharing a non-exclusive queue,
+either worker may be the one that skips past an expired request, so which
+log shows it is not fixed. The queue's own counter is:
+`maxTtlExpiredToDmqMsgCount` (section 11) counts every request that lapsed
+while waiting. The card asserts on it through the dashboard's box counters
+(`boxes:`, at least 100 of a 20-second-hold burst of 1,500 drained at about
+40 a second), and the workers report how long the requests they did book
+had waited.
+

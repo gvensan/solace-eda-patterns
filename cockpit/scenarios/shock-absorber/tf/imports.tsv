@@ -1,0 +1,13 @@
+# What the shock-absorber scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.sa	{vpn}/cp-sa
+solacebroker_msg_vpn_acl_profile.sa	{vpn}/acl-sa
+
+solacebroker_msg_vpn_queue.purchases	{vpn}/q.sa.purchases
+solacebroker_msg_vpn_queue_subscription.purchases	{vpn}/q.sa.purchases/sa%2Ftickets%2Fpurchase%2Frequested%2Fv1%2F%3E
+solacebroker_msg_vpn_queue.dmq	{vpn}/q.sa.purchases.dmq
+
+# Client usernames
+solacebroker_msg_vpn_client_username.sa["onsale"]	{vpn}/svc-sa-onsale
+solacebroker_msg_vpn_client_username.sa["booking"]	{vpn}/svc-sa-booking
