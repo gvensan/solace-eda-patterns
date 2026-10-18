@@ -93,14 +93,14 @@ brief.
 | 440 | [Partitioning](guides/440-partitioning.md) | built | 54eac9b |
 | 510 | [Event Bridge](guides/510-event-bridge.md) | built | 9f8ec14 |
 | 520 | Event Mesh | not started | |
-| 530 | Event Gateway | not started | |
+| 530 | [Event Gateway](guides/530-event-gateway.md) | built | f3ede54 |
 | 610 | [Dead Letter Queue (built as Dead Message Queue)](guides/610-dead-letter-queue.md) | built | 558aa17 |
 | 620 | [Discard, Pause and Retry](guides/620-discard-pause-retry.md) | built | 7f1301c |
 | 630 | [Saga](guides/630-saga.md) | built | 40b7907 |
-| 710 | Event Catalog | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
-| 720 | Event APIs | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
-| 730 | Intermediated Governance | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
-| 740 | Disintermediated Governance | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
+| 710 | [Event Catalog](guides/710-event-catalog.md) | built | afbbc8a |
+| 720 | [Event APIs](guides/720-event-apis.md) | built | f727057 |
+| 730 | [Intermediated Governance](guides/730-intermediated-governance.md) | built | 02a759f |
+| 740 | [Disintermediated Governance](guides/740-disintermediated-governance.md) | built | 1f527a3 |
 | 750 | [Access Control and Authorization](guides/750-access-control.md) | built | 83b5d99 |
 | 810 | [Strangler](guides/810-strangler.md) | built | 5a78129 |
 | 820 | [Data Synchronization](guides/820-data-synchronization.md) | built | bfc1dec |
