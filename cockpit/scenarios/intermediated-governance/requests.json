@@ -1,0 +1,7 @@
+[
+  {
+    "team": "inventory",
+    "subscribe": "ig/sales/order/>",
+    "reason": "Reserve stock for every new order. We need order events only, not payments."
+  }
+]

@@ -27,6 +27,7 @@ import (
 	"solace-workshop/apps/scenarios/exclusive"
 	"solace-workshop/apps/scenarios/filter"
 	"solace-workshop/apps/scenarios/gateway"
+	"solace-workshop/apps/scenarios/governance"
 	"solace-workshop/apps/scenarios/groups"
 	"solace-workshop/apps/scenarios/guaranteed"
 	"solace-workshop/apps/scenarios/p2p"
@@ -44,6 +45,7 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"ig sales":          governance.Sales,
 	"ea shipping":       catalog.Shipping,
 	"ea consumer":       catalog.Consumer,
 	"ec shop":           catalog.Shop,

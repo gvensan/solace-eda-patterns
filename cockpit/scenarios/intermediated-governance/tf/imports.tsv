@@ -1,0 +1,13 @@
+# What the intermediated-governance scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+# Approved subscribe exceptions are added by central.sh, not terraform; they
+# go with their ACL profile.
+
+solacebroker_msg_vpn_client_profile.ig	{vpn}/cp-ig
+solacebroker_msg_vpn_acl_profile.ig["sales"]	{vpn}/acl-ig-sales
+solacebroker_msg_vpn_acl_profile.ig["inventory"]	{vpn}/acl-ig-inventory
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.ig_sales	{vpn}/acl-ig-sales/smf/ig%2Fsales%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ig["sales"]	{vpn}/svc-ig-sales
+solacebroker_msg_vpn_client_username.ig["inventory"]	{vpn}/svc-ig-inventory

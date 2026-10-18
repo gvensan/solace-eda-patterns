@@ -1,0 +1,323 @@
+id: intermediated-governance
+# Category 7 of the pattern guide (Governance Patterns), third pattern.
+order: 730
+eyebrow: Governance Patterns
+title: Intermediated Governance
+summary: >
+  The sales team publishes orders and payments. The inventory team wants
+  the orders. Here no team may subscribe to another team's events until a
+  central team approves a request, and the broker enforces each grant. The
+  request is a file, the central team's approval a script; the refusal and
+  the grant are the broker's own.
+
+objectives:
+  - See a request approved, and the broker allow exactly what was granted
+  - See a team subscribe before approval, and the broker refuse it
+  - See a grant made too broad, and a team receive events nobody meant it to have
+  - Learn what a central team's review controls, and what it costs
+
+pattern:
+  what: >
+    A central team decides who may publish and consume which events.
+    Teams request access, the central team reviews and grants it, and the
+    platform enforces each grant.
+  when: >
+    Data is sensitive or regulated, or consistency across many teams
+    matters more than speed.
+  cost: >
+    Every new consumer waits for a review, the central team becomes a
+    queue of requests, and a grant broader than the request goes unnoticed.
+  solace: >
+    The broker enforces grants with ACL profiles per client username.
+    Event Portal, a cloud service, adds the request and approval workflow;
+    here a request file and a script stand in for it.
+  related: [disintermediated-governance, access-control, event-catalog]
+  guide: https://solace.com/event-driven-architecture-patterns/#intermediated
+
+run:
+  - apply
+  - revoke
+  - approve
+  - build
+  - inventory
+  - sales
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The sales team publishes ig/sales/order/... and ig/sales/payment/...
+    The inventory team's username may subscribe only to what the central
+    team approved from requests.json, which the broker checks on every
+    subscription.
+  duration: 2.4
+  liveWhen: sales
+  nodes:
+    - id: central
+      label: Central Team
+      sublabel: approves requests
+      kind: app
+      col: 0
+      action: approve
+    - id: sales
+      label: Sales Team
+      sublabel: orders and payments
+      kind: app
+      col: 0
+      action: sales
+      requires:
+        - label: svc-ig-sales
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ig-sales
+    - id: broker
+      label: Solace Broker
+      sublabel: enforces each grant
+      kind: broker
+      col: 1
+      action: apply
+      provides:
+        - label: acl-ig-sales
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ig-sales
+        - label: acl-ig-inventory
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ig-inventory
+        - label: cp-ig
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ig
+    - id: inventory
+      label: Inventory Team
+      sublabel: asked for orders only
+      kind: app
+      col: 2
+      action: inventory
+      requires:
+        - label: svc-ig-inventory
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ig-inventory
+  flows:
+    - { from: sales, to: broker, label: orders and payments, delay: 0 }
+    - { from: broker, to: inventory, label: what was granted, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates both teams' ACL profiles (deny by default; sales may publish
+      under ig/sales/), the client profile and the usernames.
+
+  - id: revoke
+    label: Revoke every grant
+    kind: process
+    cmd: [bash, ./central.sh, revoke]
+    cwd: .
+    variant: secondary
+    description: >
+      Removes every subscription the central team has granted the inventory
+      team. Play starts here, so it always begins from the requests file.
+
+  - id: approve
+    label: Approve the requests
+    kind: process
+    cmd: [bash, ./central.sh, approve]
+    cwd: .
+    variant: secondary
+    description: >
+      The central team approves every request in requests.json as asked,
+      adding each topic to the requesting team's ACL profile.
+
+  - id: approve-broad
+    label: Approve the request, too broadly
+    kind: process
+    cmd: [bash, ./central.sh, approve-as, "ig/sales/>"]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      The central team grants ig/sales/> instead of the ig/sales/order/>
+      that was asked for.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: inventory
+    label: Start the inventory team's app
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, inventory, --user, svc-ig-inventory, --client-name, ig-inventory, --subscribe, "ig/sales/order/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to ig/sales/order/>, as its request asked, and prints what
+      it receives. Exits if the broker refuses the subscription.
+
+  - id: inventory-wide
+    label: Start the inventory app, new release
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ac, app, --role, inventory, --user, svc-ig-inventory, --client-name, ig-inventory, --subscribe, "ig/sales/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: inventory
+    description: >
+      A release whose subscription is wider than it should be: ig/sales/>.
+      Stop the inventory app first.
+
+  - id: sales
+    label: Start the sales team's app
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ig, sales, --client-name, ig-sales]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes an order or a payment every second, as direct messages.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, intermediated-governance]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes both ACL profiles, with their grants, and the rest of this
+      scenario's access control.
+
+failure_modes:
+  - id: before-approval
+    title: A team subscribes before approval
+    breaks: >
+      Every grant is revoked, and the inventory app starts again before the
+      central team has approved anything.
+    watch: >
+      The card shows the inventory app. It connects, then its subscription is
+      refused: "Subscription ACL Denied - Topic 'ig/sales/order/>'", and it
+      exits. The sales team carries on publishing; nothing reaches inventory.
+      Reset approves the request and starts the app again, and orders
+      arrive.
+    why: >
+      The inventory team's ACL profile denies every subscription unless the
+      central team has added an exception. The broker checks the profile
+      when the subscription is made, so an app deployed ahead of its
+      approval fails at once, with the reason.
+    real_world: >
+      A team that deploys on Friday and waits until Monday for the ticket.
+      Intermediated governance trades speed for control: nothing flows
+      without a decision, and the decision takes as long as the queue of
+      requests.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Client authorization"
+        url: https://docs.solace.com/Security/Client-Authorization-Overview.htm
+    node: inventory
+    logs: inventory
+    trigger:
+      - run: revoke
+      - stop: inventory
+      - start: inventory
+    reset:
+      - run: approve
+      - stop: inventory
+      - start: inventory
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: revoke
+            has: ["the inventory team may subscribe to nothing"]
+          - log: inventory
+            has: ["Subscription ACL Denied - Topic 'ig/sales/order/>'"]
+      reset:
+        within: 15
+        logs:
+          - log: approve
+            has: ["approved: team inventory may now subscribe to ig/sales/order/>"]
+          - log: inventory
+            has: ["received on ig/sales/order/created/v1/O-\\d+"]
+
+  - id: too-broad
+    title: A request is approved too broadly
+    breaks: >
+      The central team grants ig/sales/> instead of ig/sales/order/>. Then
+      the inventory team ships a release whose subscription is wider than it
+      needs.
+    watch: >
+      The card shows the inventory app. It now receives payments as well as
+      orders: "received on ig/sales/payment/taken/v1/O-12345", with a card
+      number in each. Nobody asked for that, and nothing refused it: the
+      grant allowed it. Reset grants exactly what was requested and goes
+      back to the earlier release.
+    why: >
+      The grant is the control. A request for orders, approved as all of
+      sales, lets a later mistake in the app through unnoticed, because the
+      broker enforces the grant, not the request. Under the narrow grant the
+      same release would have been refused.
+    real_world: >
+      Wildcard grants approved to save time, and access reviews that never
+      compare what was granted with what was asked for. Review the grant
+      itself, and keep it as narrow as the request.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Configuring client authorization"
+        url: https://docs.solace.com/Security/Configuring-Client-Authorization.htm
+    node: inventory
+    logs: inventory-wide
+    trigger:
+      - run: revoke
+      - run: approve-broad
+      - stop: inventory
+      - start: inventory-wide
+    reset:
+      - stop: inventory-wide
+      - run: revoke
+      - run: approve
+      - start: inventory
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: approve-broad
+            has: ["approved: team inventory may now subscribe to ig/sales/>"]
+          - log: inventory-wide
+            has: ["received on ig/sales/payment/taken/v1/O-\\d+"]
+      reset:
+        settle: 2
+        within: 12
+        logs:
+          - log: inventory
+            has: ["received on ig/sales/order/created/v1/O-\\d+"]
+            lacks: ["received on ig/sales/payment/"]
+
+inspect:
+  - label: What the inventory team was granted
+    kind: semp
+    path: /msgVpns/{vpn}/aclProfiles/acl-ig-inventory/subscribeTopicExceptions
+    columns: [aclProfileName, subscribeTopicException]
+    ui_hint: Manager → Access Control → ACL Profiles → acl-ig-inventory
+    empty: Nothing granted. The inventory team may subscribe to nothing.
+  - label: Each team's defaults
+    kind: semp
+    path: /msgVpns/{vpn}/aclProfiles?where=aclProfileName==acl-ig-*
+    columns: [aclProfileName, publishTopicDefaultAction, subscribeTopicDefaultAction]
+    ui_hint: Manager → Access Control → ACL Profiles
+    empty: No ACL profiles yet. Press Play.
