@@ -61,6 +61,45 @@ The sidebar follows the eight categories of the pattern guide.
 | 820 | [Data Synchronization](guides/820-data-synchronization.md) | Migration Patterns | Two CRMs written at once, kept the same by publishing and applying each other's edits; an edit that echoes for ever; a CRM offline catches up |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 
+## Pattern coverage
+
+All 30 patterns of the pattern guide, by number (category times 100 plus
+position times 10). The commit is the one that added the scenario or the
+brief.
+
+| # | Pattern | Status | Commit |
+| --- | --- | --- | --- |
+| 110 | [Event-Carried State Transfer](guides/110-event-carried-state-transfer.md) | built | 1a507dd |
+| 120 | [CQRS](guides/120-cqrs.md) | built | 3a0d04b |
+| 130 | [Change Data Capture](guides/130-change-data-capture.md) | built | 0b6185e |
+| 140 | [Event Sourcing](guides/140-event-sourcing.md) | built | fe46c03 |
+| 210 | [Publish-Subscribe](guides/210-publish-subscribe.md) | built | 4086a28 |
+| 220 | [Point-to-Point](guides/220-point-to-point.md) | built | 287d512 |
+| 230 | [Request-Reply](guides/230-request-reply.md) | built | eae80cb |
+| 240 | [Event Streaming](guides/240-event-streaming.md) | built | 4c3fb5e |
+| 310 | [Hierarchical Topics](guides/310-hierarchical-topics.md) | built | 454b372 |
+| 320 | [Event Filtering](guides/320-event-filtering.md) | built | 8f77358 |
+| 330 | [Guaranteed Delivery](guides/330-guaranteed-delivery.md) | built | 94bae00 |
+| 340 | [Backpressure and Push](guides/340-backpressure.md) | built | b98391a |
+| 350 | [Exclusive Consumer](guides/350-exclusive-consumer.md) | built | 054e7da |
+| 410 | [Competing Consumers](guides/410-competing-consumers.md) | built | a098285 |
+| 420 | [Consumer Groups](guides/420-consumer-groups.md) | built | 106eaec |
+| 430 | [Shock Absorber](guides/430-shock-absorber.md) | built | fa158c3 |
+| 440 | [Partitioning](guides/440-partitioning.md) | built | 54eac9b |
+| 510 | [Event Bridge](guides/510-event-bridge.md) | built | 9f8ec14 |
+| 520 | Event Mesh | not started | |
+| 530 | Event Gateway | not started | |
+| 610 | [Dead Letter Queue (built as Dead Message Queue)](guides/610-dead-letter-queue.md) | built | 558aa17 |
+| 620 | [Discard, Pause and Retry](guides/620-discard-pause-retry.md) | built | 7f1301c |
+| 630 | [Saga](guides/630-saga.md) | built | 40b7907 |
+| 710 | Event Catalog | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
+| 720 | Event APIs | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
+| 730 | Intermediated Governance | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
+| 740 | Disintermediated Governance | brief, [docs/designs/wave-b-governance.md](docs/designs/wave-b-governance.md) | e61537a |
+| 750 | [Access Control and Authorization](guides/750-access-control.md) | built | 83b5d99 |
+| 810 | [Strangler](guides/810-strangler.md) | built | 5a78129 |
+| 820 | [Data Synchronization](guides/820-data-synchronization.md) | built | bfc1dec |
+
 ## What you get in the container
 
 | Thing | Where |
