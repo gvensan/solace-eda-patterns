@@ -19,6 +19,7 @@ import (
 	"solace-workshop/apps/scenarios/cdc"
 	"solace-workshop/apps/scenarios/compete"
 	"solace-workshop/apps/scenarios/cqrs"
+	"solace-workshop/apps/scenarios/datasync"
 	"solace-workshop/apps/scenarios/dlq"
 	"solace-workshop/apps/scenarios/ecst"
 	"solace-workshop/apps/scenarios/esrc"
@@ -41,6 +42,7 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"dsync crm":         datasync.CRM,
 	"stg refunds":       strangler.Refunds,
 	"stg legacy":        strangler.Legacy,
 	"stg shop":          strangler.Shop,

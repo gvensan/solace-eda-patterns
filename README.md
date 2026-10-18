@@ -58,6 +58,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 630 | [Saga](guides/630-saga.md) | Error Handling Patterns | Three services, each its own step and event; a sold-out item undone by a refund; a service down delays the sagas that need it |
 | 750 | [Access Control and Authorization](guides/750-access-control.md) | Governance Patterns | Per-username ACL profiles; a refused publish reaches nobody; a refused subscription |
 | 810 | [Strangler](guides/810-strangler.md) | Migration Patterns | Move refunds from the old system to a new service by moving a subscription; both systems paying the same refund; refunds stranded on a failed new service |
+| 820 | [Data Synchronization](guides/820-data-synchronization.md) | Migration Patterns | Two CRMs written at once, kept the same by publishing and applying each other's edits; an edit that echoes for ever; a CRM offline catches up |
 | 999 | [Cleanup](guides/999-cleanup.md) | | Tearing it down |
 
 ## What you get in the container

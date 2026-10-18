@@ -1,0 +1,316 @@
+id: data-synchronization
+# Category 8 of the pattern guide (Migration Patterns), second pattern.
+order: 820
+eyebrow: Migration Patterns
+title: Data Synchronization
+summary: >
+  A company is moving from its old CRM to a new one, and for a while people
+  edit customers in both. Each CRM publishes every edit made in it and
+  applies the edits the other publishes, so both keep the same customer
+  table. Two rules make that work: an applied edit is not published again,
+  and every record carries a version so both sides settle the same way.
+
+objectives:
+  - See edits made in either CRM reach the other, and both tables match
+  - See an edit echo back and forth forever when applied changes are published again
+  - See a CRM that was offline catch up from its queue and match again
+  - Learn why synchronization needs an origin and a version on every change
+
+run:
+  - apply
+  - build
+  - legacy
+  - new
+
+cleanup:
+  - destroy
+  - forget-tables
+
+diagram:
+  caption: >
+    Each CRM publishes its edits to dsync/crm/customer/changed/v1/<side>/<customer>.
+    q.dsync.new subscribes to the old CRM's side, q.dsync.legacy to the new
+    CRM's. Each CRM applies what arrives on its own queue, and never gets its
+    own edits back.
+  duration: 2.4
+  liveWhen: legacy
+  nodes:
+    - id: legacy
+      label: Old CRM
+      sublabel: syncs from the new CRM
+      kind: app
+      shape: processor
+      col: 0
+      action: legacy
+      flowOn:
+        queue: q.dsync.legacy
+        client: dsync-legacy
+      requires:
+        - label: svc-dsync-legacy
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dsync-legacy
+    - id: broker
+      label: Solace Broker
+      sublabel: a queue per side
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: legacyq
+          label: q.dsync.legacy
+          depth: { queue: q.dsync.legacy, unit: waiting }
+        - id: newq
+          label: q.dsync.new
+          depth: { queue: q.dsync.new, unit: waiting }
+      provides:
+        - label: q.dsync.legacy
+          group: legacyq
+          semp: /msgVpns/{vpn}/queues/q.dsync.legacy
+        - label: q.dsync.new
+          group: newq
+          semp: /msgVpns/{vpn}/queues/q.dsync.new
+        - label: cp-dsync
+          semp: /msgVpns/{vpn}/clientProfiles/cp-dsync
+        - label: acl-dsync
+          semp: /msgVpns/{vpn}/aclProfiles/acl-dsync
+    - id: new
+      label: New CRM
+      sublabel: syncs from the old CRM
+      kind: app
+      shape: processor
+      col: 2
+      action: new
+      flowOn:
+        queue: q.dsync.new
+        client: dsync-new
+      requires:
+        - label: svc-dsync-new
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dsync-new
+  flows:
+    - { from: legacy, to: broker, label: old CRM's edits, delay: 0 }
+    - { from: broker, to: new, via: newq, source: legacy, delay: 0.8 }
+    - { from: new, to: broker, label: new CRM's edits, delay: 0 }
+    - { from: broker, to: legacy, source: new, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.dsync.legacy and q.dsync.new, each subscribed to the other
+      CRM's edits, and the client profile, ACL profile and usernames for
+      this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: legacy
+    label: Start the old CRM
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dsync, crm, --side, legacy, --client-name, dsync-legacy]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Edits a customer every 3 seconds and publishes the edit, applies the
+      new CRM's edits from q.dsync.legacy, and every 5 seconds prints its
+      table's checksum.
+
+  - id: new
+    label: Start the new CRM
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dsync, crm, --side, new, --client-name, dsync-new]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      The same, for the new CRM, reading q.dsync.new.
+
+  - id: legacy-echo
+    label: Start the old CRM, publishing applied changes too
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dsync, crm, --side, legacy, --client-name, dsync-legacy, --echo]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The old CRM with a sync trigger that cannot tell a synced write from a
+      user's: it publishes every change it applies as a new edit. Stop the
+      old CRM first.
+
+  - id: new-echo
+    label: Start the new CRM, publishing applied changes too
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dsync, crm, --side, new, --client-name, dsync-new, --echo]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      The same for the new CRM. Stop the new CRM first.
+
+  - id: kill-new
+    label: Crash the new CRM
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, dsync-new, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the new CRM outright (SIGKILL), and returns once it has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, data-synchronization]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: forget-tables
+    label: Delete both customer tables
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dsync, crm, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes both CRMs' customer tables, so the next Play starts from the
+      same six customers on both sides.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: sync-echoes
+    title: The sync echoes back and forth
+    breaks: >
+      Both CRMs restart with a sync trigger that publishes every change it
+      applies, as if a user had made it.
+    watch: >
+      The card shows the old CRM. Each edit now comes back: the new CRM
+      applies it and publishes it again with a higher version, the old CRM
+      applies that and publishes it again, and so on, forever. "last 5 s: 2
+      edits made here, 41 changes sent", and the count climbs as every new
+      edit starts another loop; the highest version races up. Reset restarts
+      both CRMs without the echo, and the traffic falls back to the edits
+      people make.
+    why: >
+      Synchronizing in both directions means each side writes what the
+      other publishes. If those writes are published like any other, every
+      change bounces between the two for ever. The origin rule breaks the
+      loop: a change applied from the other side is not published again.
+      Database triggers and change data capture often cannot tell the two
+      kinds of write apart, which is exactly how this happens.
+    real_world: >
+      Two-way sync between an old and a new system during a migration, or
+      between two regions. Each change carries where it came from, and each
+      side ignores, or does not republish, what it received.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+    node: legacy
+    logs: legacy-echo
+    trigger:
+      - stop: legacy
+      - stop: new
+      - start: legacy-echo
+      - start: new-echo
+    reset:
+      - stop: legacy-echo
+      - stop: new-echo
+      - start: legacy
+      - start: new
+    expect:
+      break:
+        within: 30
+        logs:
+          - log: legacy-echo
+            has: ["last 5 s: \\d+ edits? made here, ([1-9]\\d+) changes sent"]
+      reset:
+        settle: 10
+        within: 12
+        logs:
+          - log: legacy
+            has: ["last 5 s: \\d+ edits? made here, [0-4] changes? sent"]
+
+  - id: new-offline
+    title: The new CRM is offline for a while
+    breaks: >
+      The new CRM crashes. People keep editing customers in the old one.
+    watch: >
+      The card shows the new CRM. The old CRM carries on: "edited C-04
+      here", and its checksum changes with every edit. Its edits wait on
+      q.dsync.new. Reset starts the new CRM: it opens its saved table, then
+      "applied C-04 from legacy" for every edit it missed, in order, and
+      within seconds both CRMs print the same checksum.
+    why: >
+      Each CRM's queue keeps the other's edits while it is away, so a side
+      that comes back applies what it missed, in the order it happened. The
+      versions make the result the same whatever order the two sides' edits
+      cross in: both apply the higher version, and the old CRM wins a tie.
+    real_world: >
+      A migration where the new system is redeployed, or goes down, during
+      business hours. Without a queue between them, the old system's edits
+      during the outage would be lost, and someone would have to compare
+      the two databases by hand.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues and topic endpoints"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: new
+    logs: new
+    trigger:
+      - run: kill-new
+    reset:
+      - start: new
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: new
+            has: ["exited with code -9"]
+          - log: legacy
+            has: ["edited C-\\d+ here"]
+      reset:
+        within: 20
+        logs:
+          - log: new
+            has: ["opened its customer table", "applied C-\\d+ from legacy"]
+
+inspect:
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.dsync.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
+  - label: Connected clients
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==dsync-*
+    # During the echo card, both CRMs' counts race up.
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.

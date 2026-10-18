@@ -1,0 +1,15 @@
+# What the data-synchronization scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.dsync	{vpn}/cp-dsync
+solacebroker_msg_vpn_acl_profile.dsync	{vpn}/acl-dsync
+
+solacebroker_msg_vpn_queue.legacy	{vpn}/q.dsync.legacy
+solacebroker_msg_vpn_queue_subscription.legacy	{vpn}/q.dsync.legacy/dsync%2Fcrm%2Fcustomer%2Fchanged%2Fv1%2Fnew%2F%3E
+
+solacebroker_msg_vpn_queue.new	{vpn}/q.dsync.new
+solacebroker_msg_vpn_queue_subscription.new	{vpn}/q.dsync.new/dsync%2Fcrm%2Fcustomer%2Fchanged%2Fv1%2Flegacy%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.dsync["legacy"]	{vpn}/svc-dsync-legacy
+solacebroker_msg_vpn_client_username.dsync["new"]	{vpn}/svc-dsync-new
