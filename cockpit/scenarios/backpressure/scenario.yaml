@@ -17,6 +17,21 @@ objectives:
   - See a display that takes readings direct drop some when it falls behind, because nothing waits for it
   - Learn which readings to drop, the oldest or the newest, for a live display
 
+pattern:
+  what: >
+    A consumer that cannot keep up slows the flow to it, instead of being
+    flooded or losing work.
+  when: >
+    Consumers are slower than producers some of the time.
+  cost: >
+    Something has to hold the backlog, or drop it. A slow consumer still
+    falls behind; it just does so safely.
+  solace: >
+    A queue's limit on unacknowledged messages per consumer stops delivery
+    to a busy consumer, and the Go receiver can pause and resume. A direct
+    subscriber drops when its buffer fills.
+  related: [shock-absorber, competing-consumers, discard-pause-retry]
+
 run:
   - apply
   - build
@@ -140,6 +155,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, bp, display, --client-name, bp-display, --drop, latest]
     cwd: .
     long_running: true
+    stands_for: display
     variant: secondary
     description: >
       The same display, but when it falls behind the API drops the newest

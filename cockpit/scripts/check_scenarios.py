@@ -65,6 +65,15 @@ def check(path: pathlib.Path) -> list[str]:
     for node in spec.get("diagram", {}).get("nodes", []):
         if node.get("action") and node["action"] not in actions:
             bad.append(f"diagram node {node['id']!r} points at missing action {node['action']!r}")
+        # A node is drawn at a fixed width; a processor's hexagon cuts text
+        # at about this length, and an app box not much later.
+        if len(node.get("sublabel", "")) > SUBLABEL_MAX:
+            bad.append(f"diagram node {node['id']!r} sublabel is {len(node['sublabel'])} characters; "
+                       f"the box shows {SUBLABEL_MAX}")
+
+    for a in actions.values():
+        if a.get("stands_for") and a["stands_for"] not in actions:
+            bad.append(f"action {a['id']!r} stands_for missing action {a['stands_for']!r}")
 
     node_ids = {n["id"] for n in spec.get("diagram", {}).get("nodes", [])}
     for flow in spec.get("diagram", {}).get("flows", []):
@@ -151,6 +160,7 @@ def check(path: pathlib.Path) -> list[str]:
                 bad.append(f"diagram node {node['id']!r} has flowOn client {flow_on['client']!r}, "
                            f"but its action does not pass --client-name {flow_on['client']}")
 
+    bad.extend(check_pattern(spec, here.parent))
     bad.extend(check_partitions(spec, here, actions))
     bad.extend(check_settings(spec, actions, node_ids))
     bad.extend(check_in_flight(spec))
@@ -186,6 +196,25 @@ def check(path: pathlib.Path) -> list[str]:
         bad.append("offers reconcile but has no tf/imports.tsv")
 
     return [f"{sid}: {m}" for m in bad]
+
+
+SUBLABEL_MAX = 30
+PATTERN_FIELDS = ("what", "when", "cost", "solace")
+
+
+def check_pattern(spec, scenarios_dir) -> list:
+    """Every scenario says what its pattern is, beside its own story: the
+    page shows the two side by side so the idea and the example are told
+    apart. related: names other scenarios, linked from the panel."""
+    p = spec.get("pattern")
+    if not isinstance(p, dict):
+        return ["no pattern: block (what, when, cost, solace, related)"]
+    bad = [f"pattern {k}: missing or not plain text" for k in PATTERN_FIELDS
+           if not isinstance(p.get(k), str) or not p[k].strip()]
+    for rid in p.get("related", []) or []:
+        if not (scenarios_dir / rid / "scenario.yaml").exists():
+            bad.append(f"pattern related: {rid!r} is not a scenario")
+    return bad
 
 
 def check_expect(mid, expect, actions, spec) -> list:

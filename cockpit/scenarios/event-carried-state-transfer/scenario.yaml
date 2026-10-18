@@ -16,6 +16,24 @@ objectives:
   - See a service that has lost its copy, and one way to give it back
   - Learn what an event must carry for consumers to keep their own state
 
+pattern:
+  what: >
+    Events carry the state that changed, not just the fact that something
+    changed, so consumers can keep their own copy and never have to ask the
+    owner.
+  when: >
+    Many services need the same reference data (customers, products,
+    prices), and calling the owner for every event would tie their uptime to
+    it.
+  cost: >
+    Every consumer keeps and stores a copy, the copy is a little behind the
+    owner, and a new or restarted consumer needs a way to get the current
+    state.
+  solace: >
+    Ordinary guaranteed events on a topic per entity. A queue per consumer
+    keeps the changes in order and holds them while the consumer is away.
+  related: [cqrs, change-data-capture, event-sourcing]
+
 run:
   - apply
   - build

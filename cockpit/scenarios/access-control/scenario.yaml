@@ -17,6 +17,20 @@ objectives:
   - See a subscription to a forbidden topic refused, with the broker's reason
   - Learn where access control lives on Solace, and what it is keyed on
 
+pattern:
+  what: >
+    The broker decides who may publish and subscribe to which topics, per
+    user, and enforces it on every attempt.
+  when: >
+    Data has owners and audiences: partners, teams, regulated information.
+  cost: >
+    The rules need managing as topics grow, and a refused direct publish is
+    dropped without telling the publisher.
+  solace: >
+    ACL profiles with allow or deny defaults and topic exceptions, assigned
+    to client usernames.
+  related: [hierarchical-topics, publish-subscribe, event-bridge]
+
 run:
   - apply
   - build
@@ -187,6 +201,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, ac, app, --role, reporting-refund-direct, --user, svc-ac-reporting, --client-name, ac-reporting-refund-direct, --publish, ac/bank/payment/refund/v1]
     cwd: .
     long_running: true
+    stands_for: reporting-refund
     variant: secondary
     description: >
       The same refund, published as direct messages. The broker drops each

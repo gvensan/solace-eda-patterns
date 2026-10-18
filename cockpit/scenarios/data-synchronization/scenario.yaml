@@ -16,6 +16,21 @@ objectives:
   - See a CRM that was offline catch up from its queue and match again
   - Learn why synchronization needs an origin and a version on every change
 
+pattern:
+  what: >
+    Keep two systems' data the same by having each publish its changes and
+    apply the other's.
+  when: >
+    Two systems are both in use for the same data: during a migration, or
+    across regions.
+  cost: >
+    It needs loop prevention (where a change came from) and a conflict rule
+    (versions), and the two differ briefly after each change.
+  solace: >
+    Each side publishes on a topic that names its origin, and reads a queue
+    subscribed to the other side only.
+  related: [change-data-capture, strangler, event-carried-state-transfer]
+
 run:
   - apply
   - build
@@ -89,7 +104,7 @@ diagram:
     - { from: legacy, to: broker, label: old CRM's edits, delay: 0 }
     - { from: broker, to: new, via: newq, source: legacy, delay: 0.8 }
     - { from: new, to: broker, label: new CRM's edits, delay: 0 }
-    - { from: broker, to: legacy, source: new, delay: 0.8 }
+    - { from: broker, to: legacy, via: legacyq, source: new, delay: 0.8 }
 
 actions:
   - id: apply
@@ -141,6 +156,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, dsync, crm, --side, legacy, --client-name, dsync-legacy, --echo]
     cwd: .
     long_running: true
+    stands_for: legacy
     variant: secondary
     failure_only: true
     description: >
@@ -154,6 +170,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, dsync, crm, --side, new, --client-name, dsync-new, --echo]
     cwd: .
     long_running: true
+    stands_for: new
     variant: secondary
     failure_only: true
     description: >

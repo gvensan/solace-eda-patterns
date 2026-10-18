@@ -16,6 +16,21 @@ objectives:
   - See a member beyond its queue's partitions bind without error and receive nothing
   - Learn how a queue per group stands in for a consumer group
 
+pattern:
+  what: >
+    Each group of consumers gets every event, and the members of a group
+    share that group's events between them.
+  when: >
+    Several applications each need all the events, and each runs more than
+    one instance.
+  cost: >
+    A queue per group to manage, and members beyond a partitioned queue's
+    partitions sit idle.
+  solace: >
+    A queue per group, subscribed to the same topics. Members bind their
+    group's queue, partitioned when order per key matters.
+  related: [competing-consumers, partitioning, publish-subscribe]
+
 run:
   - apply
   - build

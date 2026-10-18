@@ -19,6 +19,21 @@ objectives:
   - Find the parked order on the dead message queue, kept rather than lost
   - "Learn what decides whether a message is parked or dropped: on 10.26.0 the queue, on 10.8.1 the sender"
 
+pattern:
+  what: >
+    A message that cannot be delivered or processed is moved aside to a
+    queue of its own, instead of blocking the rest or vanishing.
+  when: >
+    Some messages will fail for good (bad data, expired, retried too often),
+    and someone needs to look at them.
+  cost: >
+    Someone has to watch and empty it, and whether a message is moved there
+    or dropped depends on settings.
+  solace: >
+    A dead message queue for each queue, for messages over the redelivery
+    limit, past their time to live, or rejected by the consumer.
+  related: [discard-pause-retry, guaranteed-delivery, shock-absorber]
+
 run:
   - apply
   - build

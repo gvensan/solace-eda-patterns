@@ -73,6 +73,80 @@ a { color: var(--text-link); }
   grid-template-columns: 264px 1fr;
   height: 100vh;
   overflow: hidden;
+  transition: grid-template-columns var(--dur-base) var(--ease-standard);
+}
+
+/* Collapsed: a rail of pattern numbers. Names, group headings and the broker
+   box's words are hidden; the broker's dot stays. */
+.app.is-collapsed {
+  grid-template-columns: 68px 1fr;
+}
+
+.app.is-collapsed .sidebar {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.app.is-collapsed .sidebar__rule,
+.app.is-collapsed .sidebar__brand .eyebrow,
+.app.is-collapsed .nav-item__title,
+.app.is-collapsed .broker-status__label,
+.app.is-collapsed .broker-status__link,
+.app.is-collapsed #broker-text {
+  display: none;
+}
+
+.app.is-collapsed .sidebar__brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.app.is-collapsed .sidebar__logo {
+  height: 14px;
+}
+
+.app.is-collapsed .nav-group {
+  margin: var(--space-3) var(--space-2) var(--space-1);
+  height: 1px;
+  overflow: hidden;
+  color: transparent;
+  background: var(--border-subtle);
+}
+
+.app.is-collapsed .nav-item {
+  justify-content: center;
+  padding: var(--space-2) 0;
+}
+
+.app.is-collapsed .nav-item__index {
+  min-width: 0;
+  font-size: 0.8125rem;
+}
+
+.app.is-collapsed .broker-status {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-left: calc(-1 * var(--space-3));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 /* ------------------------------------------------------------------ sidebar */
@@ -83,7 +157,9 @@ a { color: var(--text-link); }
   display: flex;
   flex-direction: column;
   padding: var(--space-5) var(--space-4);
-  overflow-y: auto;
+  /* The logo and the broker status stay put; only the list of patterns
+     between them scrolls. */
+  overflow: hidden;
 }
 
 .sidebar__brand {
@@ -105,6 +181,16 @@ a { color: var(--text-link); }
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.sidebar__brand,
+.broker-status {
+  flex-shrink: 0;
 }
 
 .nav-item {
@@ -146,7 +232,7 @@ a { color: var(--text-link); }
 /* Broker status block, pinned to the bottom of the sidebar. */
 
 .broker-status {
-  margin-top: auto;
+  margin-top: var(--space-3);
   padding: var(--space-3);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
@@ -345,6 +431,140 @@ a { color: var(--text-link); }
   font-size: var(--fs-body-lg);
   color: var(--text-body);
   max-width: 68ch;
+}
+
+/* Scenario on the left, the pattern it teaches on the right. Stacks on a
+   narrow screen, pattern second. */
+.scenario-header--split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.scenario-header__story {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.scenario-header__label,
+.pattern__eyebrow {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.pattern {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--green-classic);
+}
+
+.pattern__eyebrow {
+  margin: 0;
+  color: var(--green-bright);
+}
+
+.pattern__what {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  color: var(--text-strong);
+}
+
+.pattern__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pattern__title {
+  margin: 0;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+}
+
+.pattern__text {
+  margin: 0;
+  font-size: var(--fs-body-sm);
+  color: var(--text-body);
+}
+
+.pattern__related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pattern__link {
+  font-size: var(--fs-body-sm);
+  color: var(--text-link);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  text-decoration: none;
+}
+
+.pattern__link:hover {
+  border-color: var(--green-classic);
+}
+
+@media (max-width: 1100px) {
+  .scenario-header--split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Pinned to the top of the page while a Break it card is in effect. */
+.failbar {
+  position: sticky;
+  top: calc(-1 * var(--space-6));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-6)) 0;
+  padding: var(--space-3) var(--space-6);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--status-danger);
+  box-shadow: var(--shadow-sm);
+}
+
+.failbar[hidden] {
+  display: none;
+}
+
+.failbar__title {
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+}
+
+.failbar__time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body-sm);
+  color: var(--text-muted);
+}
+
+.failbar__spacer {
+  flex: 1;
+}
+
+/* A jump to a section or card leaves room for the failure bar. */
+.part,
+.stage,
+.fm {
+  scroll-margin-top: calc(var(--space-6) + 56px);
 }
 
 .objectives {

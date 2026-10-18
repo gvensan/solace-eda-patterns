@@ -17,6 +17,21 @@ objectives:
   - See a subscription with the wrong number of levels match nothing, silently
   - See a publisher add a level, and which subscriptions survive it
 
+pattern:
+  what: >
+    Topic names built from levels, general to specific, so consumers can
+    subscribe to exactly the slice they want with wildcards.
+  when: >
+    Many kinds of event, sources or regions share a broker, and consumers
+    each want a different cut.
+  cost: >
+    The levels are a contract: changing them, or adding one, quietly breaks
+    subscriptions that relied on the old shape.
+  solace: >
+    Topics are levels separated by /, with * for one level and > for
+    everything after. The broker matches them as it routes.
+  related: [event-filtering, publish-subscribe, access-control]
+
 run:
   - apply
   - build
@@ -48,7 +63,7 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-ht-stores
     - id: broker
       label: Solace Broker
-      sublabel: matches topics to subscriptions
+      sublabel: routes topics to subscribers
       kind: broker
       col: 1
       action: apply
@@ -182,6 +197,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, ht, stores, --client-name, ht-stores, --extra-level, till]
     cwd: .
     long_running: true
+    stands_for: stores
     variant: secondary
     failure_only: true
     description: >

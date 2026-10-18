@@ -16,6 +16,21 @@ objectives:
   - See refunds wait for a new service that fails after the move, and why moving back is not instant
   - Learn why the order of the two routing steps matters
 
+pattern:
+  what: >
+    Replace an old system one capability at a time, by moving the events for
+    that capability to a new service, until the old system can be retired.
+  when: >
+    A rewrite in one go is too risky, and the old system must keep running
+    meanwhile.
+  cost: >
+    Both systems run side by side for a long time, and each cut-over needs
+    care so work is neither done twice nor lost.
+  solace: >
+    Queue subscriptions decide which service gets which events, so a cut-
+    over is a configuration change on the broker.
+  related: [data-synchronization, change-data-capture, hierarchical-topics]
+
 run:
   - apply
   - route-start

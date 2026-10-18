@@ -16,6 +16,22 @@ objectives:
   - See a service that is down delay the sagas that need it, and nothing lost
   - Learn why a saga ends consistent, but not at once, and not by rollback
 
+pattern:
+  what: >
+    A business transaction across services as a chain of local steps joined
+    by events, with compensating steps that undo earlier ones when a later
+    one fails.
+  when: >
+    One outcome spans several services with their own data, and a single
+    transaction across them is not possible.
+  cost: >
+    Consistent at the end, not at every moment, and a compensation is a
+    business action that can fail too.
+  solace: >
+    A queue per service, subscribed to the events it reacts to, so each step
+    waits for its service if it is down.
+  related: [discard-pause-retry, cqrs, event-sourcing]
+
 run:
   - apply
   - build

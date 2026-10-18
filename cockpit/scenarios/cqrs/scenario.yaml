@@ -17,6 +17,22 @@ objectives:
   - See the read side fall behind, and what the account page is told
   - Learn why the read side is always a little behind the writes
 
+pattern:
+  what: >
+    Separate the model that handles commands (writes) from the model that
+    answers queries (reads), and keep the read side up to date from the
+    write side's events.
+  when: >
+    Reads and writes have different shapes or loads: many lookups, few
+    checked writes, or several views of the same data.
+  cost: >
+    The read side is always somewhat behind the writes, and the product has
+    to decide what users see in between.
+  solace: >
+    Commands on a queue for the write side, events on topics with a queue
+    per read side, and queries by request-reply.
+  related: [event-sourcing, event-carried-state-transfer, request-reply]
+
 run:
   - apply
   - build

@@ -16,6 +16,20 @@ objectives:
   - See a reply that arrives after the asker gave up, and what happens to it
   - Learn why request-reply on Solace is direct messaging, and what that means
 
+pattern:
+  what: >
+    One app sends a request and waits, with a timeout, for a reply addressed
+    back to it.
+  when: >
+    The asker needs an answer now to carry on: a price, a balance, a check.
+  cost: >
+    Both sides must be up at the same moment, a slow replier slows every
+    asker, and timeouts and retries are the asker's job.
+  solace: >
+    Two direct messages: a request on a topic, and a reply on a topic made
+    for the asker. The Go API offers request-reply on direct messaging.
+  related: [point-to-point, publish-subscribe, cqrs]
+
 run:
   - apply
   - build
@@ -107,6 +121,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, rr, pricing, --client-name, rr-pricing, --work, 3s]
     cwd: .
     long_running: true
+    stands_for: pricing
     variant: secondary
     failure_only: true
     description: >

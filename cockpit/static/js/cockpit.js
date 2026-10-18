@@ -49,6 +49,7 @@
     stopAll: document.getElementById("stop-all"),
     clearBroker: document.getElementById("clear-broker"),
     refresh: document.getElementById("refresh"),
+    sidebarToggle: document.getElementById("sidebar-toggle"),
   };
 
   /* ------------------------------------------------------------ helpers */
@@ -130,7 +131,24 @@
 
   /* ------------------------------------------------------- broker status */
 
+  /* Every log on the page keeps only its last LOG_LINES lines. The server
+     keeps a bounded history too, but a page left open on a busy card would
+     otherwise grow by thousands of lines a minute. Follows the bottom only
+     when the reader is already there, so scrolling back to read is not
+     yanked away. */
+  const LOG_LINES = 500;
+  function appendLog(pre, line) {
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    pre.append(h("div", { class: `line--${line.stream}`, text: line.text }));
+    while (pre.childElementCount > LOG_LINES) pre.firstElementChild.remove();
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+
+  // Polls skip a hidden tab, and catch up the moment it is shown again.
+  const pageVisible = () => document.visibilityState === "visible";
+
   async function pollBroker() {
+    if (!pageVisible()) return;
     try {
       const health = await API.health();
       if (health.ready) {
@@ -155,8 +173,9 @@
   }
 
   async function pollRuns() {
+    if (!pageVisible()) return;
     try {
-      const { activeCount, sequences, runs, sequenceErrors } = await API.runs();
+      const { activeCount, sequences, runs, sequenceErrors } = await API.runs(state.activeId);
       el.activeBadge.classList.toggle("hidden", activeCount === 0);
       el.activeBadge.textContent = `${activeCount} running`;
       indicator(el.activeBadge, "running-count",
@@ -166,9 +185,10 @@
          flight means busy, a live process means Pause is available. */
       if (state.activeId) {
         const busy = (sequences || []).includes(state.activeId);
-        const active = (runs || []).some(
+        const mine = (runs || []).filter(
           (r) => r.key.startsWith(`${state.activeId}:`) && r.state === "running"
-        );
+        ).length;
+        const active = mine > 0;
         /* A halted Play must say why. Without this the buttons simply return
            to resting and it looks like nothing happened. */
         const failure = (sequenceErrors || {})[state.activeId];
@@ -184,7 +204,9 @@
           if (sid === state.activeId) paintStatus(sid, aid, r);
         }
 
-        paintFailureModes(active);
+        // A card stays locked while Play is still starting the apps: breaking
+        // one half way through stops the sequence and leaves the rest unstarted.
+        paintFailureModes(active && !busy, busy);
 
         setTransport({
           busy,
@@ -194,7 +216,7 @@
             : failure
             ? failure
             : active
-            ? `${activeCount} process(es) running`
+            ? `${mine} process(es) running in this scenario`
             : "",
           failed: Boolean(failure) && !busy,
         });
@@ -398,11 +420,7 @@
       return;
     }
 
-    const append = (line) => {
-      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-      pre.append(h("div", { class: `line--${line.stream}`, text: line.text }));
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
-    };
+    const append = (line) => appendLog(pre, line);
     state.sockets.set(key, API.streamRun(scenario.id, action.id, {
       onHistory: (lines) => { pre.textContent = ""; lines.forEach(append); },
       onLine: append,
@@ -576,7 +594,7 @@
 
   /* Keep every card honest about whether it can be used. Called on each run
      poll, since "the scenario is running" is what unlocks them. */
-  function paintFailureModes(live) {
+  function paintFailureModes(live, starting = false) {
     const scenario = state.scenarios.find((s) => s.id === state.activeId);
     if (!scenario) return;
     /* Most failures need apps running to break. A scenario with no apps, like
@@ -605,7 +623,7 @@
       const badge = card.querySelector(".fm__badge");
       const [cls, text] = {
         broken: ["failed", "Broken"],
-        locked: ["idle", "Not ready"],
+        locked: ["idle", starting ? "Starting" : "Not ready"],
         waiting: ["idle", "Reset the other first"],
         recovered: ["succeeded", "Recovered"],
         ready: ["succeeded", "Ready"],
@@ -614,7 +632,9 @@
       badge.textContent = text;
       indicator(badge, "card-badge", {
         broken: "This failure is in effect now. Press Reset to put things back",
-        locked: mode.needs === "applied"
+        locked: starting
+          ? "Play is still starting the apps. Wait for it to finish, then break it"
+          : mode.needs === "applied"
           ? "Apply this scenario's configuration first (press Play)"
           : "Press Play first. This failure needs the scenario running",
         waiting: "Another failure on this page is in effect. Reset that one first",
@@ -645,7 +665,7 @@
       // A step already running is left alone, so a failure mode can make
       // sure something is up (like the processor's router) without failing
       // when it already is.
-      const { runs } = await API.runs();
+      const { runs } = await API.runs(scenario.id);
       const current = (runs || []).find((r) => r.key === `${scenario.id}:${actionId}`);
       if (current?.state !== "running") await API.startAction(scenario.id, actionId);
       if (verb === "run") await waitForStep(scenario.id, actionId);
@@ -657,7 +677,7 @@
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000));
-      const { runs } = await API.runs();
+      const { runs } = await API.runs(scenarioId);
       const run = (runs || []).find((r) => r.key === key);
       if (run && run.state !== "running") return run;
     }
@@ -697,11 +717,7 @@
       source.textContent = ` · ${scenario.actions.find((a) => a.id === logs)?.label || logs}`;
     }
     pre.textContent = "";
-    const append = (line) => {
-      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-      pre.append(h("div", { class: `line--${line.stream}`, text: line.text }));
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
-    };
+    const append = (line) => appendLog(pre, line);
     state.failureSocket = API.streamRun(scenario.id, logs, {
       onHistory: (lines) => { pre.textContent = ""; lines.forEach(append); },
       onLine: append,
@@ -720,16 +736,18 @@
       return;
     }
     state.recovered = null;
-    state.failure = { scenarioId: scenario.id, modeId: mode.id, bound };
+    state.failure = { scenarioId: scenario.id, modeId: mode.id, bound, since: Date.now() };
     paintFailureModes(true);
     markDiagramNode(bound.node, true);
+    paintFailBar();
     try {
       await runSteps(scenario, mode.trigger);
       streamFailureLog(scenario, mode);
-      // The card grows to full width and may move, so keep it on screen.
-      document.getElementById(`fm-${mode.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      // An open panel for the marked node should switch to the failure's log.
-      if (state.panel?.nodeId === bound.node) renderPanel();
+      /* The failure shows on the diagram, a screen or more above the card,
+         so go there, with the broken app's log open beside it. The bar at
+         the top leads back to the card and its Reset. */
+      if (bound.node) selectNode(scenario, bound.node, "logs");
+      document.querySelector(".stage")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       toast(err.message, true);
     }
@@ -746,6 +764,7 @@
     state.recovered = null;
     closeFailureSocket();
     markDiagramNode(null, false);
+    paintFailBar();
     // The next run poll repaints the cards with the real running state.
   }
 
@@ -761,6 +780,7 @@
     state.recovered = { scenarioId: scenario.id, modeId: mode.id, bound };
     markDiagramNode(null, false);
     paintFailureModes(true);
+    paintFailBar();
     // Reattach to the log, which now belongs to the app's new run.
     streamFailureLog(scenario, mode);
     if (state.panel?.nodeId === bound.node) renderPanel();
@@ -885,6 +905,13 @@
   }
 
   function navItem(scenario, index) {
+    const item = navButton(scenario, index);
+    // Collapsed to numbers only, the name is a hover away.
+    if (state.sidebarCollapsed) indicator(item, "nav-collapsed", `${scenario.title}, ${scenario.eyebrow}`);
+    return item;
+  }
+
+  function navButton(scenario, index) {
     return (
         h(
           "button",
@@ -894,7 +921,7 @@
             onClick: () => select(scenario.id),
           },
           h("span", { class: "nav-item__index", text: String(index + 1).padStart(2, "0") }),
-          scenario.title
+          h("span", { class: "nav-item__title", text: scenario.title })
         )
     );
   }
@@ -902,14 +929,21 @@
   function renderScenario(scenario) {
     el.crumb.textContent = scenario.title;
 
+    /* Two columns: this scenario's story and what it lets you see on the
+       left, the pattern itself on the right. The scenario is one example of
+       the pattern; keeping them apart lets an attendee tell the idea from
+       the shop or bank that illustrates it. */
     const header = h(
       "section",
-      { class: "scenario-header" },
-      h("p", { class: "eyebrow", text: scenario.eyebrow }),
-      h("h1", { text: scenario.title }),
-      h("p", { class: "scenario-header__summary", text: scenario.summary }),
-      scenario.objectives.length &&
-        h("ul", { class: "objectives" }, scenario.objectives.map((o) => h("li", { text: o })))
+      { class: `scenario-header${scenario.pattern?.what ? " scenario-header--split" : ""}` },
+      h("div", { class: "scenario-header__story" },
+        h("p", { class: "eyebrow", text: scenario.eyebrow }),
+        h("h1", { text: scenario.title }),
+        h("p", { class: "scenario-header__label", text: "This scenario" }),
+        h("p", { class: "scenario-header__summary", text: scenario.summary }),
+        scenario.objectives.length &&
+          h("ul", { class: "objectives" }, scenario.objectives.map((o) => h("li", { text: o })))),
+      scenario.pattern?.what && makePatternPanel(scenario)
     );
 
     /* The diagram is the primary interface: nodes carry live status, open their
@@ -937,12 +971,12 @@
        run it, step through it, break it, then look at what is on the broker.
        Numbering the parts makes that order visible rather than implied. */
     const parts = [];
-    const part = (title, hint, extra, ...content) => {
+    const part = (key, title, hint, extra, ...content) => {
       const n = String(parts.length + 1).padStart(2, "0");
       parts.push(
         h(
           "section",
-          { class: "part" },
+          { class: "part", id: `part-${key}` },
           h(
             "div",
             { class: "part__head" },
@@ -958,6 +992,7 @@
     };
 
     part(
+      "run",
       "Run it",
       "Press Play to bring the scenario up. The diagram shows what is running and where events go.",
       null,
@@ -965,6 +1000,7 @@
     );
 
     part(
+      "steps",
       "Step through it",
       "Every step Play and Cleanup run, one at a time. Click a step to run it on its own or read its logs.",
       h("button", {
@@ -977,6 +1013,7 @@
 
     if ((scenario.failureModes || []).length) {
       part(
+        "break",
         "Break it",
         "With the scenario running, cause one failure on purpose, watch what the broker does, then reset and try another.",
         null,
@@ -985,6 +1022,7 @@
     }
 
     part(
+      "broker",
       "On the broker",
       "What the broker holds right now, read over SEMP.",
       h(
@@ -1001,7 +1039,8 @@
       h("div", { id: "inspect-host", class: "shade-list" }, h("div", { class: "empty", text: "Loading…" }))
     );
 
-    el.view.replaceChildren(header, ...parts);
+    const failBar = h("div", { class: "failbar", id: "failbar", hidden: true });
+    el.view.replaceChildren(failBar, header, ...parts);
 
     /* A failure left in effect is still in effect on the broker, so coming
        back to the scenario shows it broken again rather than a fresh card. */
@@ -1010,9 +1049,66 @@
       markDiagramNode(boundOf(scenario, broken).node, true);
       streamFailureLog(scenario, broken);
     }
+    paintFailBar();
 
     refreshInspect(scenario.id);
     refreshStats();
+  }
+
+  function makePatternPanel(scenario) {
+    const p = scenario.pattern;
+    const row = (title, text) => text && h("div", { class: "pattern__row" },
+      h("p", { class: "pattern__title", text: title }),
+      h("p", { class: "pattern__text", text: text }));
+    const related = (p.related || [])
+      .map((id) => state.scenarios.find((s) => s.id === id))
+      .filter(Boolean);
+    return h("aside", { class: "pattern", "aria-label": "The pattern" },
+      h("p", { class: "pattern__eyebrow", text: "The pattern" }),
+      h("p", { class: "pattern__what", text: p.what }),
+      row("Use it when", p.when),
+      row("Watch out for", p.cost),
+      row("On Solace", p.solace),
+      related.length && h("div", { class: "pattern__row" },
+        h("p", { class: "pattern__title", text: "Next to it" }),
+        h("div", { class: "pattern__related" },
+          related.map((r) => h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))));
+  }
+
+  /* While a failure is in effect a bar stays at the top of the page: which
+     card, for how long, a way back to the diagram or the card, and Reset, so
+     the attendee can watch the diagram without losing the card. */
+  function paintFailBar() {
+    const bar = document.getElementById("failbar");
+    if (!bar) return;
+    const scenario = state.scenarios.find((s) => s.id === state.activeId);
+    const mode = scenario && (scenario.failureModes || []).find((m) => failureActive(scenario, m));
+    if (!mode) {
+      bar.hidden = true;
+      bar.replaceChildren();
+      return;
+    }
+    const jump = (selector) => document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    bar.hidden = false;
+    bar.replaceChildren(
+      h("span", { class: "badge badge--failed", text: "Broken",
+        indicator: ["failure-bar", `"${mode.title}" is in effect. Watch the diagram and the log, then press Reset to put things back`] }),
+      h("span", { class: "failbar__title", text: mode.title }),
+      h("span", { class: "failbar__time", id: "failbar-time",
+        indicator: ["failure-timer", "How long this failure has been in effect. Backlogs and timeouts grow with it"] }),
+      h("span", { class: "failbar__spacer" }),
+      h("button", { class: "btn btn--ghost btn--sm", text: "Diagram", onClick: () => jump(".stage") }),
+      h("button", { class: "btn btn--ghost btn--sm", text: "Card", onClick: () => jump(`#fm-${mode.id}`) }),
+      h("button", { class: "btn btn--secondary btn--sm", text: "Reset", onClick: () => resetFailure(scenario, mode) })
+    );
+    tickFailBar();
+  }
+
+  function tickFailBar() {
+    const t = document.getElementById("failbar-time");
+    if (!t || !state.failure?.since) return;
+    const secs = Math.floor((Date.now() - state.failure.since) / 1000);
+    t.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
   }
 
   async function refreshStats() {
@@ -1102,9 +1198,12 @@
        process, and the healthy subscriber's log would show nothing wrong. */
     const failing = (scenario.failureModes || []).find((m) =>
       failureActive(scenario, m) && boundOf(scenario, m).node === nodeId && boundOf(scenario, m).logs);
+    // A variant running in this node's place has the log worth reading.
+    const standIn = state.diagramState?.nodes?.[nodeId]?.standIn;
+    const ownAction = (standIn && scenario.actions.find((a) => a.id === standIn)) || action;
     const logAction = failing
-      ? scenario.actions.find((a) => a.id === boundOf(scenario, failing).logs) || action
-      : action;
+      ? scenario.actions.find((a) => a.id === boundOf(scenario, failing).logs) || ownAction
+      : ownAction;
 
     closePanelSocket();
     document.querySelector(".stage")?.classList.add("is-open");
@@ -1153,7 +1252,10 @@
     const nodeState = state.diagramState?.nodes?.[spec.id];
     const checklist = nodeState?.checklist || [];
 
-    const statusText = nodeState?.running
+    const standIn = nodeState?.standIn && scenario.actions.find((a) => a.id === nodeState.standIn);
+    const statusText = standIn
+      ? `Running as: ${standIn.label}`
+      : nodeState?.running
       ? "Running"
       : nodeState?.run
       ? STATE_LABEL[nodeState.run.state] || "Idle"
@@ -1210,12 +1312,12 @@
             text: running ? "Stop" : "Start",
             // Read state at click time, not render time: the label is updated
             // in place by polling, so a captured value would go stale.
-            onClick: () =>
-              toggleNode(
-                scenario,
-                action,
-                Boolean(state.diagramState?.nodes?.[spec.id]?.running)
-              ),
+            // A variant running in this node's place is what Stop stops.
+            onClick: () => {
+              const now = state.diagramState?.nodes?.[spec.id];
+              const current = (now?.standIn && scenario.actions.find((a) => a.id === now.standIn)) || action;
+              toggleNode(scenario, current, Boolean(now?.running));
+            },
           }),
           h("button", {
             class: "btn btn--ghost btn--sm",
@@ -1243,11 +1345,7 @@
       : null;
     body.replaceChildren(...(notice ? [notice] : []), pre);
 
-    const append = (line) => {
-      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-      pre.append(h("div", { class: `line--${line.stream}`, text: line.text }));
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
-    };
+    const append = (line) => appendLog(pre, line);
 
     // A dedicated socket for whatever the panel is showing, closed on every
     // switch so a long session cannot accumulate one per node visited.
@@ -1268,7 +1366,10 @@
 
     const statusEl = document.querySelector("#panel-body .panel__status");
     if (statusEl) {
-      const text = nodeState.running
+      const standIn = nodeState.standIn && scenario.actions.find((a) => a.id === nodeState.standIn);
+      const text = standIn
+        ? `Running as: ${standIn.label}`
+        : nodeState.running
         ? "Running"
         : nodeState.run
         ? STATE_LABEL[nodeState.run.state] || "Idle"
@@ -1467,6 +1568,11 @@
   async function transportPlay(scenario) {
     setTransport({ busy: true, status: "Starting..." });
     forgetFailure(scenario.id);
+    // What Play does shows on the diagram, so make sure it is in view.
+    const stage = document.querySelector(".stage");
+    if (stage && stage.getBoundingClientRect().top > window.innerHeight * 0.5) {
+      stage.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
     try {
       await API.runScenario(scenario.id);
     } catch (err) {
@@ -1544,7 +1650,33 @@
     }
   }
 
-  function select(scenarioId) {
+  /* The hash is "<scenario>" or "<scenario>/<section>", where a section is
+     run, steps, break, broker or break-<n> for one card, so a guide can link
+     straight to "Break it, card 2". */
+  function parseHash() {
+    const [id, section] = decodeURIComponent(location.hash.slice(1)).split("/");
+    return { id, section: section || null };
+  }
+
+  function scrollToSection(scenario, section) {
+    const content = document.querySelector(".content");
+    if (!section) {
+      if (content) content.scrollTop = 0;
+      return;
+    }
+    const card = section.match(/^break-(\d+)$/);
+    const mode = card && (scenario.failureModes || [])[Number(card[1]) - 1];
+    const target = mode ? document.getElementById(`fm-${mode.id}`) : document.getElementById(`part-${section}`);
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
+    else if (content) content.scrollTop = 0;
+  }
+
+  function select(scenarioId, section = null) {
+    if (scenarioId === state.activeId) {
+      const scenario = state.scenarios.find((s) => s.id === scenarioId);
+      if (scenario) scrollToSection(scenario, section);
+      return;
+    }
     closeSockets();
     closeFailureSocket();
     state.recovered = null;
@@ -1553,8 +1685,14 @@
     state.activeId = scenarioId;
     const scenario = state.scenarios.find((s) => s.id === scenarioId);
     renderNav();
-    if (scenario) renderScenario(scenario);
-    location.hash = scenarioId;
+    if (scenario) {
+      renderScenario(scenario);
+      scrollToSection(scenario, section);
+    }
+    const hash = section ? `${scenarioId}/${section}` : scenarioId;
+    if (decodeURIComponent(location.hash.slice(1)) !== hash) history.replaceState(null, "", `#${hash}`);
+    // The sidebar is long; keep the open scenario's entry in view.
+    el.nav.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
   }
 
   /* ----------------------------------------------------------------- boot */
@@ -1566,9 +1704,10 @@
       el.view.replaceChildren(h("div", { class: "empty", text: "No scenarios found." }));
       return;
     }
-    const wanted = location.hash.slice(1);
-    const target = scenarios.find((s) => s.id === wanted) || scenarios[0];
-    select(target.id);
+    const { id, section } = parseHash();
+    const target = scenarios.find((s) => s.id === id) || scenarios[0];
+    state.activeId = null;
+    select(target.id, target.id === id ? section : null);
   }
 
   // The server only knows the broker as localhost, which is wrong for any
@@ -1604,7 +1743,29 @@
     }, 1500);
   }
 
+  /* The sidebar can shrink to a rail of pattern numbers, for more room on a
+     small screen. The choice is remembered in this browser only. */
+  function setSidebar(collapsed) {
+    state.sidebarCollapsed = collapsed;
+    document.querySelector(".app")?.classList.toggle("is-collapsed", collapsed);
+    el.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+    el.sidebarToggle.firstElementChild.textContent = collapsed ? "\u00bb" : "\u00ab";
+    indicator(el.sidebarToggle, "sidebar-toggle", collapsed
+      ? "Show the full sidebar, with every pattern's name"
+      : "Shrink the sidebar to pattern numbers, for more room");
+    try { localStorage.setItem("eda.sidebarCollapsed", collapsed ? "1" : "0"); } catch (_) { /* private window */ }
+    if (state.scenarios.length) {
+      renderNav();
+      el.nav.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   async function init() {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem("eda.sidebarCollapsed") === "1"; } catch (_) { /* private window */ }
+    setSidebar(collapsed);
+    el.sidebarToggle.addEventListener("click", () => setSidebar(!state.sidebarCollapsed));
+
     state.env = await API.env();
     el.brokerLink.href = brokerUiUrl(state.env);
 
@@ -1651,8 +1812,9 @@
         "Clear broker config?\n\nThis stops everything that is running, then deletes every " +
           "queue, client profile, ACL profile and client username the workshop scenarios " +
           "create, along with any messages waiting on those queues. Broker defaults and " +
-          "anything you created yourself are left alone.\n\nPress Play on a scenario to set " +
-          "it up again."
+          "anything you created yourself are left alone. So are replay logs, bridges and extra " +
+          "message VPNs: Cleanup on their scenario removes those.\n\nPress Play on a scenario " +
+          "to set it up again."
       );
       if (!ok) return;
       el.clearBroker.disabled = true;
@@ -1675,9 +1837,17 @@
     });
 
     window.addEventListener("hashchange", () => {
-      const id = location.hash.slice(1);
-      if (id && id !== state.activeId) select(id);
+      const { id, section } = parseHash();
+      if (id) select(id, section);
     });
+
+    // Polls skip a hidden tab; catch up as soon as it is shown again.
+    document.addEventListener("visibilitychange", () => {
+      if (!pageVisible()) return;
+      pollBroker();
+      pollRuns();
+    });
+    setInterval(tickFailBar, 1000);
   }
 
   init().catch((err) => {

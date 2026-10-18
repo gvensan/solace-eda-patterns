@@ -17,6 +17,21 @@ objectives:
   - See an event type nobody added to the bridge never arrive, with no error anywhere
   - Learn that a bridge carries only what its configuration says
 
+pattern:
+  what: >
+    A link between two separate messaging domains that carries a chosen set
+    of events from one into the other.
+  when: >
+    Teams, sites or clouds run their own messaging, but some events must
+    cross between them.
+  cost: >
+    Only what is configured crosses, and each link is configured and watched
+    on its own.
+  solace: >
+    A message VPN bridge, between two VPNs on one broker or on two brokers.
+    Guaranteed messages cross through a queue on the far side.
+  related: [publish-subscribe, guaranteed-delivery, access-control]
+
 run:
   - apply
   - build

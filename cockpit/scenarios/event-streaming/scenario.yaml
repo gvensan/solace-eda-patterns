@@ -17,6 +17,21 @@ objectives:
   - See a consumer that joins the stream late get its state wrong, and why
   - Learn what a queue holds for a stream consumer, and what a snapshot adds
 
+pattern:
+  what: >
+    Consumers read an unbounded, ordered sequence of events, each with its
+    own position in it, building state as they go.
+  when: >
+    Events form a sequence to be processed in order: telemetry, positions,
+    counters, activity.
+  cost: >
+    A consumer has to keep its position and its state in step, and one that
+    joins late has no history unless something replays it.
+  solace: >
+    A queue per consumer keeps the order, and acknowledgements are the
+    position. A replay log can feed history to a consumer that needs it.
+  related: [event-sourcing, publish-subscribe, partitioning]
+
 run:
   - apply
   - build
@@ -130,6 +145,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, es, counter, --client-name, es-counter, --no-snapshot]
     cwd: .
     long_running: true
+    stands_for: counter
     variant: secondary
     description: >
       The same counter, keeping its count in memory only. Stop the counter

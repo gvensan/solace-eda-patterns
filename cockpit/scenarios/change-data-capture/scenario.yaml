@@ -16,6 +16,23 @@ objectives:
   - See a connector that lost its position publish old changes again, and the consumer ignore them
   - Learn why change data capture delivers at least once
 
+pattern:
+  what: >
+    Turn the committed changes in a database into events by reading the
+    database's own change log, without changing the application that writes
+    to it.
+  when: >
+    A system of record cannot or should not be modified, but other systems
+    need to react to its changes.
+  cost: >
+    Events mirror tables, not business intent. Delivery is at least once,
+    and a database keeps its log only so long: a connector down too long has
+    to start again from a snapshot.
+  solace: >
+    A connector publishes each change as a guaranteed event on a topic per
+    table or key, and each consumer reads its own queue.
+  related: [event-carried-state-transfer, data-synchronization, strangler]
+
 run:
   - apply
   - build
@@ -136,6 +153,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, cdc, connector, --client-name, cdc-connector, --from-start]
     cwd: .
     long_running: true
+    stands_for: connector
     variant: secondary
     failure_only: true
     description: >

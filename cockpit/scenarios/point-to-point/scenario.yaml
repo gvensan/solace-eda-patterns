@@ -16,6 +16,21 @@ objectives:
   - Find the queue's limit, and the error the sender gets when it is reached
   - See what the broker tells a sender that names a queue that does not exist
 
+pattern:
+  what: >
+    A sender addresses one named destination, and exactly one receiver takes
+    each message from it.
+  when: >
+    A piece of work must be done once, by a known service: print a label,
+    send an invoice.
+  cost: >
+    Sender and receiver are tied by the destination's name, and another kind
+    of consumer needs another destination.
+  solace: >
+    A durable queue, addressed by its name, that keeps each message until
+    the receiver takes it.
+  related: [publish-subscribe, competing-consumers, request-reply]
+
 # The printer first, so the first job already has somewhere to go. The
 # queue would keep it anyway: that is what makes this point-to-point.
 run:
@@ -133,6 +148,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, p2p, send, --queue, q.p2p.lables]
     cwd: .
     long_running: true
+    stands_for: sender
     variant: secondary
     failure_only: true
     description: >

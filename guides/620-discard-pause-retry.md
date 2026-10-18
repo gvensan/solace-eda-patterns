@@ -41,9 +41,11 @@ charged it.
 ## Break it
 
 With Play running, scroll to **Break it**. Each card causes one failure on
-purpose. Press **Break it**, read the log in the card and what it tells you
-to look for, then press **Reset**. **Why this breaks** explains the cause
-and where you would meet it in production.
+purpose. Press **Break it**: the page moves up to the diagram, with the
+broken app's log open beside it, and a bar at the top keeps the card's name,
+how long it has been broken, and **Reset** in reach. **Card** in that bar
+takes you back to the card's log and what to look for. **Why this breaks**
+explains the cause and where you would meet it in production.
 
 1. **The bank goes down.** The processor's charge gets no answer, so it
    pauses: "pausing payments, checking the bank every 2 s". Payments wait on

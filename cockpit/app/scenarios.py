@@ -39,6 +39,11 @@ class Action:
     # Exists only to cause a failure mode, so it is left out of the Actions
     # flowchart and reached from that failure mode's card instead.
     failure_only: bool = False
+    # A variant of another action (the same app started differently, such as
+    # a slow pricing service for a failure card). While it runs, the diagram
+    # node of the action it stands for shows as running, since that is the
+    # app the attendee is looking at.
+    stands_for: Optional[str] = None
 
     @property
     def is_destructive(self) -> bool:
@@ -108,6 +113,11 @@ class Scenario:
     # publisher goes, say). Each choice is a set of arguments, put into any
     # action's cmd where it says "{setting:<name>}".
     settings: dict = field(default_factory=dict)
+    # The pattern this scenario teaches, in general terms: what it is, when to
+    # use it, how Solace supports it, and the patterns next to it. Shown
+    # beside the scenario's own summary so the idea and the example are told
+    # apart.
+    pattern: dict = field(default_factory=dict)
 
     @property
     def run_sequence(self) -> list:
@@ -176,6 +186,7 @@ class Scenario:
                     "confirm": a.confirm,
                     "longRunning": a.long_running,
                     "failureOnly": a.failure_only,
+                    "standsFor": a.stands_for,
                 }
                 for a in self.actions
             ],
@@ -190,6 +201,7 @@ class Scenario:
             "failureModes": self.failure_modes,
             "expect": self.expect,
             "settings": self.settings,
+            "pattern": self.pattern,
         }
 
 
@@ -212,6 +224,7 @@ def _load_one(path: Path) -> Scenario:
         failure_modes=raw.get("failure_modes", []) or [],
         expect=raw.get("expect", {}) or {},
         settings=raw.get("settings", {}) or {},
+        pattern=raw.get("pattern", {}) or {},
     )
 
 

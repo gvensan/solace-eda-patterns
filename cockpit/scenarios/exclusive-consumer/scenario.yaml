@@ -16,6 +16,22 @@ objectives:
   - See which messages come back marked redelivered after a handover
   - "Learn the limit of the pattern: a consumer that freezes without disconnecting stops everything"
 
+pattern:
+  what: >
+    Only one consumer receives a queue's messages at a time, in order.
+    Others wait as standbys and take over when it goes.
+  when: >
+    Order matters and the work must not run twice in parallel, but you still
+    want failover.
+  cost: >
+    One consumer's throughput, and a consumer that hangs without
+    disconnecting keeps the queue to itself.
+  solace: >
+    An exclusive queue: the first consumer to bind is active and the rest
+    are standbys. The broker fails over when the active consumer's session
+    ends.
+  related: [competing-consumers, partitioning, consumer-groups]
+
 # Ledger A binds first, so the broker makes it the active consumer. Ledger B
 # binds second and becomes the standby. Both are up before anything is
 # published, so the first posting already goes to A.

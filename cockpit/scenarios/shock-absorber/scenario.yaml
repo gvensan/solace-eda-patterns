@@ -17,6 +17,21 @@ objectives:
   - See a burst bigger than the queue refused to the publisher, and what that costs
   - See requests go stale while they wait, and where they end up
 
+pattern:
+  what: >
+    A queue between bursty producers and steady consumers takes the burst,
+    and the consumers drain it at their own pace.
+  when: >
+    Load arrives in spikes, such as a sale or a batch job, that consumers
+    could not take all at once.
+  cost: >
+    Work waits. A burst bigger than the queue is refused, and some requests
+    are stale by the time they are handled.
+  solace: >
+    A durable queue with a spool quota. The publisher is told when the queue
+    is full.
+  related: [backpressure, competing-consumers, dead-letter-queue]
+
 run:
   - apply
   - build

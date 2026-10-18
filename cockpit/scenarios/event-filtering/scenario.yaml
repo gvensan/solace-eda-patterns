@@ -17,6 +17,22 @@ objectives:
   - See a selector's leftovers fill its queue until the publisher is refused, for everyone
   - Learn why topics are the first filter, and selectors the exception
 
+pattern:
+  what: >
+    Each consumer receives only the events it wants, by filtering on the
+    topic, or on message properties when the topic cannot carry what it
+    filters on.
+  when: >
+    Consumers want subsets of a large stream: one site, one kind of sensor,
+    one severity.
+  cost: >
+    Filtering on content is evaluated for every message, and on Solace a
+    selector leaves what it does not match on the queue.
+  solace: >
+    Topic subscriptions with wildcards first. Message selectors on a queue
+    binding when a property is needed; partitioned queues refuse them.
+  related: [hierarchical-topics, publish-subscribe, consumer-groups]
+
 run:
   - apply
   - build
@@ -72,7 +88,7 @@ diagram:
           semp: /msgVpns/{vpn}/aclProfiles/acl-ef
     - id: berlin
       label: Berlin Temperatures
-      sublabel: "topic: ef/plant/berlin/*/temp/>"
+      sublabel: "topic ef/plant/berlin/*/temp/>"
       kind: app
       col: 2
       action: berlin
@@ -149,6 +165,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, ef, watch, --role, alarms, --user, svc-ef-alarms, --client-name, ef-alarms, --queue, q.ef.alarms, --selector, "severity = = 4"]
     cwd: .
     long_running: true
+    stands_for: alarms
     variant: secondary
     failure_only: true
     description: >
@@ -172,6 +189,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, ef, sensors, --client-name, ef-sensors, --rate, "50", --pad, "8000"]
     cwd: .
     long_running: true
+    stands_for: sensors
     variant: secondary
     failure_only: true
     description: >

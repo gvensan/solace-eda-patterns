@@ -529,6 +529,7 @@ const Diagram = (() => {
     const clamp = (y) => Math.min(Math.max(y, top + half), bottom - half);
 
     const boxes = new Map();
+    const displaced = new Set();
     for (const c of kids) {
       const ys = [];
       flows.forEach((f, i) => {
@@ -545,6 +546,15 @@ const Diagram = (() => {
       if (!ys.length) continue;
       const y1 = clamp(Math.min(...ys)) - half;
       const y2 = clamp(Math.max(...ys)) + half;
+      /* Two processors level with each other (one each side of the broker)
+         put their lanes at the same height. The second box would sit on the
+         first, so it takes a free slot instead, and its lines are drawn
+         from there as ordinary curves (see render). */
+      const overlaps = [...boxes.values()].some((b) => y1 < b.y + b.h + CHILD_GAP && y2 + CHILD_GAP > b.y);
+      if (overlaps) {
+        displaced.add(c.id);
+        continue;
+      }
       boxes.set(c.id, { y: y1, h: y2 - y1 });
     }
 
@@ -559,6 +569,22 @@ const Diagram = (() => {
       boxes.set(c.id, box);
       taken.push(box);
     }
+    /* A displaced box's lines leave from the box's own height, on the side
+       facing their consumer, and curve to the consumer's near side. Flows
+       into a processor have no ports of their own (they normally run on its
+       lane), so the points are made here. */
+    flows.forEach((f, i) => {
+      if (!displaced.has(f.via) || f.from !== broker.id) return;
+      const box = boxes.get(f.via);
+      const to = placed.get(f.to);
+      if (!to) return;
+      const right = to.x > broker.x;
+      ports[i] = [
+        { x: right ? broker.x + broker.w : broker.x, y: box.y + box.h / 2, nx: right ? 1 : -1, ny: 0 },
+        { x: right ? to.x : to.x + to.w, y: to.y + to.h / 2, nx: right ? -1 : 1, ny: 0 },
+      ];
+      ports[i].free = true;
+    });
     return boxes;
   }
 
@@ -610,7 +636,7 @@ const Diagram = (() => {
       if (lanesOf && f.via === lanesOf.child.id) return;
 
       const back = isBack(from, to);
-      const routed = isProcessor(from) || isProcessor(to) ? processorPath(from, to) : null;
+      const routed = (isProcessor(from) || isProcessor(to)) && !ports[i].free ? processorPath(from, to) : null;
       const d = routed ? routed.d : flowPath(...ports[i]);
       const pathId = `dg-flow-${i}`;
 

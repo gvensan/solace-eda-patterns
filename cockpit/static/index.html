@@ -13,10 +13,10 @@
       <div class="sidebar__brand">
         <img class="sidebar__logo" src="/static/ds/assets/logo/solace-white.png" alt="Solace">
         <span class="sidebar__rule" aria-hidden="true"></span>
-        <span class="eyebrow">Workshop Dashboard</span>
+        <span class="eyebrow">EDA Patterns</span>
       </div>
 
-      <nav class="sidebar__nav" id="nav" aria-label="Workshop sections"></nav>
+      <nav class="sidebar__nav" id="nav" aria-label="Patterns"></nav>
 
       <div class="broker-status">
         <div class="broker-status__label">Event broker</div>
@@ -32,8 +32,11 @@
 
     <main class="main">
       <header class="topbar">
+        <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-controls="nav" aria-expanded="true">
+          <span aria-hidden="true">&laquo;</span>
+        </button>
         <div class="crumbs">
-          <span>Workshop</span>
+          <span>Patterns</span>
           <span aria-hidden="true">/</span>
           <span class="crumbs__current" id="crumb">Loading</span>
         </div>

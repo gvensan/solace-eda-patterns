@@ -156,6 +156,13 @@ objectives:
 run: [apply, build, consumer, publisher]   # Play, in order: consumers before publishers
 cleanup: [destroy]                          # optional, defaults to destructive actions
 
+pattern:                      # the pattern in general, shown beside the summary
+  what: One or two sentences on what the pattern is, without the story.
+  when: When to use it.
+  cost: What it costs, or what to watch out for.
+  solace: How Solace supports it, only what docs or a spike confirm.
+  related: [other-scenario-id, another-id]   # linked under "Next to it"
+
 diagram: { ... }              # see below
 actions: [ ... ]              # see below
 failure_modes: [ ... ]        # see below
@@ -204,8 +211,24 @@ actions:
     variant: danger
 ```
 
-Other fields: `confirm:` (a prompt shown before running) and
-`failure_only: true` (hidden from the flowchart, used only by a failure mode).
+Other fields: `confirm:` (a prompt shown before running),
+`failure_only: true` (hidden from the flowchart, used only by a failure mode),
+and `stands_for: <action id>` on a variant of another action (the same app
+started differently for a card, such as a slow pricing service). While a
+variant runs, the diagram node of the action it stands for shows as running,
+its panel says "Running as" the variant, Stop stops the variant, and its Logs
+tab shows the variant's output.
+
+The page header has two columns: the scenario's `summary:` and
+`objectives:` on the left, the `pattern:` block on the right. Write
+`pattern:` in general terms, with no shop or bank in it: it is what an
+attendee should take away after the example is forgotten. The checker
+requires `what`, `when`, `cost` and `solace`, and that every `related` id is
+a scenario.
+
+Each part of the page has an anchor, so a guide can link straight to it:
+`#<id>/run`, `#<id>/steps`, `#<id>/break`, `#<id>/broker`, or
+`#<id>/break-2` for the second card.
 
 ### Diagram
 
@@ -389,6 +412,9 @@ diagram:
 A flow that carries only the odd message (from a queue to its dead message
 queue's reader, say) can set `animate: false`. It is drawn, but never shows
 packets, so the picture does not suggest a steady stream that is not there.
+
+A node's `sublabel` may be at most 30 characters: a processor's hexagon cuts
+text at about that length. The checker enforces it.
 
 Rules the checker enforces, because they are what the workshop teaches:
 

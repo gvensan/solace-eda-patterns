@@ -17,6 +17,21 @@ objectives:
   - Crash a consumer, and add a fourth, and watch partitions move
   - Publish without a partition key and see one order's updates split between consumers
 
+pattern:
+  what: >
+    Messages with the same key always go to the same consumer, in order,
+    while different keys spread across consumers.
+  when: >
+    Order matters for each entity (an order, an account, a device) but not
+    across them, and one consumer is not enough.
+  cost: >
+    A busy key loads one consumer, partitions move when consumers join or
+    leave, and consumers beyond the partition count sit idle.
+  solace: >
+    A partitioned queue: the broker hashes each message's partition key to a
+    partition, and gives each partition to one consumer.
+  related: [exclusive-consumer, consumer-groups, competing-consumers]
+
 run:
   - apply
   - build
@@ -256,6 +271,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, partition, orders, --no-key, "{setting:pace}"]
     cwd: .
     long_running: true
+    stands_for: orders
     variant: secondary
     failure_only: true
     description: >

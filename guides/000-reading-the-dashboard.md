@@ -65,9 +65,11 @@ second; nothing moves on a timer.
 | <!-- indicator: broker-total --> `2 on broker` under the diagram | How many queues, client profiles, ACL profiles and client usernames the message VPN holds right now, across every scenario and including the broker's own defaults. Read every 5 seconds. The broker box in the diagram lists this scenario's own. |
 | <!-- indicator: running-count --> `3 running` in the top bar | Apps or steps running across every scenario. **Stop everything** ends them all. |
 | <!-- indicator: step-dot --> Dots on the Step through it flowchart | Each step's state, as on the diagram. Click a step to see what it does, and to run or stop it on its own. |
-| <!-- indicator: card-badge --> Badge on a Break it card | **Ready**: you can break it. **Not ready**: press Play first. **Broken**: the failure is in effect, press Reset. **Reset the other first**: another card is in effect. **Recovered**: Reset is done and the log shows the recovery. |
+| <!-- indicator: card-badge --> Badge on a Break it card | **Ready**: you can break it. **Not ready**: press Play first. **Starting**: Play is still starting the apps; wait for it. **Broken**: the failure is in effect, press Reset. **Reset the other first**: another card is in effect. **Recovered**: Reset is done and the log shows the recovery. |
+| <!-- indicator: failure-bar, failure-timer --> **Broken** bar at the top of the page, with `0:42` | A Break it card is in effect, and for how long. It stays at the top while you scroll. **Diagram** and **Card** jump to either; **Reset** puts things back, as on the card. |
 | <!-- indicator: inspect-updated, refresh-button --> `Updated 10:31:05` and **Refresh** in On the broker | When the tables were last read from the broker. They are read again every 5 seconds while the page is open; **Refresh** reads them now. |
 | <!-- indicator: broker-status --> Event broker, bottom left | **Ready** means the dashboard can reach the broker. **Starting** means it is still booting, which takes about a minute. **Unreachable** means the broker container is not running. |
+| <!-- indicator: sidebar-toggle, nav-collapsed --> `«` and `»`, left of the page title | Shrinks the sidebar to pattern numbers, for more room, and back. Collapsed, point at a number to see its pattern's name. The dot at the bottom is still the broker's status. Your choice is remembered in this browser. |
 
 | <!-- indicator: close-panel --> `×` on the side panel | Closes the panel. |
 

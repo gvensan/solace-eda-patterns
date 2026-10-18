@@ -17,6 +17,22 @@ objectives:
   - See what a subscriber misses while it is away, and why nothing waits for it
   - See a second copy of a subscriber double the work, and learn where that leads
 
+pattern:
+  what: >
+    A publisher sends an event to a topic without knowing who receives it,
+    and every subscriber to that topic gets its own copy.
+  when: >
+    Several parts of a system react to the same events, and new ones should
+    be added without changing the publisher.
+  cost: >
+    The publisher does not know who received an event. With direct
+    messaging, a subscriber that is away misses what was published
+    meanwhile.
+  solace: >
+    Topics with wildcard subscriptions. Direct messages when speed matters
+    most; a queue subscribed to the topics when nothing may be missed.
+  related: [point-to-point, hierarchical-topics, guaranteed-delivery]
+
 run:
   - apply
   - build

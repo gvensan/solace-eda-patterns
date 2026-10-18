@@ -369,7 +369,8 @@ async def scenario_state(scenario_id: str):
             # honest than claiming the object is absent.
             return path, None
 
-    found = dict(await asyncio.gather(*(probe(p) for p in paths))) if paths else {}
+    async def probe_all():
+        return dict(await asyncio.gather(*(probe(p) for p in paths))) if paths else {}
 
     # A node may say which queue it consumes and under what client name, so the
     # diagram can show what the broker decided: on an exclusive queue only one
@@ -386,13 +387,31 @@ async def scenario_state(scenario_id: str):
         except Exception:
             return queue, None
 
-    tx = dict(await asyncio.gather(*(flows(q) for q in queues))) if queues else {}
+    async def flows_all():
+        return dict(await asyncio.gather(*(flows(q) for q in queues))) if queues else {}
+
+    # The three kinds of question are independent, so they go to the broker
+    # together rather than one phase after another.
+    found, tx, boxes = await asyncio.gather(probe_all(), flows_all(), _box_state(nodes))
+
+    # An action that stands for another (a variant of the same app, started
+    # by a failure card) makes that action's node show as running.
+    stand_ins = {}
+    for a in scenario.actions:
+        if a.stands_for:
+            stand_ins.setdefault(a.stands_for, []).append(a.id)
 
     out = {}
     for node in nodes:
         node_id = node.get("id")
         action_id = node.get("action")
         run = manager.get(f"{scenario_id}:{action_id}") if action_id else None
+        if not (run and run.is_active):
+            for alt in stand_ins.get(action_id, []):
+                alt_run = manager.get(f"{scenario_id}:{alt}")
+                if alt_run and alt_run.is_active:
+                    run = alt_run
+                    break
 
         # `group` ties an item to one of the node's contained boxes, so a
         # broker holding four kinds of configuration can show a count per kind
@@ -408,13 +427,15 @@ async def scenario_state(scenario_id: str):
             "action": action_id,
             "run": run.status() if run else None,
             "running": bool(run and run.is_active),
+            # The variant running in this node's place, if any.
+            "standIn": run.key.split(":", 1)[1] if run and run.key != f"{scenario_id}:{action_id}" else None,
             "checklist": checklist,
             "ready": all(c["present"] for c in checklist) if checklist else None,
             "flow": _flow_role(node.get("flowOn"), tx),
         }
 
     return {"nodes": out,
-            "boxes": await _box_state(nodes),
+            "boxes": boxes,
             "settings": {name: setting_value(scenario, name) for name in scenario.settings}}
 
 
@@ -555,9 +576,14 @@ async def inspect_scenario(scenario_id: str):
 # ------------------------------------------------------------------- run state
 
 @app.get("/api/runs")
-async def list_runs():
+async def list_runs(scenario: str | None = None):
+    """Every run, or with ?scenario=<id> only that scenario's. activeCount
+    always counts every scenario, for the running badge above the page."""
+    runs = manager.all()
+    if scenario:
+        runs = [r for r in runs if r.key.startswith(f"{scenario}:")]
     return {
-        "runs": [r.status() for r in manager.all()],
+        "runs": [r.status() for r in runs],
         "activeCount": len(manager.active()),
         # Which scenarios are mid-sequence, so the UI can show that a Run
         # scenario is still working through its steps.

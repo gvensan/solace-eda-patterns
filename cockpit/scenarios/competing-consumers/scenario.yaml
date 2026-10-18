@@ -16,6 +16,20 @@ objectives:
   - Crash a worker and see its unfinished jobs handed to another
   - See that a worker that hangs holds up only its own jobs, not everyone's
 
+pattern:
+  what: >
+    Several identical workers read one queue and each message goes to one of
+    them, so adding workers adds capacity.
+  when: >
+    Work items are independent and the load varies.
+  cost: >
+    No order across workers, and a crashed worker's unacknowledged messages
+    go to the others.
+  solace: >
+    A non-exclusive queue: the broker shares its messages among every bound
+    consumer.
+  related: [consumer-groups, exclusive-consumer, shock-absorber]
+
 # Two workers, then checkout. Checkout confirms six orders a second and two
 # workers send five, so a small backlog builds: the reason to start worker 3.
 run:

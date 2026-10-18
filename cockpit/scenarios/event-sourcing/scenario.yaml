@@ -16,6 +16,23 @@ objectives:
   - See a full replay log drop its oldest events, and the history go with them
   - Learn why event sourcing needs a store of record, and what the replay log is for
 
+pattern:
+  what: >
+    Store every change as an event and derive the current state from the
+    events, so the history is the record and the state can always be
+    rebuilt.
+  when: >
+    The history matters (audit, finance), or state must be rebuilt or read
+    in new ways from past events.
+  cost: >
+    It needs a durable event store, snapshots for long histories, and care
+    whenever the format of an event changes.
+  solace: >
+    A replay log keeps published messages up to a fixed size and replays
+    them into an exclusive queue on request. It is a buffer for recovery,
+    not a permanent event store.
+  related: [cqrs, event-streaming, event-carried-state-transfer]
+
 run:
   - apply
   - build

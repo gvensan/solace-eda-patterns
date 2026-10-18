@@ -25,7 +25,8 @@ const API = (() => {
     health: () => req("/api/health"),
     overview: () => req("/api/overview"),
     scenarios: () => req("/api/scenarios"),
-    runs: () => req("/api/runs"),
+    // With a scenario, only its runs; activeCount still counts every scenario.
+    runs: (scenario) => req(scenario ? `/api/runs?scenario=${encodeURIComponent(scenario)}` : "/api/runs"),
 
     startAction: (scenario, action) =>
       req(`/api/scenarios/${scenario}/actions/${action}/start`, { method: "POST" }),

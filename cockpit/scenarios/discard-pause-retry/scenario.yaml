@@ -16,6 +16,21 @@ objectives:
   - See the processor pause when the bank is down, and resume when it is back
   - Learn to tell a bad message from a bad moment from a broken dependency
 
+pattern:
+  what: >
+    Handle a failed message by why it failed: discard what can never
+    succeed, retry what failed because of the moment, and pause when a
+    dependency is down.
+  when: >
+    A consumer depends on other systems, and on input it does not control.
+  cost: >
+    Each failure has to be told apart correctly, retries need a limit and a
+    delay, and pausing needs a way to know the dependency is back.
+  solace: >
+    Reject to a dead message queue to discard, republish to a queue with a
+    delivery delay to retry, and pause and resume the Go receiver.
+  related: [dead-letter-queue, saga, backpressure]
+
 run:
   - apply
   - build
@@ -110,6 +125,7 @@ diagram:
     - { from: shop, to: broker, label: payments, delay: 0 }
     - { from: badshop, to: broker, label: malformed, delay: 0 }
     - { from: broker, to: processor, via: payments, delay: 0.6 }
+    - { from: broker, to: processor, via: retry, animate: false, delay: 0.6 }
     - { from: processor, to: broker, label: charge, delay: 1.1 }
     - { from: broker, to: bank, label: charge, source: processor, delay: 1.5 }
     - { from: bank, to: broker, label: answer, source: processor, delay: 1.9 }
@@ -152,6 +168,7 @@ actions:
     cmd: [bash, ../../apps/run.sh, dpr, bank, --client-name, dpr-bank, --busy-every, "3"]
     cwd: .
     long_running: true
+    stands_for: bank
     variant: secondary
     description: >
       The same bank, answering every third charge with "busy, try later".
