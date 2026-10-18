@@ -1,0 +1,346 @@
+id: strangler
+# Category 8 of the pattern guide (Migration Patterns), first pattern.
+order: 810
+eyebrow: Migration Patterns
+title: Strangler
+summary: >
+  A shop's old order system handles every order event. The team is
+  replacing it one piece at a time, starting with refunds. The shop keeps
+  publishing exactly as before, and the old system is not changed. What
+  moves is a subscription on the broker: refund events stop going to the old
+  system's queue and start going to the new refund service's queue.
+
+objectives:
+  - Move one kind of event from an old system to a new one with no change to either app
+  - See what happens when both systems receive refunds at once
+  - See refunds wait for a new service that fails after the move, and why moving back is not instant
+  - Learn why the order of the two routing steps matters
+
+run:
+  - apply
+  - route-start
+  - build
+  - legacy
+  - refunds
+  - shop
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The shop publishes order placed, order paid and refund requested
+    events. Queue subscriptions decide who gets what: at the start
+    q.stg.legacy subscribes to all three and q.stg.refunds to nothing. The
+    migration moves the refund subscription from one queue to the other.
+  duration: 2.4
+  liveWhen: shop
+  nodes:
+    - id: shop
+      label: Shop
+      sublabel: publishes, unchanged
+      kind: app
+      col: 0
+      action: shop
+      requires:
+        - label: svc-stg-shop
+          semp: /msgVpns/{vpn}/clientUsernames/svc-stg-shop
+    - id: broker
+      label: Solace Broker
+      sublabel: subscriptions route
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: legacyq
+          label: q.stg.legacy
+          depth: { queue: q.stg.legacy, unit: waiting }
+        - id: refundsq
+          label: q.stg.refunds
+          depth: { queue: q.stg.refunds, unit: waiting }
+      provides:
+        - label: q.stg.legacy
+          group: legacyq
+          semp: /msgVpns/{vpn}/queues/q.stg.legacy
+        - label: q.stg.refunds
+          group: refundsq
+          semp: /msgVpns/{vpn}/queues/q.stg.refunds
+        - label: cp-stg
+          semp: /msgVpns/{vpn}/clientProfiles/cp-stg
+        - label: acl-stg
+          semp: /msgVpns/{vpn}/aclProfiles/acl-stg
+    - id: legacy
+      label: Old Order System
+      sublabel: orders, payments, refunds
+      kind: app
+      col: 2
+      action: legacy
+      flowOn:
+        queue: q.stg.legacy
+        client: stg-legacy
+      requires:
+        - label: svc-stg-legacy
+          semp: /msgVpns/{vpn}/clientUsernames/svc-stg-legacy
+    - id: refunds
+      label: New Refund Service
+      sublabel: refunds, once routed
+      kind: app
+      col: 2
+      action: refunds
+      flowOn:
+        queue: q.stg.refunds
+        client: stg-refunds
+      requires:
+        - label: svc-stg-refunds
+          semp: /msgVpns/{vpn}/clientUsernames/svc-stg-refunds
+  flows:
+    - { from: shop, to: broker, label: order events, delay: 0 }
+    - { from: broker, to: legacy, via: legacyq, delay: 0.8 }
+    - { from: broker, to: refunds, via: refundsq, animate: false, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.stg.legacy, subscribed to every order event, and
+      q.stg.refunds, subscribed to nothing, with the client profile, ACL
+      profile and usernames for this scenario.
+
+  - id: route-start
+    label: Route refunds to the old system only
+    kind: process
+    cmd: [bash, ./route.sh, start]
+    cwd: .
+    variant: secondary
+    description: >
+      The starting point: removes the refund subscription from
+      q.stg.refunds and makes sure q.stg.legacy has it.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: legacy
+    label: Start the old order system
+    kind: process
+    cmd: [bash, ../../apps/run.sh, stg, legacy, --client-name, stg-legacy]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Handles every event its queue receives: orders, payments and refunds.
+
+  - id: refunds
+    label: Start the new refund service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, stg, refunds, --client-name, stg-refunds]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Handles every event its queue receives, which is nothing until refunds
+      are routed to it.
+
+  - id: shop
+    label: Start the shop
+    kind: process
+    cmd: [bash, ../../apps/run.sh, stg, shop, --client-name, stg-shop]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes an order event a second: placed, paid, and now and then a
+      refund request.
+
+  - id: route-new
+    label: "Step 1: route refunds to the new service"
+    kind: process
+    cmd: [bash, ./route.sh, refunds, add]
+    cwd: .
+    variant: secondary
+    description: >
+      Adds the refund subscription to q.stg.refunds. Until step 2, the old
+      system's queue still has it too.
+
+  - id: unroute-legacy
+    label: "Step 2: stop routing refunds to the old system"
+    kind: process
+    cmd: [bash, ./route.sh, legacy, remove]
+    cwd: .
+    variant: secondary
+    description: >
+      Removes the refund subscription from q.stg.legacy. Refunds now reach
+      the new service only.
+
+  - id: cut-over
+    label: Move refunds to the new service
+    kind: process
+    cmd: [bash, ./route.sh, cut-over]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Both routing steps, one straight after the other: the old route off,
+      then the new one on.
+
+  - id: kill-refunds
+    label: Crash the new refund service
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, stg-refunds, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the new refund service outright (SIGKILL), and returns once it
+      has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, strangler]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: both-routed
+    title: Refunds go to both systems
+    breaks: >
+      The refund subscription is added to the new service's queue, and not
+      yet removed from the old one's.
+    watch: >
+      The card shows the new refund service: "refunded R-00042 (new refund
+      service)". Open the old order system's log: "refunded R-00042 (old
+      order system)". The same refund, paid out twice. Each queue that
+      subscribes gets its own copy; the broker does not know they are meant
+      to be one job. Reset routes refunds to the old system only.
+    why: >
+      Moving a subscription is two changes, and the order matters. Add the
+      new route first, and every refund published in between matches both
+      queues and is handled twice. Remove the old route first, and every
+      refund published in between matches no queue and is not kept at all.
+      One straight after the other, the gap is milliseconds; by hand, as
+      here, it is as long as you take.
+    real_world: >
+      Cut-overs done step by step by hand, and feature flags flipped on two
+      services at slightly different times. The usual answer is to add the
+      new route first and have the new service skip anything the old one
+      already did, by an id both can see.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues and topic endpoints"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: refunds
+    logs: refunds
+    trigger:
+      - run: route-new
+    reset:
+      - run: route-start
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: refunds
+            has: ["refunded R-\\d+ \\(new refund service\\)"]
+          - log: legacy
+            has: ["refunded R-\\d+ \\(old order system\\)"]
+      reset:
+        settle: 2
+        within: 12
+        logs:
+          - log: legacy
+            has: ["refunded R-\\d+ \\(old order system\\)"]
+          - log: refunds
+            lacks: ["refunded R-\\d+"]
+
+  - id: new-service-fails
+    title: The new service fails after the cut-over
+    breaks: >
+      Refunds are moved to the new service, which then crashes.
+    watch: >
+      The card shows the shop: "refund R-00051 requested", as always. No
+      service handles them: they wait on q.stg.refunds, which counts up. The
+      old order system is still running and still subscribed to orders and
+      payments, but it gets no refunds, because its queue no longer asks for
+      them. Reset starts the new refund service, which handles every waiting
+      refund, then routes refunds back to the old system.
+    why: >
+      After the cut-over the routing is the broker's, and it does not know
+      the new service is down. Nothing is lost, because the queue keeps the
+      refunds, but nothing is handled either. Routing back to the old system
+      only changes where new refunds go: the ones already on q.stg.refunds
+      stay there until something reads that queue.
+    real_world: >
+      The new service passes its tests and fails on real traffic at 2 a.m.
+      A rollback plan has to say what happens to the events already routed
+      to it, not just where the next ones go.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues and topic endpoints"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: refunds
+    logs: shop
+    trigger:
+      - run: cut-over
+      - run: kill-refunds
+    reset:
+      - start: refunds
+      - run: route-start
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: shop
+            has: ["refund R-\\d+ requested"]
+          - log: legacy
+            has: ["order recorded \\(old order system\\)"]
+            lacks: ["refunded R-\\d+"]
+      reset:
+        within: 15
+        logs:
+          - log: refunds
+            has: ["refunded R-\\d+ \\(new refund service\\)"]
+
+inspect:
+  - label: Who gets refunds
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.stg.legacy/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.stg.legacy → Subscriptions
+    empty: No queue yet. Press Play.
+  - label: The new service's subscriptions
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.stg.refunds/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.stg.refunds → Subscriptions
+    empty: q.stg.refunds subscribes to nothing yet. Refunds go to the old system.
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.stg.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.

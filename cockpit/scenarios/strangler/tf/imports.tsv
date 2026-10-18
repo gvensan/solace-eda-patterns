@@ -1,0 +1,17 @@
+# What the strangler scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.stg	{vpn}/cp-stg
+solacebroker_msg_vpn_acl_profile.stg	{vpn}/acl-stg
+
+solacebroker_msg_vpn_queue.legacy	{vpn}/q.stg.legacy
+solacebroker_msg_vpn_queue_subscription.legacy["stg/shop/order/placed/v1/>"]	{vpn}/q.stg.legacy/stg%2Fshop%2Forder%2Fplaced%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.legacy["stg/shop/order/paid/v1/>"]	{vpn}/q.stg.legacy/stg%2Fshop%2Forder%2Fpaid%2Fv1%2F%3E
+solacebroker_msg_vpn_queue_subscription.legacy["stg/shop/refund/requested/v1/>"]	{vpn}/q.stg.legacy/stg%2Fshop%2Frefund%2Frequested%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.refunds	{vpn}/q.stg.refunds
+
+# Client usernames
+solacebroker_msg_vpn_client_username.stg["shop"]	{vpn}/svc-stg-shop
+solacebroker_msg_vpn_client_username.stg["legacy"]	{vpn}/svc-stg-legacy
+solacebroker_msg_vpn_client_username.stg["refunds"]	{vpn}/svc-stg-refunds

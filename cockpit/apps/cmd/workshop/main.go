@@ -33,6 +33,7 @@ import (
 	"solace-workshop/apps/scenarios/retry"
 	"solace-workshop/apps/scenarios/saga"
 	"solace-workshop/apps/scenarios/shock"
+	"solace-workshop/apps/scenarios/strangler"
 	"solace-workshop/apps/scenarios/streaming"
 	"solace-workshop/apps/scenarios/topics"
 )
@@ -40,6 +41,9 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"stg refunds":       strangler.Refunds,
+	"stg legacy":        strangler.Legacy,
+	"stg shop":          strangler.Shop,
 	"saga inventory":    saga.Inventory,
 	"saga payments":     saga.Payments,
 	"saga orders":       saga.Orders,
