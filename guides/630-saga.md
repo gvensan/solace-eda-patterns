@@ -78,4 +78,4 @@ explains the cause and where you would meet it in production.
 - A compensation can fail too (the refund is refused). Real systems retry
   compensations until they succeed, and alert a person when they cannot.
 
-Next: [Access Control and Authorization](750-access-control.md).
+Next: [Event Catalog](710-event-catalog.md).

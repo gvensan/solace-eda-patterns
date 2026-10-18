@@ -1,0 +1,55 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "Shop events",
+    "version": "1.0.0",
+    "description": "The events the shop's orders and payments teams publish. Hand-written for the workshop; Solace Event Portal exports documents in this format."
+  },
+  "channels": {
+    "ec/shop/order/created/v1/{order}": {
+      "description": "A customer placed an order.",
+      "parameters": { "order": { "schema": { "type": "string" } } },
+      "publish": {
+        "message": {
+          "name": "Order created",
+          "contentType": "application/json",
+          "payload": {
+            "type": "object",
+            "required": ["order", "amount"],
+            "properties": { "order": { "type": "string" }, "amount": { "type": "integer" } }
+          }
+        }
+      }
+    },
+    "ec/shop/order/shipped/v1/{order}": {
+      "description": "An order left the warehouse.",
+      "parameters": { "order": { "schema": { "type": "string" } } },
+      "publish": {
+        "message": {
+          "name": "Order shipped",
+          "contentType": "application/json",
+          "payload": {
+            "type": "object",
+            "required": ["order", "carrier"],
+            "properties": { "order": { "type": "string" }, "carrier": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "ec/shop/payment/taken/v1/{order}": {
+      "description": "Payment for an order was taken.",
+      "parameters": { "order": { "schema": { "type": "string" } } },
+      "publish": {
+        "message": {
+          "name": "Payment taken",
+          "contentType": "application/json",
+          "payload": {
+            "type": "object",
+            "required": ["order", "amount"],
+            "properties": { "order": { "type": "string" }, "amount": { "type": "integer" } }
+          }
+        }
+      }
+    }
+  }
+}

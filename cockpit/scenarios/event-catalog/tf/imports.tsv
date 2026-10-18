@@ -1,0 +1,14 @@
+# What the event-catalog scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ec	{vpn}/cp-ec
+solacebroker_msg_vpn_acl_profile.ec	{vpn}/acl-ec
+
+solacebroker_msg_vpn_queue.finance	{vpn}/q.ec.finance
+solacebroker_msg_vpn_queue_subscription.finance	{vpn}/q.ec.finance/ec%2Fshop%2Fpayment%2Ftaken%2Fv1%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ec["orders"]	{vpn}/svc-ec-orders
+solacebroker_msg_vpn_client_username.ec["payments"]	{vpn}/svc-ec-payments
+solacebroker_msg_vpn_client_username.ec["checker"]	{vpn}/svc-ec-checker
+solacebroker_msg_vpn_client_username.ec["finance"]	{vpn}/svc-ec-finance

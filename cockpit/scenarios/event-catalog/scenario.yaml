@@ -1,0 +1,341 @@
+id: event-catalog
+# Category 7 of the pattern guide (Governance Patterns), first pattern.
+order: 710
+eyebrow: Governance Patterns
+title: Event Catalog
+summary: >
+  A shop's orders and payments teams publish events that other teams build
+  on. The events are described in a catalog: which exist, on which topics,
+  with what fields. Here the catalog is an AsyncAPI document, and a checker
+  compares every event that actually flows with it. A catalog is only useful
+  while it matches what runs; the cards show it drifting.
+
+objectives:
+  - Read the catalog, an AsyncAPI document, and see the events it describes flowing
+  - See an event nobody catalogued appear, with nothing failing at the broker
+  - See a payload change shape, and the consumer built from the catalog break
+  - Learn why a catalog needs comparing with real traffic, and what Event Portal adds
+
+pattern:
+  what: >
+    An inventory of the events in a system: what each event is, its topic,
+    its payload, and who produces and consumes it, so teams can find and
+    reuse events instead of asking around.
+  when: >
+    More than a handful of teams publish and consume events, and nobody can
+    keep all of them in their head.
+  cost: >
+    A catalog drifts from reality unless something compares it with what
+    actually runs, and keeping it current is work someone has to own.
+  solace: >
+    Solace Event Portal is the catalog: a cloud service with runtime
+    discovery and downloadable AsyncAPI documents. It is not part of the
+    broker; here a hand-written AsyncAPI document stands in for it.
+  related: [event-apis, hierarchical-topics, access-control]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-catalog
+
+run:
+  - apply
+  - build
+  - finance
+  - checker
+  - payments
+  - orders
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    Orders and payments publish to ec/shop/<entity>/<event>/v1/<order>. The
+    catalog checker subscribes to ec/> and compares every event with
+    catalog.json. Finance reads payments from q.ec.finance, expecting the
+    fields the catalog promises.
+  duration: 2.4
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Orders Team
+      sublabel: order created, shipped
+      kind: app
+      col: 0
+      action: orders
+      requires:
+        - label: svc-ec-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ec-orders
+    - id: payments
+      label: Payments Team
+      sublabel: payment taken
+      kind: app
+      col: 0
+      action: payments
+      requires:
+        - label: svc-ec-payments
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ec-payments
+    - id: broker
+      label: Solace Broker
+      sublabel: carries what is published
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: financeq
+          label: q.ec.finance
+          depth: { queue: q.ec.finance, unit: waiting }
+      provides:
+        - label: q.ec.finance
+          group: financeq
+          semp: /msgVpns/{vpn}/queues/q.ec.finance
+        - label: cp-ec
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ec
+        - label: acl-ec
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ec
+    - id: checker
+      label: Catalog Checker
+      sublabel: compares traffic, catalog
+      kind: app
+      col: 2
+      action: checker
+      requires:
+        - label: svc-ec-checker
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ec-checker
+    - id: finance
+      label: Finance
+      sublabel: built from the catalog
+      kind: app
+      col: 2
+      action: finance
+      flowOn:
+        queue: q.ec.finance
+        client: ec-finance
+      requires:
+        - label: svc-ec-finance
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ec-finance
+  flows:
+    - { from: orders, to: broker, label: orders, delay: 0 }
+    - { from: payments, to: broker, label: payments, delay: 0.3 }
+    - { from: broker, to: checker, label: "ec/>", delay: 0.8 }
+    - { from: broker, to: finance, via: financeq, source: payments, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.ec.finance, and the client profile, ACL profile and
+      usernames for this scenario. The catalog itself is catalog.json in
+      this scenario's folder, not anything on the broker.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: finance
+    label: Start finance
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, finance, --client-name, ec-finance]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.ec.finance and books each payment, reading the amount field
+      the catalog says a payment has.
+
+  - id: checker
+    label: Start the catalog checker
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, checker, --client-name, ec-checker, --catalog, catalog.json]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Subscribes to ec/> and compares every event with catalog.json: is its
+      topic documented, and does its payload have the required fields.
+
+  - id: payments
+    label: Start the payments team's service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, shop, --team, payments]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Publishes a payment taken event a second.
+
+  - id: payments-renamed
+    label: Start the payments service, new release
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, shop, --team, payments, --rename]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: payments
+    description: >
+      A release in which the payment's amount field is called total. Stop
+      the payments service first.
+
+  - id: orders
+    label: Start the orders team's service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, shop, --team, orders]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes order created and order shipped events, one a second.
+
+  - id: orders-cancellations
+    label: Start the orders service, new release
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ec, shop, --team, orders, --cancellations]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: orders
+    description: >
+      A release that also publishes order cancelled events, which nobody
+      added to the catalog. Stop the orders service first.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-catalog]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queue and access control for this scenario.
+
+failure_modes:
+  - id: undocumented-event
+    title: A team ships an event nobody catalogued
+    breaks: >
+      The orders team releases a version that also publishes order cancelled
+      events. Nobody updated the catalog.
+    watch: >
+      The card shows the catalog checker: "undocumented:
+      ec/shop/order/cancelled/v1/O-12345 is not in the catalog", and every 10
+      seconds "documented event types, 1 not in the catalog". Nothing fails
+      anywhere else. The broker carries the new event like any other, and no
+      consumer complains, because none knows it exists. Reset puts the orders
+      service back to the release the catalog describes.
+    why: >
+      The broker routes whatever is published to whatever subscribes; it has
+      no idea which events are meant to exist. A catalog written by hand is
+      only as current as the last time someone edited it. Comparing it with
+      the traffic is what finds the gap.
+    real_world: >
+      A new event type teams discover months later, by accident, after
+      building the same thing again. Event Portal offers runtime discovery,
+      which catalogs the events and schemas actually in use.
+    docs:
+      - label: "Go API: consuming direct messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-DM-Subscribe.htm
+      - label: "Event Portal catalog"
+        url: https://docs.solace.com/Cloud/Event-Portal/event-portal-catalog-tool.htm
+    node: orders
+    logs: checker
+    trigger:
+      - stop: orders
+      - start: orders-cancellations
+    reset:
+      - stop: orders-cancellations
+      - start: orders
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: checker
+            has: ["undocumented: ec/shop/order/cancelled/v1/O-\\d+ is not in the catalog"]
+      reset:
+        settle: 2
+        within: 25
+        logs:
+          - log: checker
+            has: ["last 10 s: \\d+ event types seen, all in the catalog"]
+
+  - id: payload-changed
+    title: A payload changes shape
+    breaks: >
+      The payments team renames the payment's amount field to total. The
+      topic stays the same.
+    watch: >
+      The card shows finance, which was written from the catalog: "payment
+      has no amount field, cannot book it", for every payment. Open the
+      catalog checker's log: "does not match the catalog:
+      ec/shop/payment/taken/v1/O-12345 is missing amount". The broker
+      delivered every event; it does not look inside them. Reset puts the
+      payments service back to the release that matches the catalog.
+    why: >
+      A payload is a contract between producer and consumers, and the
+      catalog is where it is written down. A change that keeps the topic and
+      breaks the payload reaches every consumer at once, and none of them
+      can tell it from a bug in their own code.
+    real_world: >
+      A field renamed in a refactor, a number sent as a string. Event
+      Portal keeps versions of each event's schema, so a change is a new
+      version consumers can move to, not a surprise.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Event Portal overview"
+        url: https://docs.solace.com/Cloud/Event-Portal/event-portal-overview.htm
+    node: payments
+    logs: finance
+    trigger:
+      - stop: payments
+      - start: payments-renamed
+    reset:
+      - stop: payments-renamed
+      - start: payments
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: finance
+            has: ["O-\\d+: payment has no amount field, cannot book it"]
+          - log: checker
+            has: ["does not match the catalog: ec/shop/payment/taken/v1/O-\\d+ is missing amount"]
+      reset:
+        settle: 2
+        within: 12
+        logs:
+          - log: finance
+            has: ["O-\\d+: booked \\d+\\.00"]
+            lacks: ["has no amount field"]
+
+inspect:
+  - label: What is subscribed to the shop's events
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=20&where=clientName==ec-*
+    columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
+  - label: Queue
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.ec.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
