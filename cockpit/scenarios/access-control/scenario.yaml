@@ -30,6 +30,7 @@ pattern:
     ACL profiles with allow or deny defaults and topic exceptions, assigned
     to client usernames.
   related: [hierarchical-topics, publish-subscribe, event-bridge]
+  guide: https://solace.com/event-driven-architecture-patterns/#access-control-authorization
 
 run:
   - apply

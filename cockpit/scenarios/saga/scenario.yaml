@@ -31,6 +31,7 @@ pattern:
     A queue per service, subscribed to the events it reacts to, so each step
     waits for its service if it is down.
   related: [discard-pause-retry, cqrs, event-sourcing]
+  guide: https://solace.com/event-driven-architecture-patterns/#saga
 
 run:
   - apply

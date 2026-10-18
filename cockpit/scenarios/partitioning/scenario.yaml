@@ -31,6 +31,7 @@ pattern:
     A partitioned queue: the broker hashes each message's partition key to a
     partition, and gives each partition to one consumer.
   related: [exclusive-consumer, consumer-groups, competing-consumers]
+  guide: https://solace.com/event-driven-architecture-patterns/#partitioning
 
 run:
   - apply

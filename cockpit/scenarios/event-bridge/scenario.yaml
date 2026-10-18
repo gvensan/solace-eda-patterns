@@ -31,6 +31,7 @@ pattern:
     A message VPN bridge, between two VPNs on one broker or on two brokers.
     Guaranteed messages cross through a queue on the far side.
   related: [publish-subscribe, guaranteed-delivery, access-control]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-bridge
 
 run:
   - apply

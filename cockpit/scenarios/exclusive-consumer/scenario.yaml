@@ -31,6 +31,7 @@ pattern:
     are standbys. The broker fails over when the active consumer's session
     ends.
   related: [competing-consumers, partitioning, consumer-groups]
+  guide: https://solace.com/event-driven-architecture-patterns/#exclusive-consumer
 
 # Ledger A binds first, so the broker makes it the active consumer. Ledger B
 # binds second and becomes the standby. Both are up before anything is

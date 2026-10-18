@@ -31,6 +31,7 @@ pattern:
     A durable queue with a spool quota. The publisher is told when the queue
     is full.
   related: [backpressure, competing-consumers, dead-letter-queue]
+  guide: https://solace.com/event-driven-architecture-patterns/#shock-absorber
 
 run:
   - apply

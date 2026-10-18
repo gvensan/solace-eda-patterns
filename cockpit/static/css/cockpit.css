@@ -519,6 +519,15 @@ a { color: var(--text-link); }
   border-color: var(--green-classic);
 }
 
+.pattern__guide {
+  font-size: var(--fs-body-sm);
+  color: var(--text-link);
+}
+
+.pattern__guide::after {
+  content: " \2197";
+}
+
 @media (max-width: 1100px) {
   .scenario-header--split {
     grid-template-columns: 1fr;

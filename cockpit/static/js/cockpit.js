@@ -1072,7 +1072,9 @@
       related.length && h("div", { class: "pattern__row" },
         h("p", { class: "pattern__title", text: "Next to it" }),
         h("div", { class: "pattern__related" },
-          related.map((r) => h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))));
+          related.map((r) => h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))),
+      p.guide && h("a", { class: "pattern__guide", href: p.guide, target: "_blank", rel: "noopener",
+        text: "Read about it in the Solace pattern guide" }));
   }
 
   /* While a failure is in effect a bar stays at the top of the page: which

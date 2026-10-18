@@ -31,6 +31,7 @@ pattern:
     to a busy consumer, and the Go receiver can pause and resume. A direct
     subscriber drops when its buffer fills.
   related: [shock-absorber, competing-consumers, discard-pause-retry]
+  guide: https://solace.com/event-driven-architecture-patterns/#backpressure-push
 
 run:
   - apply

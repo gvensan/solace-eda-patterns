@@ -30,6 +30,7 @@ pattern:
     Each side publishes on a topic that names its origin, and reads a queue
     subscribed to the other side only.
   related: [change-data-capture, strangler, event-carried-state-transfer]
+  guide: https://solace.com/event-driven-architecture-patterns/#data-synchronization
 
 run:
   - apply

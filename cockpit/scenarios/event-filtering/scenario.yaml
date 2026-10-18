@@ -32,6 +32,7 @@ pattern:
     Topic subscriptions with wildcards first. Message selectors on a queue
     binding when a property is needed; partitioned queues refuse them.
   related: [hierarchical-topics, publish-subscribe, consumer-groups]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-filtering
 
 run:
   - apply

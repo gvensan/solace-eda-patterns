@@ -30,6 +30,7 @@ pattern:
     Queue subscriptions decide which service gets which events, so a cut-
     over is a configuration change on the broker.
   related: [data-synchronization, change-data-capture, hierarchical-topics]
+  guide: https://solace.com/event-driven-architecture-patterns/#strangler
 
 run:
   - apply

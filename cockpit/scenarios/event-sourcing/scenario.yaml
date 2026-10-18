@@ -32,6 +32,7 @@ pattern:
     them into an exclusive queue on request. It is a buffer for recovery,
     not a permanent event store.
   related: [cqrs, event-streaming, event-carried-state-transfer]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-sourcing
 
 run:
   - apply

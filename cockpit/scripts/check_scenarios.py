@@ -200,6 +200,15 @@ def check(path: pathlib.Path) -> list[str]:
 
 SUBLABEL_MAX = 30
 PATTERN_FIELDS = ("what", "when", "cost", "solace")
+PATTERN_GUIDE = "https://solace.com/event-driven-architecture-patterns/"
+PATTERN_ANCHORS = {
+    "ecst", "cqrs", "cdc", "event-sourcing", "publish-subscribe", "point-to-point", "request-reply",
+    "streaming", "hierarchical-topics", "event-filtering", "guaranteed-delivery", "backpressure-push",
+    "exclusive-consumer", "competing-consumers", "consumer-groups", "shock-absorber", "partitioning",
+    "event-bridge", "event-mesh", "event-gateway", "dead-letter-queue", "discard-pause-retry", "saga",
+    "event-catalog", "event-apis", "intermediated", "disintermediated", "access-control-authorization",
+    "strangler", "data-synchronization",
+}
 
 
 def check_pattern(spec, scenarios_dir) -> list:
@@ -208,12 +217,23 @@ def check_pattern(spec, scenarios_dir) -> list:
     apart. related: names other scenarios, linked from the panel."""
     p = spec.get("pattern")
     if not isinstance(p, dict):
-        return ["no pattern: block (what, when, cost, solace, related)"]
+        return ["no pattern: block (what, when, cost, solace, related, guide)"]
     bad = [f"pattern {k}: missing or not plain text" for k in PATTERN_FIELDS
            if not isinstance(p.get(k), str) or not p[k].strip()]
     for rid in p.get("related", []) or []:
         if not (scenarios_dir / rid / "scenario.yaml").exists():
             bad.append(f"pattern related: {rid!r} is not a scenario")
+    # The writing rule, enforced where it is easiest to slip: no em dashes,
+    # en dashes or double hyphens in the pattern text.
+    for k in PATTERN_FIELDS:
+        text = p.get(k) if isinstance(p.get(k), str) else ""
+        if "\u2014" in text or "\u2013" in text or "--" in text:
+            bad.append(f"pattern {k}: has an em dash, en dash or double hyphen; use a comma, colon or parentheses")
+    # One link to this pattern's section of the pattern guide. The anchors
+    # were read off the page on 2026-10-18; a new one must be checked there.
+    guide = p.get("guide", "")
+    if not guide.startswith(PATTERN_GUIDE + "#") or guide[len(PATTERN_GUIDE) + 1:] not in PATTERN_ANCHORS:
+        bad.append(f"pattern guide: {guide!r} is not {PATTERN_GUIDE}#<one of the guide's section anchors>")
     return bad
 
 

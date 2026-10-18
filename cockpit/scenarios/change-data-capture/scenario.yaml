@@ -30,8 +30,10 @@ pattern:
     to start again from a snapshot.
   solace: >
     A connector publishes each change as a guaranteed event on a topic per
-    table or key, and each consumer reads its own queue.
+    table or key, and each consumer reads its own queue. Solace
+    Micro-Integrations include one for Oracle CDC, built on Debezium.
   related: [event-carried-state-transfer, data-synchronization, strangler]
+  guide: https://solace.com/event-driven-architecture-patterns/#cdc
 
 run:
   - apply

@@ -30,6 +30,7 @@ pattern:
     A durable queue, addressed by its name, that keeps each message until
     the receiver takes it.
   related: [publish-subscribe, competing-consumers, request-reply]
+  guide: https://solace.com/event-driven-architecture-patterns/#point-to-point
 
 # The printer first, so the first job already has somewhere to go. The
 # queue would keep it anyway: that is what makes this point-to-point.

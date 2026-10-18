@@ -29,6 +29,7 @@ pattern:
     Two direct messages: a request on a topic, and a reply on a topic made
     for the asker. The Go API offers request-reply on direct messaging.
   related: [point-to-point, publish-subscribe, cqrs]
+  guide: https://solace.com/event-driven-architecture-patterns/#request-reply
 
 run:
   - apply

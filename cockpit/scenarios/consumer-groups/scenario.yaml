@@ -30,6 +30,7 @@ pattern:
     A queue per group, subscribed to the same topics. Members bind their
     group's queue, partitioned when order per key matters.
   related: [competing-consumers, partitioning, publish-subscribe]
+  guide: https://solace.com/event-driven-architecture-patterns/#consumer-groups
 
 run:
   - apply

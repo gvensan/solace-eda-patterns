@@ -30,6 +30,7 @@ pattern:
     Guaranteed messages: the broker confirms each publish once it is stored,
     and redelivers whatever the consumer has not acknowledged.
   related: [dead-letter-queue, backpressure, point-to-point]
+  guide: https://solace.com/event-driven-architecture-patterns/#guaranteed-delivery
 
 run:
   - apply

@@ -30,6 +30,7 @@ pattern:
     Reject to a dead message queue to discard, republish to a queue with a
     delivery delay to retry, and pause and resume the Go receiver.
   related: [dead-letter-queue, saga, backpressure]
+  guide: https://solace.com/event-driven-architecture-patterns/#discard-pause-retry
 
 run:
   - apply

@@ -33,6 +33,7 @@ pattern:
     A dead message queue for each queue, for messages over the redelivery
     limit, past their time to live, or rejected by the consumer.
   related: [discard-pause-retry, guaranteed-delivery, shock-absorber]
+  guide: https://solace.com/event-driven-architecture-patterns/#dead-letter-queue
 
 run:
   - apply

@@ -29,6 +29,7 @@ pattern:
     A non-exclusive queue: the broker shares its messages among every bound
     consumer.
   related: [consumer-groups, exclusive-consumer, shock-absorber]
+  guide: https://solace.com/event-driven-architecture-patterns/#competing-consumers
 
 # Two workers, then checkout. Checkout confirms six orders a second and two
 # workers send five, so a small backlog builds: the reason to start worker 3.

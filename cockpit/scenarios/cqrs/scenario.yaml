@@ -32,6 +32,7 @@ pattern:
     Commands on a queue for the write side, events on topics with a queue
     per read side, and queries by request-reply.
   related: [event-sourcing, event-carried-state-transfer, request-reply]
+  guide: https://solace.com/event-driven-architecture-patterns/#cqrs
 
 run:
   - apply

@@ -32,6 +32,7 @@ pattern:
     Topics with wildcard subscriptions. Direct messages when speed matters
     most; a queue subscribed to the topics when nothing may be missed.
   related: [point-to-point, hierarchical-topics, guaranteed-delivery]
+  guide: https://solace.com/event-driven-architecture-patterns/#publish-subscribe
 
 run:
   - apply

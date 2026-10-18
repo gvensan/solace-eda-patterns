@@ -33,6 +33,7 @@ pattern:
     Ordinary guaranteed events on a topic per entity. A queue per consumer
     keeps the changes in order and holds them while the consumer is away.
   related: [cqrs, change-data-capture, event-sourcing]
+  guide: https://solace.com/event-driven-architecture-patterns/#ecst
 
 run:
   - apply
