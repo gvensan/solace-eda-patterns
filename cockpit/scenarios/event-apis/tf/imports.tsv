@@ -1,0 +1,16 @@
+# What the event-apis scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.ea	{vpn}/cp-ea
+solacebroker_msg_vpn_acl_profile.ea	{vpn}/acl-ea
+
+solacebroker_msg_vpn_queue.labels	{vpn}/q.ea.labels
+solacebroker_msg_vpn_queue_subscription.labels	{vpn}/q.ea.labels/ea%2Fshipping%2Fparcel%2Fdispatched%2Fv1%2F%3E
+
+solacebroker_msg_vpn_queue.tracking	{vpn}/q.ea.tracking
+solacebroker_msg_vpn_queue_subscription.tracking	{vpn}/q.ea.tracking/ea%2Fshipping%2Fparcel%2Fdispatched%2Fv2%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.ea["shipping"]	{vpn}/svc-ea-shipping
+solacebroker_msg_vpn_client_username.ea["labels"]	{vpn}/svc-ea-labels
+solacebroker_msg_vpn_client_username.ea["tracking"]	{vpn}/svc-ea-tracking

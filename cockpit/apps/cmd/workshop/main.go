@@ -44,6 +44,8 @@ import (
 // roles maps "<scenario> <role>" to the function that runs it. Adding a
 // scenario means adding entries here and a package under scenarios/.
 var roles = map[string]func([]string){
+	"ea shipping":       catalog.Shipping,
+	"ea consumer":       catalog.Consumer,
 	"ec shop":           catalog.Shop,
 	"ec checker":        catalog.Checker,
 	"ec finance":        catalog.Finance,

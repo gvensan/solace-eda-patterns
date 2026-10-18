@@ -1,0 +1,47 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "Shipping event API",
+    "version": "2.0.0",
+    "description": "Events the shipping service offers to other teams. Version 1 stays published while consumers move to version 2. Hand-written for the workshop."
+  },
+  "channels": {
+    "ea/shipping/parcel/dispatched/v1/{parcel}": {
+      "description": "A parcel left the depot. Version 1: weight in kilograms.",
+      "parameters": { "parcel": { "schema": { "type": "string" } } },
+      "publish": {
+        "message": {
+          "name": "Parcel dispatched (v1)",
+          "contentType": "application/json",
+          "payload": {
+            "type": "object",
+            "required": ["parcel", "weightKg"],
+            "properties": { "parcel": { "type": "string" }, "weightKg": { "type": "number" } }
+          }
+        }
+      }
+    },
+    "ea/shipping/parcel/dispatched/v2/{parcel}": {
+      "description": "A parcel left the depot. Version 2: weight as a value and a unit.",
+      "parameters": { "parcel": { "schema": { "type": "string" } } },
+      "publish": {
+        "message": {
+          "name": "Parcel dispatched (v2)",
+          "contentType": "application/json",
+          "payload": {
+            "type": "object",
+            "required": ["parcel", "weight"],
+            "properties": {
+              "parcel": { "type": "string" },
+              "weight": {
+                "type": "object",
+                "required": ["value", "unit"],
+                "properties": { "value": { "type": "integer" }, "unit": { "type": "string", "enum": ["g"] } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

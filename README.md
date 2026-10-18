@@ -58,6 +58,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 620 | [Discard, Pause and Retry](guides/620-discard-pause-retry.md) | Error Handling Patterns | Discard a message that can never succeed, retry one that failed because of the moment, pause when the bank is down |
 | 630 | [Saga](guides/630-saga.md) | Error Handling Patterns | Three services, each its own step and event; a sold-out item undone by a refund; a service down delays the sagas that need it |
 | 710 | [Event Catalog](guides/710-event-catalog.md) | Governance Patterns | An AsyncAPI catalog compared with real traffic; an event nobody catalogued; a payload that changes shape |
+| 720 | [Event APIs](guides/720-event-apis.md) | Governance Patterns | A versioned event contract published v1 and v2 side by side; a version changed in place; a version retired while still in use |
 | 750 | [Access Control and Authorization](guides/750-access-control.md) | Governance Patterns | Per-username ACL profiles; a refused publish reaches nobody; a refused subscription |
 | 810 | [Strangler](guides/810-strangler.md) | Migration Patterns | Move refunds from the old system to a new service by moving a subscription; both systems paying the same refund; refunds stranded on a failed new service |
 | 820 | [Data Synchronization](guides/820-data-synchronization.md) | Migration Patterns | Two CRMs written at once, kept the same by publishing and applying each other's edits; an edit that echoes for ever; a CRM offline catches up |

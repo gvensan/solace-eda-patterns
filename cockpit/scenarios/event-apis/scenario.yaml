@@ -1,0 +1,329 @@
+id: event-apis
+# Category 7 of the pattern guide (Governance Patterns), second pattern.
+order: 720
+eyebrow: Governance Patterns
+title: Event APIs
+summary: >
+  A shipping service offers other teams an event API: a published contract
+  for the events it emits, with topics, payloads and a version. The labels
+  team built against version 1, the tracking team against version 2, and the
+  shipping service publishes both while teams move across. The cards show
+  the two ways to break that promise: changing a version in place, and
+  retiring one while someone still uses it.
+
+objectives:
+  - Read an event API, an AsyncAPI document with two versions, and see both versions published
+  - See a change made in place break the consumer that trusted the contract
+  - See a version retired while a consumer still subscribes, and the silence that follows
+  - Learn why event APIs change by adding a version, and retire only what nobody uses
+
+pattern:
+  what: >
+    A published contract for the events an application offers: the
+    channels, the payload of each, and a version, so consumers build
+    against the contract instead of against the producer's code.
+  when: >
+    Events are consumed by teams the producer does not control, inside the
+    company or outside it.
+  cost: >
+    Every change needs a new version that runs beside the old one until no
+    consumer is left on it, and knowing who is left takes a registry.
+  solace: >
+    Event Portal models event APIs and event API products and exports them
+    as AsyncAPI documents; it is a cloud service. On the broker, a version
+    is part of the topic, and live subscriptions show who still uses it.
+  related: [event-catalog, hierarchical-topics, publish-subscribe]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-apis
+
+run:
+  - apply
+  - build
+  - labels
+  - tracking
+  - shipping
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The shipping service publishes each dispatched parcel on API v1
+    (ea/shipping/parcel/dispatched/v1/<parcel>) and v2 (.../v2/<parcel>).
+    q.ea.labels subscribes to v1, q.ea.tracking to v2.
+  duration: 2.4
+  liveWhen: shipping
+  nodes:
+    - id: shipping
+      label: Shipping Service
+      sublabel: publishes API v1 and v2
+      kind: app
+      col: 0
+      action: shipping
+      requires:
+        - label: svc-ea-shipping
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ea-shipping
+    - id: broker
+      label: Solace Broker
+      sublabel: version in the topic
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: labelsq
+          label: q.ea.labels (v1)
+          depth: { queue: q.ea.labels, unit: waiting }
+        - id: trackingq
+          label: q.ea.tracking (v2)
+          depth: { queue: q.ea.tracking, unit: waiting }
+      provides:
+        - label: q.ea.labels
+          group: labelsq
+          semp: /msgVpns/{vpn}/queues/q.ea.labels
+        - label: q.ea.tracking
+          group: trackingq
+          semp: /msgVpns/{vpn}/queues/q.ea.tracking
+        - label: cp-ea
+          semp: /msgVpns/{vpn}/clientProfiles/cp-ea
+        - label: acl-ea
+          semp: /msgVpns/{vpn}/aclProfiles/acl-ea
+    - id: labels
+      label: Labels
+      sublabel: written against v1
+      kind: app
+      col: 2
+      action: labels
+      flowOn:
+        queue: q.ea.labels
+        client: ea-labels
+      requires:
+        - label: svc-ea-labels
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ea-labels
+    - id: tracking
+      label: Tracking
+      sublabel: written against v2
+      kind: app
+      col: 2
+      action: tracking
+      flowOn:
+        queue: q.ea.tracking
+        client: ea-tracking
+      requires:
+        - label: svc-ea-tracking
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ea-tracking
+  flows:
+    - { from: shipping, to: broker, label: v1 and v2, delay: 0 }
+    - { from: broker, to: labels, via: labelsq, traffic: q.ea.labels, delay: 0.8 }
+    - { from: broker, to: tracking, via: trackingq, traffic: q.ea.tracking, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.ea.labels (API v1) and q.ea.tracking (API v2), and the
+      client profile, ACL profile and usernames for this scenario. The API
+      itself is api.json in this scenario's folder.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: labels
+    label: Start labels
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ea, consumer, --role, labels, --user, svc-ea-labels, --client-name, ea-labels, --queue, q.ea.labels, --version, v1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Written against API v1: reads weightKg from each parcel and prints a
+      label. Says when nothing has arrived for a while.
+
+  - id: tracking
+    label: Start tracking
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ea, consumer, --role, tracking, --user, svc-ea-tracking, --client-name, ea-tracking, --queue, q.ea.tracking, --version, v2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Written against API v2: reads weight.value from each parcel.
+
+  - id: shipping
+    label: Start the shipping service
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ea, shipping, --client-name, ea-shipping]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes every dispatched parcel on API v1 and v2.
+
+  - id: shipping-in-place
+    label: Start the shipping service, changed in place
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ea, shipping, --client-name, ea-shipping, --break]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: shipping
+    description: >
+      A release that sends v1 events in the v2 payload shape, under the v1
+      topic. Stop the shipping service first.
+
+  - id: shipping-v2-only
+    label: Start the shipping service with v1 retired
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ea, shipping, --client-name, ea-shipping, --versions, v2]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: shipping
+    description: >
+      A release that publishes API v2 only. Stop the shipping service first.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-apis]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the queues and access control for this scenario.
+
+failure_modes:
+  - id: changed-in-place
+    title: Version 1 is changed in place
+    breaks: >
+      The shipping team releases a change that sends v1 events in the new
+      shape, under the same v1 topic. No new version.
+    watch: >
+      The card shows labels, written against v1: "payload has no weightKg,
+      which API v1 promises: cannot print the label", for every parcel.
+      Tracking, on v2, carries on. Nothing in the topic says anything
+      changed, so labels cannot tell the new shape from a bug. Reset goes
+      back to the release that keeps v1 as v1.
+    why: >
+      An event API's version is a promise: everything on the v1 topic has
+      the v1 shape. A change in place breaks every consumer of v1 at once,
+      including ones the producer has never heard of. A new shape needs a
+      new version, published beside the old one.
+    real_world: >
+      A team "improves" a field for its newest consumer and breaks three
+      others. Event Portal keeps versions of events and schemas so a change
+      becomes a new version rather than an edit.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Event Portal: event APIs"
+        url: https://docs.solace.com/Cloud/Event-Portal/event-portal-designer-event-apis.htm
+    node: shipping
+    logs: labels
+    trigger:
+      - stop: shipping
+      - start: shipping-in-place
+    reset:
+      - stop: shipping-in-place
+      - start: shipping
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: labels
+            has: ["P-\\d+: payload has no weightKg, which API v1 promises: cannot print the label"]
+          - log: tracking
+            has: ["P-\\d+: tracking updated, \\d+ g"]
+      reset:
+        settle: 2
+        within: 12
+        logs:
+          - log: labels
+            has: ["P-\\d+: label printed, \\d+\\.\\d kg"]
+            lacks: ["has no weightKg"]
+
+  - id: retired-too-early
+    title: Version 1 is retired while labels still uses it
+    breaks: >
+      The shipping team retires v1 and publishes v2 only. The labels team
+      has not moved.
+    watch: >
+      The card shows labels. No error: it simply receives nothing, and after
+      a few seconds says "nothing received on API v1 for 10 s". Tracking
+      carries on, and the line to labels on the diagram stops, because no
+      message reaches q.ea.labels. On the broker, What subscribes to v1
+      still lists q.ea.labels: the broker knew someone was using v1. Reset
+      brings v1 back.
+    why: >
+      Retiring a version is safe only when nobody consumes it, and the
+      producer cannot see its consumers. The broker can: a queue subscribed
+      to the v1 topic is a consumer of v1. Without a registry of who uses
+      what, that live subscription is the only evidence, and nobody looked.
+    real_world: >
+      An old version switched off on schedule, and a quiet consumer that
+      stopped working without an alarm. Event Portal gives versions a
+      lifecycle (released, deprecated, retired) and catalogs which
+      applications use which events: the list to check before retiring one.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Event Portal: event API products"
+        url: https://docs.solace.com/Cloud/Event-Portal/event-portal-designer-event-api-products.htm
+    node: shipping
+    logs: labels
+    trigger:
+      - stop: shipping
+      - start: shipping-v2-only
+    reset:
+      - stop: shipping-v2-only
+      - start: shipping
+    expect:
+      break:
+        within: 20
+        logs:
+          - log: labels
+            has: ["nothing received on API v1 for \\d+ s"]
+            lacks: ["label printed"]
+          - log: tracking
+            has: ["tracking updated"]
+      reset:
+        within: 12
+        logs:
+          - log: labels
+            has: ["P-\\d+: label printed"]
+
+inspect:
+  - label: What subscribes to v1
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.ea.labels/subscriptions
+    # Before retiring v1, this is the list to check.
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.ea.labels → Subscriptions
+    empty: No queue yet. Press Play.
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.ea.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.
