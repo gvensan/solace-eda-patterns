@@ -60,6 +60,7 @@ The sidebar follows the eight categories of the pattern guide.
 | 710 | [Event Catalog](guides/710-event-catalog.md) | Governance Patterns | An AsyncAPI catalog compared with real traffic; an event nobody catalogued; a payload that changes shape |
 | 720 | [Event APIs](guides/720-event-apis.md) | Governance Patterns | A versioned event contract published v1 and v2 side by side; a version changed in place; a version retired while still in use |
 | 730 | [Intermediated Governance](guides/730-intermediated-governance.md) | Governance Patterns | A central team approves each request and the broker enforces the grant; subscribing before approval; a grant broader than the request |
+| 740 | [Disintermediated Governance](guides/740-disintermediated-governance.md) | Governance Patterns | Teams act in their own topic prefix and create their own queues; the broker refuses a publish outside the prefix and a queue over the quota |
 | 750 | [Access Control and Authorization](guides/750-access-control.md) | Governance Patterns | Per-username ACL profiles; a refused publish reaches nobody; a refused subscription |
 | 810 | [Strangler](guides/810-strangler.md) | Migration Patterns | Move refunds from the old system to a new service by moving a subscription; both systems paying the same refund; refunds stranded on a failed new service |
 | 820 | [Data Synchronization](guides/820-data-synchronization.md) | Migration Patterns | Two CRMs written at once, kept the same by publishing and applying each other's edits; an edit that echoes for ever; a CRM offline catches up |

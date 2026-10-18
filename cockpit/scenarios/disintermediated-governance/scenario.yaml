@@ -1,0 +1,303 @@
+id: disintermediated-governance
+# Category 7 of the pattern guide (Governance Patterns), fourth pattern.
+order: 740
+eyebrow: Governance Patterns
+title: Disintermediated Governance
+summary: >
+  Here nobody approves anything. Each team owns a part of the topic space,
+  dg/teams/<team>/, and publishes, subscribes and creates its own queues
+  there without asking. Anything a team publishes under public/ is open to
+  every other team. The platform team only sets the guardrails, and the
+  broker enforces them: stay inside your prefix, and stay inside your
+  queue quota.
+
+objectives:
+  - See a team create its own queue and subscribe to another team's public events, with no request
+  - See a team publish outside its prefix, and the broker refuse it
+  - See a team go over its queue quota, and the broker refuse that too
+  - Learn what guardrails replace a central team, and what they cannot do
+
+pattern:
+  what: >
+    Teams govern themselves inside guardrails: each owns part of the event
+    space and acts there without asking, and the platform enforces only
+    the rules every team must follow.
+  when: >
+    Many teams need to move fast, and the rules can be written down as
+    limits instead of reviews.
+  cost: >
+    Guardrails only catch what they were written for, and without a shared
+    catalog, teams lose sight of what other teams publish.
+  solace: >
+    ACL profiles per team enforce topic prefixes, and the client profile
+    limits how many queues each username may create.
+  related: [intermediated-governance, access-control, event-catalog]
+  guide: https://solace.com/event-driven-architecture-patterns/#disintermediated
+
+run:
+  - apply
+  - build
+  - billing
+  - orders
+
+cleanup:
+  - destroy
+  - delete-team-queues
+
+diagram:
+  caption: >
+    The orders team publishes under dg/teams/orders/public/. The billing
+    team created its own queue, q.dg.billing.orders, and subscribed it to
+    dg/teams/orders/public/> itself. Both stay inside the guardrails: their
+    own prefix, and one queue each.
+  duration: 2.4
+  liveWhen: orders
+  nodes:
+    - id: orders
+      label: Orders Team
+      sublabel: its own prefix
+      kind: app
+      col: 0
+      action: orders
+      requires:
+        - label: svc-dg-orders
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dg-orders
+    - id: broker
+      label: Solace Broker
+      sublabel: enforces the guardrails
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: billingq
+          label: q.dg.billing.orders
+          depth: { queue: q.dg.billing.orders, unit: waiting }
+      provides:
+        - label: acl-dg-orders
+          semp: /msgVpns/{vpn}/aclProfiles/acl-dg-orders
+        - label: acl-dg-billing
+          semp: /msgVpns/{vpn}/aclProfiles/acl-dg-billing
+        - label: cp-dg
+          semp: /msgVpns/{vpn}/clientProfiles/cp-dg
+    - id: billing
+      label: Billing Team
+      sublabel: created its own queue
+      kind: app
+      shape: processor
+      col: 2
+      action: billing
+      flowOn:
+        queue: q.dg.billing.orders
+        client: dg-billing
+      requires:
+        - label: svc-dg-billing
+          semp: /msgVpns/{vpn}/clientUsernames/svc-dg-billing
+  flows:
+    - { from: orders, to: broker, label: public orders, delay: 0 }
+    - { from: broker, to: billing, via: billingq, delay: 0.8 }
+    - { from: billing, to: broker, label: billing's own events, delay: 1.4 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates the guardrails: an ACL profile per team allowing its own
+      prefix and every team's public events, a client profile allowing one
+      self-created queue per username, and the usernames. No queues: the
+      teams create their own.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: billing
+    label: Start the billing team's app
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dg, team, --team, billing, --client-name, dg-billing, --queue, q.dg.billing.orders, --subscribe, "dg/teams/orders/public/>", --publish, dg/teams/billing/public/invoice/created/v1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Creates its own queue if it does not exist, subscribes it to the
+      orders team's public events, reads it, and publishes invoices under
+      its own prefix. No request to anyone.
+
+  - id: billing-impostor
+    label: Start a billing app that publishes as orders
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dg, team, --team, billing, --role, billing-new, --client-name, dg-billing-new, --publish, dg/teams/orders/public/order/created/v1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      A new billing service that publishes into the orders team's prefix,
+      as guaranteed messages so the refusal comes back on each receipt.
+
+  - id: billing-audit
+    label: Start a second billing app with its own queue
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dg, team, --team, billing, --role, billing-audit, --client-name, dg-billing-audit, --queue, q.dg.billing.audit, --subscribe, "dg/teams/orders/public/>"]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    description: >
+      Another billing service that creates a queue of its own: the team's
+      second.
+
+  - id: orders
+    label: Start the orders team's app
+    kind: process
+    cmd: [bash, ../../apps/run.sh, dg, team, --team, orders, --client-name, dg-orders, --publish, dg/teams/orders/public/order/created/v1]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Publishes an order a second under the orders team's public prefix.
+
+  - id: delete-team-queues
+    label: Delete the queues the teams created
+    kind: process
+    cmd: [bash, ./delete-team-queues.sh]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes q.dg.billing.orders and q.dg.billing.audit, which the teams'
+      apps created and terraform does not know about.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, disintermediated-governance]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the guardrails: the ACL profiles, the client profile and the
+      usernames.
+
+failure_modes:
+  - id: outside-prefix
+    title: A team publishes outside its prefix
+    breaks: >
+      The billing team ships a new service that publishes order events, in
+      the orders team's part of the topic space.
+    watch: >
+      The card shows the new billing service. It connects, and every publish
+      is refused on its receipt: "Publish ACL Denied", with the topic. Its
+      events never reach the orders team's subscribers. The billing team's
+      first app, inside its own prefix, carries on. No one reviewed anything:
+      the guardrail decided. Reset stops the new service.
+    why: >
+      Each team's ACL profile allows publishing under its own prefix only.
+      The broker checks every message, so a team can publish anything it
+      likes in its own space and nothing in anyone else's, without a central
+      team looking at either.
+    real_world: >
+      A team that reuses another team's topic names, or a copied service
+      still configured for its original owner. Prefix guardrails make
+      ownership visible in the topic and enforced by the broker.
+    docs:
+      - label: "Go API: publishing guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
+      - label: "Client authorization"
+        url: https://docs.solace.com/Security/Client-Authorization-Overview.htm
+    node: billing
+    logs: billing-impostor
+    trigger:
+      - start: billing-impostor
+    reset:
+      - stop: billing-impostor
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: billing-impostor
+            has: ["dg/teams/orders/public/order/created/v1/O-\\d+ refused: .*Publish ACL Denied"]
+          - log: billing
+            has: ["received O-\\d+ from dg/teams/orders/public/order/created/v1/O-\\d+"]
+      reset:
+        within: 10
+        logs:
+          - log: billing
+            has: ["published dg/teams/billing/public/invoice/created/v1/O-\\d+"]
+
+  - id: over-quota
+    title: A team goes over its queue quota
+    breaks: >
+      The billing team starts a second service that creates a queue of its
+      own. The team already has one, and the guardrail allows one.
+    watch: >
+      The card shows the second service. It connects, then cannot create its
+      queue: "No More Non-Durable Queue or Topic Endpoint" (the broker's
+      words, though the queue is durable), and it exits. The team's first queue and app
+      are untouched. Again nobody reviewed anything: the limit is in the
+      client profile, and the broker applies it to every team alike. Reset
+      stops the second service.
+    why: >
+      Self-service means a team can create queues without asking, and a
+      queue holds messages on the broker's spool. Without a limit one team's
+      forgotten queues could fill it for everyone. The client profile's
+      maximum endpoints per client username is the quota, checked when a
+      client asks the broker to create one.
+    real_world: >
+      Test queues nobody deleted, a consumer per developer, a backlog that
+      grows over a holiday. Quotas per team, set by the platform team once,
+      replace reviewing every new queue.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Queues and topic endpoints"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Endpoints.htm
+    node: billing
+    logs: billing-audit
+    trigger:
+      - start: billing-audit
+    reset:
+      - stop: billing-audit
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: billing-audit
+            has: ["could not create or bind queue q.dg.billing.audit", "No More Non-Durable Queue or Topic Endpoint"]
+      reset:
+        within: 10
+        logs:
+          - log: billing
+            has: ["received O-\\d+"]
+
+inspect:
+  - label: Queues the teams created
+    kind: semp
+    path: /msgVpns/{vpn}/queues?where=queueName==q.dg.*
+    # owner is the username that created it; nobody approved it.
+    columns: [queueName, owner, accessType, maxMsgSpoolUsage]
+    ui_hint: Manager → Queues
+    empty: No team has created a queue yet. Press Play.
+  - label: The guardrails
+    kind: semp
+    path: /msgVpns/{vpn}/clientProfiles/cp-dg
+    columns: [clientProfileName, allowGuaranteedEndpointCreateEnabled, maxEndpointCountPerClientUsername]
+    ui_hint: Manager → Access Control → Client Profiles → cp-dg
+    empty: No guardrails yet. Press Play.

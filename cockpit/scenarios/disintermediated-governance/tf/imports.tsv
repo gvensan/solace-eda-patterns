@@ -1,0 +1,19 @@
+# What the disintermediated-governance scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+# The teams' own queues are created by the teams' apps, not terraform:
+# Cleanup deletes them by name.
+
+solacebroker_msg_vpn_client_profile.dg	{vpn}/cp-dg
+
+solacebroker_msg_vpn_acl_profile.dg["orders"]	{vpn}/acl-dg-orders
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.dg["orders"]	{vpn}/acl-dg-orders/smf/dg%2Fteams%2Forders%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.dg_own["orders"]	{vpn}/acl-dg-orders/smf/dg%2Fteams%2Forders%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.dg_public["orders"]	{vpn}/acl-dg-orders/smf/dg%2Fteams%2F%2A%2Fpublic%2F%3E
+solacebroker_msg_vpn_acl_profile.dg["billing"]	{vpn}/acl-dg-billing
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.dg["billing"]	{vpn}/acl-dg-billing/smf/dg%2Fteams%2Fbilling%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.dg_own["billing"]	{vpn}/acl-dg-billing/smf/dg%2Fteams%2Fbilling%2F%3E
+solacebroker_msg_vpn_acl_profile_subscribe_topic_exception.dg_public["billing"]	{vpn}/acl-dg-billing/smf/dg%2Fteams%2F%2A%2Fpublic%2F%3E
+
+# Client usernames
+solacebroker_msg_vpn_client_username.dg["orders"]	{vpn}/svc-dg-orders
+solacebroker_msg_vpn_client_username.dg["billing"]	{vpn}/svc-dg-billing
