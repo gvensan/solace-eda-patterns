@@ -86,6 +86,12 @@ starts the broker and the dashboard in development mode, and fetches a pinned
 Terraform into `.tools/` if none is on PATH. On a machine where 8080 or 55555
 is taken, set `SOLACE_SEMP_PORT=18080`, `SOLACE_SMF_PORT=15555` and
 `SOLACE_MAP_EXTRA_PORTS=false` in `.env.dev`.
+The Event Gateway scenario also needs MQTT and incoming REST mapped
+(`SOLACE_MQTT_PORT`, `SOLACE_REST_PORT`, default 1883 and 9000; use 11883
+and 19000 where those are taken) and a port for its webhook app
+(`SOLACE_WEBHOOK_PORT`, default 18099). Ports and the container's
+`host.docker.internal` route are set when the broker container is created:
+to change them, remove the container and run `setup_broker.sh` again.
 
 Never point the dashboard at a broker someone else is using: Clear broker
 config deletes every object any scenario lists in `imports.tsv`.

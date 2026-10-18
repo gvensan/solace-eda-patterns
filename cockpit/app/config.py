@@ -99,6 +99,10 @@ def terraform_env() -> dict:
             # The same password the apps use, so a client username terraform
             # creates is one the Go apps can actually log in as.
             "TF_VAR_client_password": CLIENT_PASSWORD,
+            # Where the Event Gateway's REST delivery point posts: the port
+            # its webhook app listens on. Terraform ignores a TF_VAR_ that a
+            # scenario does not declare.
+            "TF_VAR_webhook_port": os.environ.get("SOLACE_WEBHOOK_PORT", "18099"),
         }
     )
     return env

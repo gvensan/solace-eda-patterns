@@ -68,13 +68,19 @@ class Inspect:
 
 
 # Broker object kinds a scenario can own at the top level, mapped to their SEMP
-# collection. Listed in the order they have to be deleted: a client username
-# refers to its profiles, so it goes before them.
+# collection. Listed in the order they have to be deleted: a bridge logs in
+# with a username in another VPN, a REST delivery point binds a queue, a
+# client username refers to its profiles, and a message VPN can only be
+# deleted once everything in it has gone.
 _TOP_LEVEL = {
+    "bridge": "bridges",
+    "rest_delivery_point": "restDeliveryPoints",
     "client_username": "clientUsernames",
     "queue": "queues",
     "acl_profile": "aclProfiles",
     "client_profile": "clientProfiles",
+    "replay_log": "replayLogs",
+    "msg_vpn": None,
 }
 
 
@@ -145,10 +151,12 @@ class Scenario:
         return [a for a in self.actions if a.is_destructive]
 
     def owned_objects(self) -> list:
-        """(kind, name) for every top-level broker object this scenario owns,
-        read from tf/imports.tsv, the same list Reconcile uses. Children such
-        as queue subscriptions and ACL exceptions are left out: they go when
-        their parent is deleted."""
+        """(kind, vpn, name) for every top-level broker object this scenario
+        owns, read from tf/imports.tsv, the same list Reconcile uses. vpn is
+        None for the workshop's own VPN ({vpn} in the file) or the name of
+        another VPN the scenario created. Children such as queue
+        subscriptions, ACL exceptions and a bridge's remote VPN are left out:
+        they go when their parent is deleted."""
         imports = self.root / "tf" / "imports.tsv"
         if not imports.exists():
             return []
@@ -157,9 +165,19 @@ class Scenario:
             if not line.strip() or line.startswith("#") or "\t" not in line:
                 continue
             address, import_id = line.split("\t", 1)
-            kind = address.split(".", 1)[0].removeprefix("solacebroker_msg_vpn_")
-            if kind in _TOP_LEVEL:
-                found.append((kind, import_id.strip().split("/", 1)[1]))
+            rtype = address.split(".", 1)[0]
+            import_id = import_id.strip()
+            if rtype == "solacebroker_msg_vpn":
+                found.append(("msg_vpn", None, import_id))
+                continue
+            kind = rtype.removeprefix("solacebroker_msg_vpn_")
+            if kind not in _TOP_LEVEL:
+                continue
+            vpn, name = import_id.split("/", 1)
+            if kind == "bridge":
+                # Import id <vpn>/<bridge>/<router>; SEMP names it "<bridge>,<router>".
+                name = name.replace("/", ",", 1)
+            found.append((kind, None if vpn == "{vpn}" else vpn, name))
         return found
 
     def action(self, action_id: str) -> Optional[Action]:

@@ -409,6 +409,13 @@ diagram:
   recent ownership moves and the parsed events, for the page and for
   `smoke.py`.
 
+A flow out of the broker can name a queue with `traffic: <queue>`. It then
+moves only while messages are arriving on that queue, judged from the
+queue's spooled count on each poll (`TRAFFIC_SECONDS` in
+`cockpit/app/main.py`), for a line whose traffic no app on the diagram
+sends: across a bridge, or out of a REST delivery point. The queue must be
+in the scenario's `tf/imports.tsv`.
+
 A flow that carries only the odd message (from a queue to its dead message
 queue's reader, say) can set `animate: false`. It is drawn, but never shows
 packets, so the picture does not suggest a steady stream that is not there.

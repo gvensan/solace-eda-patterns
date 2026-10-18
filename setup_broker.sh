@@ -8,8 +8,13 @@
 # already has something on 8080 or 55555 can start this broker elsewhere and
 # point the dashboard at it with the same values:
 #
-#   SOLACE_SEMP_PORT=18080 SOLACE_SMF_PORT=15555 SOLACE_MAP_EXTRA_PORTS=false bash setup_broker.sh
+#   SOLACE_SEMP_PORT=18080 SOLACE_SMF_PORT=15555 SOLACE_MQTT_PORT=11883 SOLACE_REST_PORT=19000 \
+#     SOLACE_MAP_EXTRA_PORTS=false bash setup_broker.sh
 #   SOLACE_SEMP_PORT=18080 SOLACE_SMF_PORT=15555 bash cockpit/start_cockpit.sh
+#
+# The ports and the host route are fixed when the container is created. To
+# change them on a broker that already exists, remove the container
+# (docker rm -f <name>) and run this again; its configuration starts empty.
 
 echo "Setting up Solace broker..."
 
@@ -40,11 +45,14 @@ SMF_PORT="${SOLACE_SMF_PORT:-55555}"
 SEMP_USER="${SOLACE_SEMP_USER:-admin}"
 SEMP_PASSWORD="${SOLACE_SEMP_PASSWORD:-admin}"
 VPN="${SOLACE_MSG_VPN:-default}"
+# MQTT and incoming REST, which the Event Gateway scenario publishes on.
+MQTT_PORT="${SOLACE_MQTT_PORT:-1883}"
+REST_PORT="${SOLACE_REST_PORT:-9000}"
 
 # The other protocol ports are not used by the dashboard. They are mapped for
-# attendees who want to try MQTT, REST or AMQP by hand, and can be left off on
-# a machine where something else already holds them.
-EXTRA_PORTS=(-p 1443:1443 -p 8008:8008 -p 1883:1883 -p 5672:5672 -p 9000:9000 -p 2223:2222)
+# attendees who want to try AMQP or web messaging by hand, and can be left off
+# on a machine where something else already holds them.
+EXTRA_PORTS=(-p 1443:1443 -p 8008:8008 -p 5672:5672 -p 2223:2222)
 if [ "${SOLACE_MAP_EXTRA_PORTS:-true}" = "false" ]; then
   EXTRA_PORTS=()
 fi
@@ -61,7 +69,12 @@ else
     docker start "$BROKER_NAME"
   else
     echo "Installing Solace broker..."
-    docker run -d -p "${SEMP_PORT}:8080" -p "${SMF_PORT}:55555" "${EXTRA_PORTS[@]}" \
+    # host.docker.internal lets the broker reach an app on this machine (or
+    # in this Codespace), which is where a REST delivery point posts to.
+    # Docker Desktop provides the name already; on Linux host-gateway does.
+    docker run -d -p "${SEMP_PORT}:8080" -p "${SMF_PORT}:55555" \
+      -p "${MQTT_PORT}:1883" -p "${REST_PORT}:9000" "${EXTRA_PORTS[@]}" \
+      --add-host=host.docker.internal:host-gateway \
       --shm-size=2g --restart unless-stopped \
       --env username_admin_globalaccesslevel=admin \
       --env "username_admin_password=${SEMP_PASSWORD}" \
@@ -98,10 +111,10 @@ echo "Username: ${SEMP_USER}"
 echo ""
 echo "SEMP port: ${SEMP_PORT}"
 echo "SMF port: ${SMF_PORT}"
+echo "MQTT port: ${MQTT_PORT}"
+echo "REST port: ${REST_PORT}"
 if [ ${#EXTRA_PORTS[@]} -gt 0 ]; then
   echo "Web Messaging port: 8008"
-  echo "MQTT port: 1883"
-  echo "REST port: 9000"
   echo "AMQP port: 5672"
 fi
 echo ""

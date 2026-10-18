@@ -71,6 +71,13 @@ def check(path: pathlib.Path) -> list[str]:
             bad.append(f"diagram node {node['id']!r} sublabel is {len(node['sublabel'])} characters; "
                        f"the box shows {SUBLABEL_MAX}")
 
+    # traffic: names a queue the scenario owns, read from its imports.
+    owned = (here / "tf" / "imports.tsv").read_text() if (here / "tf" / "imports.tsv").exists() else ""
+    for flow in spec.get("diagram", {}).get("flows", []):
+        if flow.get("traffic") and f"/{flow['traffic']}\n" not in owned + "\n":
+            bad.append(f"diagram flow {flow.get('from')!r} -> {flow.get('to')!r} traffic: "
+                       f"{flow['traffic']!r} is not a queue in tf/imports.tsv")
+
     for a in actions.values():
         if a.get("stands_for") and a["stands_for"] not in actions:
             bad.append(f"action {a['id']!r} stands_for missing action {a['stands_for']!r}")

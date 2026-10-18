@@ -115,7 +115,7 @@ diagram:
   flows:
     - { from: hq, to: broker, label: prices, delay: 0 }
     - { from: promos, to: broker, label: promotions, delay: 0 }
-    - { from: broker, to: store, via: storeq, delay: 1.0 }
+    - { from: broker, to: store, via: storeq, traffic: q.br.store, delay: 1.0 }
 
 actions:
   - id: apply
@@ -222,10 +222,10 @@ failure_modes:
       office's log carries on, "published", as if nothing happened: in its
       own VPN, nothing did. The prices wait on q.br.to-stores in br-hq (see
       Head office's queue for the stores). The line into the store till
-      still moves on the diagram: it shows that the till is bound and
-      active, not that prices arrive; the till's log is the truth. Reset
-      enables the bridge, and every waiting price arrives at once, in order,
-      "sent by head office 12.0 s ago".
+      stops moving within a few seconds: it follows what actually arrives on
+      q.br.store, and nothing does. Reset enables the bridge, and every
+      waiting price arrives at once, in order, "sent by head office 12.0 s
+      ago".
     why: >
       The bridge is a consumer of q.br.to-stores like any other. While it is
       down, the queue keeps the guaranteed messages, as a queue does for any

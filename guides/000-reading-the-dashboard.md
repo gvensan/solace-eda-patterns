@@ -18,7 +18,7 @@ starts or ends at the broker: apps never talk to each other directly.
 | <!-- indicator: box-depth --> `3 waiting`, `2 parked` in a dotted box | How many messages that queue holds right now: waiting to be read, or delivered and not yet acknowledged. Read from the broker every few seconds. It climbs, in orange, when nothing is reading the queue. |
 | <!-- indicator: box-arrival --> Orange dot hopping between two boxes, with a word beside it | A message the broker just moved from one queue to another, such as to a dead message queue, and why: `expired` (it waited past its time to live) or `failed 3 attempts`. It comes from the broker's own counters, then runs on to the app reading that queue. |
 | <!-- indicator: logs-button --> `logs` | Opens what that app printed, in the side panel. |
-| Moving dots on a line | Events flowing. They move only while the app that sends them is running, so a still picture means nothing is being sent. They show that events flow, not each single event. |
+| Moving dots on a line | Events flowing. They move only while the app that sends them is running, so a still picture means nothing is being sent. A line into a queue's reader can also follow the queue itself: then it moves only while messages are arriving on that queue, as the broker counts them (across a bridge, or out to a webhook). They show that events flow, not each single event. |
 | <!-- indicator: faulted-border --> Red dashed border | A **Break it** card is in effect on this app. It is the failure you caused, not a fault in the workshop. |
 
 A box can also show a setting you chose, under its name:

@@ -9,5 +9,3 @@ waves). One line each; pick them up between waves.
 - Dead Message Queue: draw the hop's reason as a chip on the dot, not only a label beside the box.
 - Stat tiles: also count this scenario's own objects, beside the VPN-wide totals.
 - smoke.py: a group mode (`--group "Communication Patterns"`) for group-level regression.
-- Clear broker config: also delete replay logs, bridges and a scenario's extra VPN (Event Sourcing, Event Bridge list them in imports.tsv, but `_TOP_LEVEL` covers queues, usernames and profiles only, and a VPN must be emptied before it can be deleted).
-- Diagram: a flow whose messages cross a bridge stops its packets while the bridge's inboundState is not ready-in-sync (Event Bridge card 1 says so in text for now).

@@ -392,7 +392,9 @@ async def scenario_state(scenario_id: str):
 
     # The three kinds of question are independent, so they go to the broker
     # together rather than one phase after another.
-    found, tx, boxes = await asyncio.gather(probe_all(), flows_all(), _box_state(nodes))
+    found, tx, boxes, traffic = await asyncio.gather(
+        probe_all(), flows_all(), _box_state(nodes),
+        _traffic_state((scenario.diagram or {}).get("flows", [])))
 
     # An action that stands for another (a variant of the same app, started
     # by a failure card) makes that action's node show as running.
@@ -436,6 +438,7 @@ async def scenario_state(scenario_id: str):
 
     return {"nodes": out,
             "boxes": boxes,
+            "traffic": traffic,
             "settings": {name: setting_value(scenario, name) for name in scenario.settings}}
 
 
@@ -471,6 +474,40 @@ async def _box_state(nodes) -> dict:
         return box["id"], out
 
     return dict(await asyncio.gather(*(one(b) for b in boxes))) if boxes else {}
+
+
+# When each queue's spooled count last rose, keyed by queue name: (count, time).
+_traffic_seen: dict = {}
+
+# A queue whose count has not risen for this long is carrying nothing.
+TRAFFIC_SECONDS = 4.0
+
+
+async def _traffic_state(flows) -> dict:
+    """True or False per queue named by a flow's `traffic:`: whether messages
+    have arrived on it in the last TRAFFIC_SECONDS, from its cumulative
+    spooled count. A flow tied to a queue moves only while this is true, so
+    the picture follows what the broker actually received, not what an app
+    is assumed to send. None where the broker could not be asked."""
+    queues = {f["traffic"] for f in flows if f.get("traffic")}
+
+    async def one(queue):
+        try:
+            data = await broker.semp_get(
+                f"/msgVpns/{{vpn}}/queues/{quote(queue, safe='')}?select=spooledMsgCount", api="monitor")
+            count = data.get("data", {}).get("spooledMsgCount")
+        except Exception:
+            return queue, None
+        if count is None:
+            return queue, None
+        now = time.monotonic()
+        last = _traffic_seen.get(queue)
+        if last is None or count != last[0]:
+            _traffic_seen[queue] = (count, now if last is not None else now - TRAFFIC_SECONDS)
+            return queue, last is not None and count > last[0]
+        return queue, now - last[1] < TRAFFIC_SECONDS
+
+    return dict(await asyncio.gather(*(one(q) for q in queues))) if queues else {}
 
 
 @app.put("/api/scenarios/{scenario_id}/settings/{name}")
@@ -610,7 +647,9 @@ async def clear_broker():
     """Remove every scenario's configuration from the broker, whatever state
     terraform is in. Stops everything first, since apps fail the moment their
     usernames go. Only objects a scenario lists in tf/imports.tsv are touched,
-    so the broker's own defaults and anything made by hand survive."""
+    so the broker's own defaults and anything made by hand survive: queues,
+    profiles and usernames, and the replay logs, bridges and extra message
+    VPNs a scenario created."""
     from .scenarios import _TOP_LEVEL
 
     for task in _sequences.values():
@@ -623,19 +662,24 @@ async def clear_broker():
         objects.extend(scenario.owned_objects())
     order = list(_TOP_LEVEL)
     # Deduplicated, and ordered so nothing is deleted while something still
-    # refers to it.
-    objects = sorted(set(objects), key=lambda o: (order.index(o[0]), o[1]))
+    # refers to it, and a VPN only once it is empty.
+    objects = sorted(set(objects), key=lambda o: (order.index(o[0]), o[1] or "", o[2]))
 
     deleted, failed = 0, []
-    for kind, name in objects:
+    for kind, vpn, name in objects:
+        if kind == "msg_vpn":
+            path = f"/msgVpns/{quote(name, safe='')}"
+        else:
+            where = "{vpn}" if vpn is None else quote(vpn, safe="")
+            path = f"/msgVpns/{where}/{_TOP_LEVEL[kind]}/{quote(name, safe=',')}"
         try:
-            outcome = await broker.semp_delete(f"/msgVpns/{{vpn}}/{_TOP_LEVEL[kind]}/{name}")
+            outcome = await broker.semp_delete(path)
         except broker.BrokerUnavailable as exc:
             raise HTTPException(503, f"broker unavailable: {exc}") from exc
         if outcome == "deleted":
             deleted += 1
         elif outcome != "absent":
-            failed.append(f"{kind} {name}: {outcome}")
+            failed.append(f"{kind} {name}{f' in {vpn}' if vpn else ''}: {outcome}")
 
     # With the objects gone, every scenario's terraform state is wrong, so it
     # goes too. The next Play then applies from scratch.

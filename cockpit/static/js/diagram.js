@@ -778,6 +778,9 @@ const Diagram = (() => {
       if (f.animate === false) return false;
       if (f.from !== brokerId) return publishing(f.from, seen);
       if (!running(f.to)) return false;
+      // Tied to a queue: moves only while messages are arriving on it, as the
+      // broker counts them (across a bridge, say, which no app here runs).
+      if (f.traffic && state.traffic?.[f.traffic] === false) return false;
       // Bound but not delivered to: a standby on an exclusive queue. A
       // stalled consumer is at its unacknowledged limit, so the broker is
       // not sending it anything either.

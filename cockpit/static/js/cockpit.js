@@ -1812,11 +1812,10 @@
     el.clearBroker.addEventListener("click", async () => {
       const ok = window.confirm(
         "Clear broker config?\n\nThis stops everything that is running, then deletes every " +
-          "queue, client profile, ACL profile and client username the workshop scenarios " +
-          "create, along with any messages waiting on those queues. Broker defaults and " +
-          "anything you created yourself are left alone. So are replay logs, bridges and extra " +
-          "message VPNs: Cleanup on their scenario removes those.\n\nPress Play on a scenario " +
-          "to set it up again."
+          "queue, client profile, ACL profile, client username, REST delivery point, bridge, " +
+          "replay log and extra message VPN the workshop scenarios create, along with any " +
+          "messages waiting on those queues. Broker defaults and anything you created yourself " +
+          "are left alone.\n\nPress Play on a scenario to set it up again."
       );
       if (!ok) return;
       el.clearBroker.disabled = true;

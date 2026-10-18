@@ -705,3 +705,49 @@ queue. A queue in `default` subscribed to `spike/br/>`.
   Terraform deletes children first. The dashboard's Clear broker config
   deletes only queues, usernames and profiles in the workshop VPN, so it
   does not remove a scenario's second VPN, bridge or replay log.
+
+## 20. Event Gateway and self-service queues, for Wave C
+
+**Ran on 10.26.0**, a broker recreated by the new `setup_broker.sh` with MQTT
+on host port 11883, REST on 19000 and `--add-host
+host.docker.internal:host-gateway`, on macOS with Docker Desktop.
+
+**Gateway: saw**
+
+- The `default` VPN has MQTT (1883) and incoming REST (9000) enabled in the
+  container, reachable through the mapped ports.
+- MQTT 3.1.1 from a minimal Go client (CONNECT with username and password,
+  PUBLISH at QoS 1): a PUBACK for every message, and the messages reached a
+  queue subscribed to the topic.
+- REST: `POST /TOPIC/<topic>` with `Solace-Delivery-Mode: persistent` and
+  HTTP basic authentication answered 200 and the message reached the queue.
+- The `default` VPN's `authenticationBasicType` is `none`: a wrong password,
+  and even an unknown username, still got 200. A password card cannot show a
+  refusal without changing a VPN-wide setting, so the gateway's card uses the
+  ACL instead.
+- ACLs apply to REST publishers: a post to a topic outside the username's
+  publish exceptions got `403` with `<reason>Publish ACL Denied</reason>`.
+- REST delivery point: creating a REST consumer with `remotePort` and no
+  `tlsEnabled` is refused (`Missing attribute "tlsEnabled", required with
+  "remotePort"`). With `tlsEnabled: false`, the consumer came up and posted
+  every queued message to a Go HTTP server on the Mac through
+  `host.docker.internal`, which resolves to an IPv6 address inside the
+  container: a listener on IPv4 only was never reached, the Go server
+  (listening on both) was.
+- Not tested: the host route inside a Codespace.
+
+**Self-service queues: saw**
+
+- With `allowGuaranteedEndpointCreateEnabled` and
+  `maxEndpointCountPerClientUsername: 1`, a Go receiver built with
+  `PersistentReceiverCreateOnStartMissingResources` created a durable queue:
+  owner the client username, permission `no-access`, `maxMsgSpoolUsage`
+  5000 (MB). `AddSubscription` on the receiver added a topic subscription to
+  it.
+- A second queue for the same username was refused: `No More Non-Durable
+  Queue or Topic Endpoint` (the broker's wording, although the queue asked
+  for was durable).
+- The ACL governs subscriptions added to a client's own queue: `Subscription
+  ACL Denied - Topic 'spike/other/>' Queue 'q.spike.own' ... '403'`.
+- Terraform does not know client-created queues, so Cleanup has to delete
+  them by name.
