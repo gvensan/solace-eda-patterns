@@ -1,0 +1,352 @@
+id: event-gateway
+# Category 5 of the pattern guide (Deployment Patterns), third pattern.
+order: 530
+eyebrow: Deployment Patterns
+title: Event Gateway
+summary: >
+  A delivery company's events arrive in different protocols. Vans report
+  their position over MQTT, a partner's portal posts orders over plain HTTP,
+  and the dispatch service reads both from one queue with the Solace API.
+  Out the other side, the broker itself posts each order to the billing
+  system's webhook, which has no Solace client at all. The broker is the
+  gateway: MQTT and REST are its own services, not a separate process.
+
+objectives:
+  - See MQTT and HTTP publishers feed one queue that a Solace API consumer reads
+  - See the broker post orders to a plain HTTP webhook through a REST delivery point
+  - See orders wait on the broker while the webhook is down, and arrive when it is back
+  - See an HTTP publisher refused at the gateway for a topic it may not use, with the reason
+
+pattern:
+  what: >
+    A single entry and exit point that lets clients speaking other
+    protocols, such as MQTT devices and HTTP services, take part in the
+    event system, translating to and from it at the edge.
+  when: >
+    Devices, partners or legacy systems cannot run your messaging API, but
+    their events must reach your services, or your events must reach them.
+  cost: >
+    Each protocol has its own delivery guarantees and security to map, and
+    the gateway becomes part of every path, so it has to be available and
+    secured like the rest of the broker.
+  solace: >
+    The broker accepts MQTT and REST natively on its own ports, and a REST
+    delivery point posts messages from a queue to an HTTP endpoint, retrying
+    until it answers.
+  related: [event-bridge, guaranteed-delivery, access-control]
+  guide: https://solace.com/event-driven-architecture-patterns/#event-gateway
+
+run:
+  - apply
+  - build
+  - billing
+  - dispatch
+  - van
+  - partner
+
+cleanup:
+  - destroy
+
+diagram:
+  caption: >
+    The van publishes over MQTT to gw/fleet/van/<van>/location; the partner
+    posts over HTTP to gw/partner/order/created/v1/<order>. q.gw.dispatch
+    takes both for dispatch. q.gw.billing takes the orders, and the REST
+    delivery point rdp-gw-billing posts each to billing's webhook.
+  duration: 2.6
+  liveWhen: van
+  nodes:
+    - id: van
+      label: Van
+      sublabel: MQTT, QoS 1
+      kind: app
+      col: 0
+      action: van
+      requires:
+        - label: svc-gw-vans
+          semp: /msgVpns/{vpn}/clientUsernames/svc-gw-vans
+    - id: partner
+      label: Partner Portal
+      sublabel: HTTP POST
+      kind: app
+      col: 0
+      action: partner
+      requires:
+        - label: svc-gw-partner
+          semp: /msgVpns/{vpn}/clientUsernames/svc-gw-partner
+    - id: broker
+      label: Solace Broker
+      sublabel: MQTT, REST and SMF in one
+      kind: broker
+      col: 1
+      action: apply
+      contains:
+        - id: dispatchq
+          label: q.gw.dispatch
+          depth: { queue: q.gw.dispatch, unit: waiting }
+        - id: billingq
+          label: q.gw.billing (to webhook)
+          depth: { queue: q.gw.billing, unit: waiting }
+      provides:
+        - label: q.gw.dispatch
+          group: dispatchq
+          semp: /msgVpns/{vpn}/queues/q.gw.dispatch
+        - label: q.gw.billing
+          group: billingq
+          semp: /msgVpns/{vpn}/queues/q.gw.billing
+        - label: rdp-gw-billing
+          group: billingq
+          semp: /msgVpns/{vpn}/restDeliveryPoints/rdp-gw-billing
+        - label: cp-gw
+          semp: /msgVpns/{vpn}/clientProfiles/cp-gw
+    - id: dispatch
+      label: Dispatch
+      sublabel: Solace API (SMF)
+      kind: app
+      col: 2
+      action: dispatch
+      flowOn:
+        queue: q.gw.dispatch
+        client: gw-dispatch
+      requires:
+        - label: svc-gw-dispatch
+          semp: /msgVpns/{vpn}/clientUsernames/svc-gw-dispatch
+    - id: billing
+      label: Billing Webhook
+      sublabel: plain HTTP only
+      kind: app
+      col: 2
+      action: billing
+  flows:
+    - { from: van, to: broker, label: MQTT, delay: 0 }
+    - { from: partner, to: broker, label: HTTP, delay: 0.3 }
+    - { from: broker, to: dispatch, via: dispatchq, delay: 0.8 }
+    - { from: broker, to: billing, via: billingq, source: partner, traffic: q.gw.billing, delay: 0.8 }
+
+actions:
+  - id: apply
+    label: Apply configuration
+    kind: terraform
+    command: apply
+    tf_dir: tf
+    variant: primary
+    description: >
+      Creates q.gw.dispatch and q.gw.billing, the REST delivery point that
+      posts from q.gw.billing to billing's webhook, and the client profile,
+      ACL profile and usernames for this scenario.
+
+  - id: build
+    label: Build the apps
+    kind: process
+    cmd: [bash, ../../apps/run.sh, build]
+    cwd: .
+    variant: secondary
+    description: >
+      Compiles the Go apps shared by every scenario. Only needed to rebuild
+      after a change.
+
+  - id: billing
+    label: Start billing's webhook
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gw, billing, --client-name, gw-billing]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      A plain HTTP server with no Solace client. The broker posts each order
+      to it, and it answers 200.
+
+  - id: dispatch
+    label: Start dispatch
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gw, dispatch, --client-name, gw-dispatch]
+    cwd: .
+    long_running: true
+    variant: secondary
+    description: >
+      Reads q.gw.dispatch with the Solace API: van positions and partner
+      orders, whatever protocol each arrived in.
+
+  - id: van
+    label: Start the van
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gw, van, --client-name, gw-van]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Connects over MQTT and publishes its position every second at QoS 1,
+      waiting for the broker's PUBACK.
+
+  - id: partner
+    label: Start the partner portal
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gw, partner]
+    cwd: .
+    long_running: true
+    variant: primary
+    description: >
+      Posts a new order over HTTP every 3 seconds, as a persistent message,
+      with HTTP basic authentication.
+
+  - id: partner-pickups
+    label: Start the partner portal, new release
+    kind: process
+    cmd: [bash, ../../apps/run.sh, gw, partner, --topic, gw/fleet/pickup/requested/v1]
+    cwd: .
+    long_running: true
+    variant: secondary
+    failure_only: true
+    stands_for: partner
+    description: >
+      A release that posts pickup requests straight onto the fleet's topics,
+      gw/fleet/pickup/requested/v1/<order>, which the partner's ACL does not
+      allow. Stop the partner portal first.
+
+  - id: kill-billing
+    label: Crash billing's webhook
+    kind: process
+    cmd: [bash, ../../scripts/signal_app.sh, gw-billing, KILL, --wait-exit]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Kills the webhook outright (SIGKILL), and returns once it has gone.
+
+  - id: reconcile
+    label: Reconcile with broker
+    kind: process
+    cmd: [bash, ../../scripts/reconcile.sh, event-gateway]
+    cwd: .
+    variant: secondary
+    description: >
+      Use this if Play fails with "already exists". It imports objects that are
+      on the broker but missing from terraform state. The broker is not modified.
+
+  - id: destroy
+    label: Remove configuration
+    kind: terraform
+    command: destroy
+    tf_dir: tf
+    variant: danger
+    description: >
+      Deletes the REST delivery point, the queues and the access control for
+      this scenario.
+
+failure_modes:
+  - id: webhook-down
+    title: Billing's webhook goes down
+    breaks: >
+      The billing webhook is killed. The partner keeps posting orders.
+    watch: >
+      The card shows billing's webhook. The broker cannot post to it, so the
+      orders wait on q.gw.billing, which counts up, and the line to billing
+      stops. Dispatch carries on: it reads its own queue. The REST delivery
+      point retries every 3 seconds. Reset starts the webhook, and every
+      waiting order is posted to it in turn.
+    why: >
+      A REST delivery point is a consumer of a queue, like any other: it
+      takes a message, posts it, and only when the endpoint answers 2xx does
+      the broker delete it. An endpoint that is down leaves the messages on
+      the queue, so a webhook outage is a delay, not a loss.
+    real_world: >
+      A SaaS endpoint, a serverless function or a partner's API that is
+      slow, rate limited or down for maintenance. Without a queue in front
+      of it, every event sent meanwhile would be lost or have to be resent by
+      the publisher.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "REST delivery points"
+        url: https://docs.solace.com/Services/Managing-RDPs.htm
+    node: billing
+    logs: billing
+    trigger:
+      - run: kill-billing
+    reset:
+      - start: billing
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: billing
+            has: ["exited with code -9"]
+          - log: partner
+            has: ["O-\\d+ posted over HTTP: 200 OK"]
+      reset:
+        within: 20
+        logs:
+          - log: billing
+            has: ["POST /billing/orders from the broker: O-\\d+ billed"]
+
+  - id: outside-acl
+    title: The partner posts to a topic it may not use
+    breaks: >
+      The partner portal's new release posts pickup requests straight onto
+      the fleet's topics, gw/fleet/..., instead of under gw/partner/.
+    watch: >
+      The card shows the partner portal. Every post is refused by the broker
+      before it becomes an event: "refused over HTTP: 403 (Publish ACL
+      Denied)". No pickup request reaches the vans' topics, and the van,
+      on MQTT under its own username, carries on. Reset goes back to the
+      release that posts orders under gw/partner/.
+    why: >
+      An HTTP publisher is a client like any other: it logs in with a client
+      username, and that username's ACL profile decides where it may
+      publish. The broker checks every post, and answers a refusal the way
+      an HTTP client expects, with a status code and the reason.
+    real_world: >
+      A partner integration that drifts from what was agreed, or a device
+      firmware that publishes somewhere new. At the edge, every protocol
+      needs its own credentials and its own limits, and the gateway enforces
+      them as strictly as for internal apps.
+    docs:
+      - label: "Go API: consuming guaranteed messages"
+        url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
+      - label: "Solace REST status codes"
+        url: https://docs.solace.com/API/RESTMessagingPrtl/Solace-REST-Status-Codes.htm
+    node: partner
+    logs: partner-pickups
+    trigger:
+      - stop: partner
+      - start: partner-pickups
+    reset:
+      - stop: partner-pickups
+      - start: partner
+    expect:
+      break:
+        within: 15
+        logs:
+          - log: partner-pickups
+            has: ["O-\\d+ refused over HTTP: 403 \\(Publish ACL Denied\\)"]
+          - log: van
+            has: ["sent over MQTT, PUBACK received"]
+      reset:
+        within: 15
+        logs:
+          - log: partner
+            has: ["O-\\d+ posted over HTTP: 200 OK"]
+
+inspect:
+  - label: REST delivery point
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/restDeliveryPoints/rdp-gw-billing/restConsumers
+    # up is whether the broker can reach the webhook now.
+    columns: [restConsumerName, remoteHost, remotePort, up, lastFailureReason]
+    ui_hint: Manager → Clients → REST → rdp-gw-billing
+    empty: No REST delivery point yet. Press Play.
+  - label: Connected clients, by protocol
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/clients?count=30&where=clientUsername==svc-gw-*
+    columns: [clientName, clientUsername, protocol, dataRxMsgCount, dataTxMsgCount]
+    ui_hint: Manager → Clients
+    empty: No app of this scenario is connected. Press Play.
+  - label: Queues
+    kind: semp
+    api: monitor
+    path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.gw.*
+    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    ui_hint: Manager → Queues
+    empty: No queue yet. Press Play.

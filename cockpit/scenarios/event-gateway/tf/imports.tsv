@@ -1,0 +1,24 @@
+# What the event-gateway scenario owns on the broker.
+# Columns: terraform address <TAB> import id. {vpn} is substituted.
+
+solacebroker_msg_vpn_client_profile.gw	{vpn}/cp-gw
+solacebroker_msg_vpn_acl_profile.gw	{vpn}/acl-gw
+solacebroker_msg_vpn_acl_profile.gw_partner	{vpn}/acl-gw-partner
+solacebroker_msg_vpn_acl_profile_publish_topic_exception.gw_partner	{vpn}/acl-gw-partner/smf/gw%2Fpartner%2F%3E
+
+solacebroker_msg_vpn_queue.dispatch	{vpn}/q.gw.dispatch
+solacebroker_msg_vpn_queue_subscription.dispatch["gw/fleet/>"]	{vpn}/q.gw.dispatch/gw%2Ffleet%2F%3E
+solacebroker_msg_vpn_queue_subscription.dispatch["gw/partner/>"]	{vpn}/q.gw.dispatch/gw%2Fpartner%2F%3E
+
+solacebroker_msg_vpn_queue.billing	{vpn}/q.gw.billing
+solacebroker_msg_vpn_queue_subscription.billing	{vpn}/q.gw.billing/gw%2Fpartner%2Forder%2F%3E
+
+# The REST delivery point and its children
+solacebroker_msg_vpn_rest_delivery_point.billing	{vpn}/rdp-gw-billing
+solacebroker_msg_vpn_rest_delivery_point_queue_binding.billing	{vpn}/rdp-gw-billing/q.gw.billing
+solacebroker_msg_vpn_rest_delivery_point_rest_consumer.billing	{vpn}/rdp-gw-billing/billing-webhook
+
+# Client usernames
+solacebroker_msg_vpn_client_username.gw["vans"]	{vpn}/svc-gw-vans
+solacebroker_msg_vpn_client_username.gw["partner"]	{vpn}/svc-gw-partner
+solacebroker_msg_vpn_client_username.gw["dispatch"]	{vpn}/svc-gw-dispatch

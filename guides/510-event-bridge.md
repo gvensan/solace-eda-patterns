@@ -61,7 +61,8 @@ takes you back to the card's log and what to look for. **Why this breaks**
 explains the cause and where you would meet it in production.
 
 1. **The bridge goes down.** It is disabled. Head office keeps publishing
-   and is told nothing; the store receives nothing. The prices wait on
+   and is told nothing; the store receives nothing, and the line into it on
+   the diagram stops. The prices wait on
    q.br.to-stores. **Reset** enables the bridge, and they all arrive, in
    order, "sent by head office 12.0 s ago".
 2. **Head office publishes something the bridge does not carry.** Head office
@@ -91,4 +92,4 @@ explains the cause and where you would meet it in production.
   limit on bridges. Many links between many brokers are what an event mesh
   (dynamic message routing) is for.
 
-Next: [Dead Message Queue](610-dead-letter-queue.md).
+Next: [Event Gateway](530-event-gateway.md).
