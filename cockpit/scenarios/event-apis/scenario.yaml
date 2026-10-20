@@ -193,6 +193,16 @@ actions:
     description: >
       A release that publishes API v2 only. Stop the shipping service first.
 
+  - id: who-uses-v1
+    label: Ask the broker who still uses v1
+    kind: process
+    cmd: [bash, ./who-uses.sh, v1]
+    cwd: .
+    variant: secondary
+    description: >
+      Lists every queue with a live subscription on API v1's topic, read
+      over SEMP. The check to make before retiring v1.
+
   - id: reconcile
     label: Reconcile with broker
     kind: process
@@ -265,11 +275,16 @@ failure_modes:
   - id: retired-too-early
     title: Version 1 is retired while labels still uses it
     breaks: >
-      The shipping team retires v1 and publishes v2 only. The labels team
-      has not moved.
+      The shipping team asks the broker who still uses v1, gets an answer,
+      and retires v1 anyway, publishing v2 only. The labels team has not
+      moved.
     watch: >
-      The card shows labels. No error: it simply receives nothing, and after
-      a few seconds says "nothing received on API v1 for 10 s". Tracking
+      First the check: open the Ask the broker who still uses v1 step's log,
+      "q.ea.labels subscribes to ea/shipping/parcel/dispatched/v1/>" and "1
+      queue(s) still subscribe to v1: retiring it now leaves them with no
+      events". The team goes ahead regardless. The card shows labels: no
+      error, it simply receives nothing, and after a few seconds says
+      "nothing received on API v1 for 10 s". Tracking
       carries on, and the line to labels on the diagram stops, because no
       message reaches q.ea.labels. On the broker, What subscribes to v1
       still lists q.ea.labels: the broker knew someone was using v1. Reset
@@ -277,8 +292,9 @@ failure_modes:
     why: >
       Retiring a version is safe only when nobody consumes it, and the
       producer cannot see its consumers. The broker can: a queue subscribed
-      to the v1 topic is a consumer of v1. Without a registry of who uses
-      what, that live subscription is the only evidence, and nobody looked.
+      to the v1 topic is a consumer of v1, and the check reads exactly that.
+      A check whose answer is ignored, or skipped, ends the same way: a
+      consumer that goes quiet without an error.
     real_world: >
       An old version switched off on schedule, and a quiet consumer that
       stopped working without an alarm. Event Portal gives versions a
@@ -292,6 +308,7 @@ failure_modes:
     node: shipping
     logs: labels
     trigger:
+      - run: who-uses-v1
       - stop: shipping
       - start: shipping-v2-only
     reset:
@@ -299,11 +316,15 @@ failure_modes:
       - start: shipping
     expect:
       break:
-        within: 20
+        within: 25
         logs:
+          - log: who-uses-v1
+            has: ["q.ea.labels subscribes to ea/shipping/parcel/dispatched/v1/>", "1 queue\\(s\\) still subscribe to v1"]
+          # A parcel already on q.ea.labels when v1 stops is still printed,
+          # so the check is the silence that follows, not the absence of
+          # labels.
           - log: labels
             has: ["nothing received on API v1 for \\d+ s"]
-            lacks: ["label printed"]
           - log: tracking
             has: ["tracking updated"]
       reset:

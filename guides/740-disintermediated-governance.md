@@ -73,5 +73,10 @@ explains the cause and where you would meet it in production.
   many each client username may create.
 - What the guardrails cannot do is tell teams what other teams publish:
   that needs a shared catalog (see Event Catalog).
+- Naming guardrails (topic names that follow the company's convention,
+  versions in the right place) are not shown here. The broker enforces
+  prefixes, not conventions within them; a convention is checked in the
+  pipeline that applies a team's configuration, or designed and governed
+  in Event Portal.
 
 Next: [Access Control and Authorization](750-access-control.md).

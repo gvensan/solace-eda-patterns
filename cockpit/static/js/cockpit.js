@@ -729,8 +729,17 @@
     // Roles are read from the broker, so ask it now rather than trust the
     // last poll: the attendee may have stopped an app a second ago.
     if (roles.length) await refreshDiagramState(scenario);
-    const bound = bindMode(scenario, mode);
-    if ((roles.length && !bound.node && mode.node) || (mode.logs && !bound.logs)) {
+    let bound = bindMode(scenario, mode);
+    const unbound = (b) => (roles.length && !b.node && mode.node) || (mode.logs && !b.logs);
+    /* Just after another card's Reset, consumers can be between roles for a
+       few seconds (partitions moving back, a standby taking over), so ask
+       the broker again for a while before giving up. */
+    for (let tries = 0; unbound(bound) && roles.length && tries < 8; tries++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      await refreshDiagramState(scenario);
+      bound = bindMode(scenario, mode);
+    }
+    if (unbound(bound)) {
       toast(`The broker has no ${roles.map((r) => r.role).join(" or ")} consumer right now. ` +
         "Make sure every app is running (press Play), wait a moment, and try again.", true);
       return;

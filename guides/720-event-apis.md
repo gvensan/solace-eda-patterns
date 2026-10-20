@@ -38,6 +38,9 @@ contract changes safely.
 
 ## On the broker
 
+- **Ask the broker who still uses v1**, in Step through it: the check to make
+  before retiring a version. It lists every queue whose subscriptions match
+  the v1 topic, read over SEMP, and says whether retiring v1 is safe.
 - **What subscribes to v1**: q.ea.labels, subscribed to the v1 topic. This is
   the broker's own record of who still uses v1.
 - **Queues**: both near empty while everyone keeps up.
@@ -54,17 +57,21 @@ explains the cause and where you would meet it in production.
 1. **Version 1 is changed in place.** The shipping team sends v1 events in
    the new shape, under the v1 topic. Labels cannot print any label;
    tracking carries on. **Reset** goes back.
-2. **Version 1 is retired while labels still uses it.** The shipping team
-   publishes v2 only. Labels gets nothing and no error, just "nothing
-   received on API v1 for 10 s", and the line to it on the diagram stops.
-   q.ea.labels is still subscribed to v1. **Reset** brings v1 back.
+2. **Version 1 is retired while labels still uses it.** First the shipping
+   team asks the broker who still consumes v1: the **Ask the broker who still
+   uses v1** step reads every queue's live subscriptions over SEMP and
+   answers "q.ea.labels subscribes to ea/shipping/parcel/dispatched/v1/>".
+   The team retires v1 anyway. Labels gets nothing and no error, just
+   "nothing received on API v1 for 10 s", and the line to it on the diagram
+   stops. **Reset** brings v1 back.
 
 ## Try this
 
 - Move labels to v2: change its action's `--version v1` to `--version v2`,
   add `ea/shipping/parcel/dispatched/v2/>` to q.ea.labels in
-  `tf/queues.tf` and remove the v1 subscription, press **Play**, then use
-  the second card. Now retiring v1 breaks nobody.
+  `tf/queues.tf` and remove the v1 subscription, press **Play**, and run
+  **Ask the broker who still uses v1**: "nobody subscribes to v1: safe to
+  retire". Now the second card breaks nobody.
 - Compare `api.json` with `catalog.json` in Event Catalog: the same format,
   used for one application's contract instead of an inventory.
 

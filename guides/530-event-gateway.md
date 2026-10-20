@@ -14,6 +14,12 @@ Press **Play**. It creates two queues, a REST delivery point and the
 usernames, then starts **Billing's webhook**, **Dispatch**, the **Van** and
 the **Partner Portal**.
 
+This is not a security demo. The workshop's broker does no authentication
+on its message VPN: it does not check passwords, and even an unknown
+username is accepted. What refuses a publisher here is the ACL of the
+username it gives. A real gateway authenticates every client, with
+passwords, certificates or OAuth, and over TLS.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 

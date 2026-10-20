@@ -112,6 +112,7 @@ brief.
 | Solace Workshop Dashboard | Port 3000 (the **Ports** tab in a Codespace, <http://localhost:3000> locally) |
 | Solace Broker Manager | Port 8080, `admin` / `admin`, or the link in the dashboard sidebar |
 | Broker messaging (SMF) | `localhost:55555` |
+| Broker MQTT and REST (Event Gateway) | `localhost:1883` and `localhost:9000` |
 | Solace Broker | Docker container `solace_10.26.0`, Standard edition |
 
 Also installed: Go with a C toolchain (the Solace Go API wraps the native
