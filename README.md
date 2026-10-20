@@ -92,7 +92,7 @@ brief.
 | 430 | [Shock Absorber](guides/430-shock-absorber.md) | built | fa158c3 |
 | 440 | [Partitioning](guides/440-partitioning.md) | built | 54eac9b |
 | 510 | [Event Bridge](guides/510-event-bridge.md) | built | 9f8ec14 |
-| 520 | Event Mesh | not started | |
+| 520 | Event Mesh | brief, [docs/designs/event-mesh.md](docs/designs/event-mesh.md) | ab2c937 |
 | 530 | [Event Gateway](guides/530-event-gateway.md) | built | f3ede54 |
 | 610 | [Dead Letter Queue (built as Dead Message Queue)](guides/610-dead-letter-queue.md) | built | 558aa17 |
 | 620 | [Discard, Pause and Retry](guides/620-discard-pause-retry.md) | built | 7f1301c |

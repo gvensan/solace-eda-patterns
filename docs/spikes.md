@@ -751,3 +751,60 @@ host.docker.internal:host-gateway`, on macOS with Docker Desktop.
   ACL Denied - Topic 'spike/other/>' Queue 'q.spike.own' ... '403'`.
 - Terraform does not know client-created queues, so Cleanup has to delete
   them by name.
+
+## 21. Event Mesh: memory and DMR at the smallest settings
+
+**Ran on 10.26.0** Standard, in a Docker VM of 7.65 GiB on macOS. The two
+workshop brokers were stopped first. Containers `mesh-a` and `mesh-b` on one
+Docker network, each created with `system_scaling_maxconnectioncount=1000`
+(DMR needs it, section 3) and the smallest value of every scaling parameter
+that can be set independently: `maxqueuemessagecount=100`,
+`maxsubscriptioncount=50000`, `maxbridgecount=25`. `--shm-size=1g`.
+
+**Memory, `docker stats` after 60 s idle:**
+
+| Setting | One broker | Two brokers |
+| --- | --- | --- |
+| 1,000 connections, defaults (section 4) | 4.15 GiB | not run here |
+| 1,000 connections, smallest independent settings | 3.39 GiB | 3.28 + 3.43 = 6.71 GiB |
+| same, subscriptions at 500,000 (needed for DMR, below) | 3.81 GiB first minute, 3.25 settled | 3.25 + 3.59 = 6.84 GiB |
+| same, with the DMR link up and messages routed | | 3.23 + 3.55 = 6.78 GiB |
+
+The smaller queue-message and bridge tiers save about 0.8 GiB per broker
+against the defaults. Traffic and the link cost nothing measurable.
+
+**DMR, saw:**
+
+- With `maxsubscriptioncount=50000`, creating a DMR cluster is refused:
+  `dynamic-message-routing is not supported when the configured system
+  limit for subscriptions is 50000`. The next tier, 500,000 (the default
+  at 1,000 connections), is accepted. So DMR's floor on Standard is 1,000
+  connections and 500,000 subscriptions; queue messages (100) and bridges
+  (25) can stay at their minimum.
+- A link's remote address can only be added while the link is disabled
+  (`Cannot change connect-via unless link is disabled`): create the link
+  disabled, add the address, enable it.
+- Setup over SEMP, both sides: a `dmrClusters` entry with basic
+  authentication and a shared password; the `default` VPN with
+  `dmrEnabled`; on mesh-a a link to `mesh-b` (`initiator: local`,
+  `remoteAddresses` `mesh-b:55555`), on mesh-b the matching link
+  (`initiator: remote`); a `dmrBridges` entry in each VPN naming the other
+  node. The link reported `up` on both sides within 20 s.
+- The VPN bridges stayed `up: false, Channel(s) Missing` even after
+  messages crossed; the link's `#bridge/local/#cluster:...` client is what
+  shows the mesh on each broker's client list. The dashboard should read
+  the link, not the bridge, for the mesh's state.
+- Three guaranteed messages published on mesh-a to `mesh/order/1` arrived
+  on a queue on mesh-b subscribed to `mesh/>`, in order. Each broker had 2
+  clients connected: the mesh's own `#bridge/local/...` and the test
+  client, so the mesh itself costs one connection per link per broker,
+  nothing near the 1,000 limit.
+
+**Three brokers:** starting a third broker on the 7.65 GiB VM killed all
+three (each exited 2, `docker stats` reported 0 B). Three need about 10.1
+GiB for the brokers alone at these settings; not possible here, and this
+VM is also smaller than a 16 GB Codespace.
+
+**Not tested:** memory of two brokers in a Codespace alongside the
+dashboard, Go builds and a Chrome tab; a Codespace's docker-in-docker
+network; DMR over an external link (two Codespaces).
