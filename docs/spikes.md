@@ -808,3 +808,22 @@ VM is also smaller than a 16 GB Codespace.
 **Not tested:** memory of two brokers in a Codespace alongside the
 dashboard, Go builds and a Chrome tab; a Codespace's docker-in-docker
 network; DMR over an external link (two Codespaces).
+
+## 22. SEMP lists under a missing parent, for any script that checks
+
+Tested 2026-10-23 on the workshop broker (10.26), SEMP v2 config.
+
+- `GET /msgVpns/nope/queues` answers `responseCode: 200` with an empty
+  `data` list, though the VPN does not exist. The same holds for a child
+  list under an ACL profile that does not exist
+  (`/aclProfiles/<missing>/subscribeTopicExceptions`).
+- `GET /msgVpns/nope` and `GET /msgVpns/default/aclProfiles/<missing>`
+  answer `responseCode: 400`, `NOT_FOUND`.
+- So a script that reads "an empty list" as "nobody" or "nothing granted"
+  must first GET the parent object. `who-uses.sh` (Event APIs) and
+  `central.sh revoke` (Intermediated Governance) do.
+- A refused login answers HTTP 401 with the same JSON `meta.error`
+  (`UNAUTHORIZED`, "Authorization failed").
+- `meta.paging.nextPageUri` was followed with `count=1` over three queues;
+  `who-uses.sh` keeps only its path and query, so a mapped SEMP port
+  (18080 on a host) cannot send the next request elsewhere.
