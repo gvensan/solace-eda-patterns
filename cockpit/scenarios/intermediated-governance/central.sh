@@ -36,12 +36,35 @@ case "${1:-}" in
     echo "requested: ig/sales/order/>"
     grant inventory "$2" ;;
   revoke)
-    curl -sS -u "$AUTH" "$BASE/aclProfiles/acl-ig-inventory/subscribeTopicExceptions?select=subscribeTopicException" |
-      python3 -c 'import json,sys,urllib.parse; [print(urllib.parse.quote(e["subscribeTopicException"], safe="")) for e in json.load(sys.stdin).get("data", [])]' |
-      while read -r enc; do
-        bash "$SEMP" DELETE "/msgVpns/{vpn}/aclProfiles/acl-ig-inventory/subscribeTopicExceptions/smf,$enc" >/dev/null
-        echo "revoked: $(python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$enc")"
-      done
+    # "may subscribe to nothing" is printed only once the broker has said so:
+    # a revoke that could not list or delete a grant must not read as done.
+    # A missing profile (or VPN) lists as empty rather than failing, so ask
+    # for the profile first.
+    out="$(bash "$SEMP" GET "/msgVpns/{vpn}/aclProfiles/acl-ig-inventory" 2>&1)" ||
+      { echo "could not ask the broker: ${out##*$'\n'}"; exit 1; }
+    body="$(curl -sS -u "$AUTH" "$BASE/aclProfiles/acl-ig-inventory/subscribeTopicExceptions?count=100&select=subscribeTopicException" 2>&1)" ||
+      { echo "could not ask the broker: $body"; exit 1; }
+    grants="$(python3 -c '
+import json, sys, urllib.parse
+try:
+    body = json.loads(sys.argv[1])
+except ValueError:
+    print("could not ask the broker: " + sys.argv[1][:200]); sys.exit(1)
+meta = body.get("meta", {})
+if meta.get("responseCode") != 200:
+    err = meta.get("error", {})
+    print("could not ask the broker: %s %s: %s" % (meta.get("responseCode"), err.get("status"), err.get("description"))); sys.exit(1)
+if meta.get("paging"):
+    print("could not ask the broker: more than 100 grants, revoke the rest in Solace Broker Manager"); sys.exit(1)
+for e in body.get("data", []):
+    print(urllib.parse.quote(e["subscribeTopicException"], safe=""))
+' "$body")" || { echo "$grants"; exit 1; }
+    while read -r enc; do
+      [ -n "$enc" ] || continue
+      out="$(bash "$SEMP" DELETE "/msgVpns/{vpn}/aclProfiles/acl-ig-inventory/subscribeTopicExceptions/smf,$enc" 2>&1)" ||
+        { echo "$out"; exit 1; }
+      echo "revoked: $(python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$enc")"
+    done <<<"$grants"
     echo "the inventory team may subscribe to nothing" ;;
   *) echo "usage: central.sh approve | approve-as <topic> | revoke" >&2; exit 2 ;;
 esac
