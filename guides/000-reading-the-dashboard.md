@@ -70,6 +70,7 @@ second; nothing moves on a timer.
 | <!-- indicator: inspect-updated, refresh-button --> `Updated 10:31:05` and **Refresh** in On the broker | When the tables were last read from the broker. They are read again every 5 seconds while the page is open; **Refresh** reads them now. |
 | <!-- indicator: broker-status --> Event broker, bottom left | **Ready** means the dashboard can reach the broker. **Starting** means it is still booting, which takes about a minute. **Unreachable** means the broker container is not running. |
 | <!-- indicator: sidebar-toggle, nav-collapsed --> `«` and `»`, left of the page title | Shrinks the sidebar to pattern numbers, for more room, and back. Collapsed, point at a number to see its pattern's name. The dot at the bottom is still the broker's status. Your choice is remembered in this browser. |
+| <!-- indicator: nav-search --> Find a pattern, the box under the logo | Type part of a pattern's name or its category and the list shortens to the matches. Enter opens the first match; Escape clears the box. |
 
 | <!-- indicator: close-panel --> `×` on the side panel | Closes the panel. |
 

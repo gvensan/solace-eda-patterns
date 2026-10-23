@@ -177,6 +177,38 @@ a { color: var(--text-link); }
   background: var(--border-strong);
 }
 
+.sidebar__search {
+  flex-shrink: 0;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.sidebar__search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+.sidebar__search-input::placeholder { color: var(--text-muted); }
+
+.sidebar__search-input:focus {
+  outline: none;
+  border-color: var(--green-classic);
+}
+
+.nav-empty {
+  padding: var(--space-3);
+  font-size: var(--fs-body-sm);
+  color: var(--text-muted);
+}
+
+.app.is-collapsed .sidebar__search { display: none; }
+
 .sidebar__nav {
   display: flex;
   flex-direction: column;

@@ -10,6 +10,8 @@
     env: null,
     scenarios: [],
     activeId: null,
+    // What is typed in the sidebar's search box, lower-cased; "" shows all.
+    navQuery: "",
     /* One open log socket per action, keyed "<scenario>:<action>". Closed on
        navigation so a long session doesn't accumulate sockets. */
     sockets: new Map(),
@@ -50,6 +52,7 @@
     clearBroker: document.getElementById("clear-broker"),
     refresh: document.getElementById("refresh"),
     sidebarToggle: document.getElementById("sidebar-toggle"),
+    navSearch: document.getElementById("nav-search"),
   };
 
   /* ------------------------------------------------------------ helpers */
@@ -900,16 +903,30 @@
      guide's category. Scenarios arrive sorted by order, and order is
      category times 100 plus position, so a category's scenarios are already
      together: a heading goes in wherever the eyebrow changes. */
+  /* The search box above the list narrows it as you type, on the pattern's
+     name or its category. A category with no match disappears with its
+     patterns, so the list reads as a shorter version of itself. Numbers
+     keep their place in the full list. Collapsed, the box is hidden, so it
+     filters nothing until the sidebar opens again. */
+  function navMatches(scenario) {
+    const q = state.navQuery;
+    if (!q || state.sidebarCollapsed) return true;
+    return scenario.title.toLowerCase().includes(q) || (scenario.eyebrow || "").toLowerCase().includes(q);
+  }
+
   function renderNav() {
     let group = null;
+    const shown = state.scenarios.filter(navMatches);
     el.nav.replaceChildren(
       ...state.scenarios.flatMap((scenario, index) => {
+        if (!shown.includes(scenario)) return [];
         const heading = scenario.eyebrow && scenario.eyebrow !== group
           ? h("div", { class: "nav-group", role: "heading", "aria-level": "2", text: scenario.eyebrow })
           : null;
         group = scenario.eyebrow;
         return [heading, navItem(scenario, index)].filter(Boolean);
-      })
+      }),
+      shown.length ? null : h("div", { class: "nav-empty", text: "No pattern matches" })
     );
   }
 
@@ -1776,6 +1793,23 @@
     try { collapsed = localStorage.getItem("eda.sidebarCollapsed") === "1"; } catch (_) { /* private window */ }
     setSidebar(collapsed);
     el.sidebarToggle.addEventListener("click", () => setSidebar(!state.sidebarCollapsed));
+
+    indicator(el.navSearch, "nav-search",
+      "Type part of a pattern's name or category to shorten the list. Enter opens the first match; Escape clears");
+    el.navSearch.addEventListener("input", () => {
+      state.navQuery = el.navSearch.value.trim().toLowerCase();
+      renderNav();
+    });
+    el.navSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        el.navSearch.value = "";
+        state.navQuery = "";
+        renderNav();
+      } else if (e.key === "Enter") {
+        const first = state.scenarios.find(navMatches);
+        if (first) select(first.id);
+      }
+    });
 
     state.env = await API.env();
     el.brokerLink.href = brokerUiUrl(state.env);
