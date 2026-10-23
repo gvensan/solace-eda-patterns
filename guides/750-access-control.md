@@ -1,7 +1,8 @@
 # Access Control and Authorization
 
 A bank's payment events. The **payments** service publishes a payment
-event for every payment made, and the day's rates. The **reporting** team
+event for every payment made, and is allowed to publish the day's rates,
+though it does not until you try it below. The **reporting** team
 needs the payment events. A **partner** needs the rates, and must never
 see a payment.
 
@@ -84,7 +85,9 @@ explains the cause and where you would meet it in production.
   reconnects, so restart it to see the new rule applied.
 - Publish rates: edit the `payments` action's `--publish` to
   `ac/bank/public/rate/v1` and restart it. The partner now receives, and
-  reporting, subscribed to payments only, does not.
+  reporting, subscribed to payments only, does not. The diagram still
+  draws what Play starts, so read the logs: the partner's says "received
+  on ac/bank/public/rate/v1".
 
 ## How Solace does this
 

@@ -6,10 +6,10 @@ title: Access Control and Authorization
 summary: >
   A bank's payment events. Three apps connect under three usernames, and
   each username's ACL profile says which topics it may publish to and
-  subscribe to. The payments service publishes payments and rates;
-  reporting may only read payments; a partner may only read rates. The
-  broker enforces it at the moment an app publishes or subscribes, and says
-  so in the API's error.
+  subscribe to. The payments service publishes payments, and may also
+  publish rates, though nothing publishes them yet; reporting may only read
+  payments; a partner may only read rates. The broker enforces it at the
+  moment an app publishes or subscribes, and says so in the API's error.
 
 objectives:
   - See each app allowed exactly the topics its role needs, and nothing else
@@ -46,14 +46,16 @@ diagram:
   caption: >
     Each app connects under its own username, and each username has an ACL
     profile that allows its topics and denies the rest. The payments
-    service publishes to ac/bank/payment/ and ac/bank/public/. Reporting
-    may subscribe to payments, the partner only to rates.
+    service publishes to ac/bank/payment/, and may publish rates to
+    ac/bank/public/, where nothing is published yet. Reporting may
+    subscribe to payments, the partner only to rates, so the partner
+    receives nothing until rates are published.
   duration: 2.4
   liveWhen: payments
   nodes:
     - id: payments
       label: Payments
-      sublabel: publishes payments and rates
+      sublabel: publishes payments
       kind: app
       col: 0
       action: payments
@@ -96,7 +98,7 @@ diagram:
           semp: /msgVpns/{vpn}/aclProfiles/acl-ac-reporting
     - id: partner
       label: Partner
-      sublabel: may read rates
+      sublabel: reads rates, none sent
       kind: app
       col: 2
       action: partner
@@ -124,9 +126,11 @@ diagram:
         - label: svc-ac-partner
           semp: /msgVpns/{vpn}/clientUsernames/svc-ac-partner
   flows:
-    - { from: payments, to: broker, label: ac/bank/payment/made/v1, ac/bank/public/rate/v1, delay: 0 }
+    - { from: payments, to: broker, label: ac/bank/payment/made/v1, delay: 0 }
     - { from: broker, to: reporting, label: ac/bank/payment/>, delay: 0.8 }
-    - { from: broker, to: partner, label: ac/bank/public/>, delay: 1.0 }
+    # Nothing is published to ac/bank/public/ until the guide's Try this,
+    # so the partner's line is drawn without packets.
+    - { from: broker, to: partner, label: ac/bank/public/>, animate: false }
     - { from: refunds, to: broker, label: ac/bank/payment/refund/v1 (refused), animate: false }
     - { from: broker, to: snoop, label: ac/bank/payment/> (refused), animate: false }
 

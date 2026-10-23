@@ -13,7 +13,7 @@ unit of control: an ACL grants or denies topic patterns.
 `ac/bank/payment/made/v1/<id>` and may subscribe to anything under
 `ac/bank/`. The **reporting** team may subscribe to payment events but
 publish nothing. A **partner** may subscribe only to `ac/bank/public/>`,
-where the bank publishes rates.
+where the bank would publish rates.
 
 **Broker objects.** No queues. One client profile `cp-ac`. Three ACL
 profiles, each with publish and subscribe default `disallow` and
@@ -31,9 +31,10 @@ ACL profile and go with it, but listing them keeps Reconcile complete).
 **Apps.** `ac app --role <name> --user <username> [--subscribe <topic>]
 [--publish <topic>]`: subscribes (exits on a refusal, printing the broker's
 error and the dashboard's explanation), and publishes once a second,
-printing any refusal. Play runs payments (publishes payment events and
-rates, subscribes `ac/bank/>`), reporting (subscribes `ac/bank/payment/>`)
-and partner (subscribes `ac/bank/public/>`).
+printing any refusal. Play runs payments (publishes payment events,
+subscribes `ac/bank/>`), reporting (subscribes `ac/bank/payment/>`) and
+partner (subscribes `ac/bank/public/>`, which nothing publishes to until
+the guide's Try this: an accepted subscription is the point).
 
 **Play.** apply, build, reporting, partner, payments.
 
