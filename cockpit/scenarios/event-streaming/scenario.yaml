@@ -273,8 +273,10 @@ failure_modes:
       started and none before, so for a bike that was already out it sees
       the end and never saw the start: "end without a start for B-12:
       joined late, no history". Its "in use" sits below what the bikes
-      report, and the gap never closes. The counter, next to it, stays
-      right. Reset stops the board.
+      report until every bike it never saw start has ended once, which
+      takes about half a minute; the starts it missed are gone for good,
+      and it comes right only because every ride ends. The counter, next
+      to it, stays right. Reset stops the board.
     why: >
       A direct subscriber has no position in the stream: it gets what is
       published while it is subscribed, and nothing before. State built

@@ -41,13 +41,15 @@ the events direct and counts the same way, with no queue and no snapshot.
 2. *The board joins the stream late.* The board starts mid-stream, direct.
    It gets every event from now on, and no history: within seconds it logs
    ends for bikes it never saw start, "end without a start for B-12: joined
-   late, no history", and its count drifts below the counter's. Reset stops
+   late, no history", and its count sits below the counter's until every
+   bike it never saw start has ended once (about 30 s, measured). Reset stops
    it. `expect:` break: board `has: ["end without a start"]`; counter
    `lacks: ["end without a start"]`.
 
 **Try this.** Restart the counter with `--no-snapshot` and use card 1: it
-resumes at the right position but with an empty set, so its count is wrong
-from then on. State and position both matter. Replay (a replay log, and the
+resumes at the right position but with an empty set, so its count is low
+until every bike that was out has ended once. State and position both
+matter. Replay (a replay log, and the
 Go API's `WithMessageReplay`) is the broker's way to rebuild state from
 further back; Event Sourcing covers it.
 

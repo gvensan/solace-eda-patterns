@@ -57,16 +57,22 @@ explains the cause and where you would meet it in production.
 2. **The city board joins the stream late.** The board starts now, direct.
    It gets every event from this moment and nothing before, so for a bike
    already out it sees the end and never the start: "end without a start
-   for B-12: joined late, no history". Its count sits below the bikes' and
-   never catches up. **Reset** stops it.
+   for B-12: joined late, no history". Its count sits below the bikes'
+   until every bike it never saw start has ended once, about half a minute.
+   The starts it missed are gone for good: it comes right only because
+   every ride ends. **Reset** stops it.
 
 ## Try this
 
 - Stop the **Counter**, start **Start the counter without a snapshot** from
-  Step through it, let it run a minute, and use the first card. It resumes
-  at the right position but with no state: "in use" starts at zero and
-  drifts negative as ends arrive for bikes it forgot. Position and state
-  both matter.
+  Step through it, and let it run a minute. Press the first card's
+  **Break it**, then, instead of **Reset**, start **Start the counter
+  without a snapshot** again. It resumes at the right position but with no
+  state: "in use" starts at zero, and each bike that was out logs an "end
+  without a start" when it comes back. The count stays low until every one
+  of those bikes has ended once. Position and state both matter. The
+  snapshot on disk is still the one from before, so press **Cleanup**
+  before the next **Play**.
 - Press **Cleanup**, which deletes the queue and the snapshot together,
   then **Play**. The counter starts from zero with a fresh stream, and the
   count is right because the stream and the state began together.
