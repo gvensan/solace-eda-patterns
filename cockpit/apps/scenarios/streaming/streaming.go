@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,9 @@ func Bikes(args []string) {
 	stop := make(chan struct{})
 	go func() { solace.WaitForStop(); close(stop) }()
 	riding := map[int]bool{}
+	// Numbers start at 1 on every start of the bikes; the run tells one
+	// start's #12 from another's.
+	run := time.Now().Format("150405")
 	tick := time.NewTicker(time.Duration(float64(time.Second) / *rate))
 	defer tick.Stop()
 	for seq := 1; ; seq++ {
@@ -66,7 +70,7 @@ func Bikes(args []string) {
 			riding[bike] = true
 		}
 		id := fmt.Sprintf("B-%02d", bike)
-		payload := fmt.Sprintf(`{"seq":%d,"bike":"%s","event":"%s","inUse":%d}`, seq, id, kind, len(riding))
+		payload := fmt.Sprintf(`{"run":"%s","seq":%d,"bike":"%s","event":"%s","inUse":%d}`, run, seq, id, kind, len(riding))
 		if err := solace.PublishKeyed(svc, pub, fmt.Sprintf("es/bikes/ride/%s/v1/%s", kind, id), payload, ""); err != nil {
 			solace.Errf(*role, "publish failed: %s", err)
 		}
@@ -105,8 +109,10 @@ func (t *tally) report(published int) {
 }
 
 // Counter reads the stream from its queue and keeps the count, with a
-// snapshot of the bikes out written before each acknowledgement, so a
-// restart carries on with the right count from the right position.
+// snapshot of the bikes out and the last event applied, written before each
+// acknowledgement, so a restart carries on with the right count from the
+// right position. A crash after the snapshot but before the acknowledgement
+// brings that event back; the snapshot already has it, so it is skipped.
 func Counter(args []string) {
 	fs := flag.NewFlagSet("es counter", flag.ExitOnError)
 	user := fs.String("user", "svc-es-counter", "client username to connect as")
@@ -115,6 +121,9 @@ func Counter(args []string) {
 	queue := fs.String("queue", "q.es.rides", "the stream's queue")
 	noSnapshot := fs.Bool("no-snapshot", false, "keep the count in memory only")
 	forget := fs.Bool("forget", false, "delete the snapshot, and exit")
+	// For testing recovery only: exit as if killed once the snapshot for
+	// event n is written, before n is acknowledged.
+	crashAfter := fs.Int("crash-after-snapshot", 0, "test only: exit right after the snapshot for this event")
 	fs.Parse(args)
 
 	dir := filepath.Join(solace.Env("COCKPIT_STATE_DIR", "."), "event-streaming")
@@ -131,12 +140,22 @@ func Counter(args []string) {
 
 	t := &tally{out: map[string]bool{}, role: *role,
 		why: "the count is wrong: this app did not see the start"}
+	// The snapshot is "at <run> <seq>" and the bikes out: the state, and
+	// the position in the stream it was taken at.
+	snapRun, snapSeq := "", 0
 	if !*noSnapshot {
 		if b, err := os.ReadFile(snap); err == nil {
-			for _, bike := range strings.Fields(string(b)) {
+			f := strings.Fields(string(b))
+			if len(f) >= 3 && f[0] == "at" {
+				snapRun = f[1]
+				snapSeq, _ = strconv.Atoi(f[2])
+				f = f[3:]
+			}
+			for _, bike := range f {
 				t.out[bike] = true
 			}
-			solace.Logf(*role, "restored %d rides in use from the snapshot.", len(t.out))
+			t.seq = snapSeq
+			solace.Logf(*role, "restored %d rides in use from the snapshot, taken at #%d.", len(t.out), snapSeq)
 		}
 	}
 
@@ -153,6 +172,7 @@ func Counter(args []string) {
 
 	var mu sync.Mutex
 	published, first := 0, true
+	run := snapRun
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		payload := solace.PayloadOf(msg)
 		mu.Lock()
@@ -165,7 +185,22 @@ func Counter(args []string) {
 				solace.Logf(*role, "resumed at #%d", seq)
 			}
 		}
+		if seq, _ := solace.FieldInt(payload, "seq"); solace.FieldString(payload, "run") == snapRun && seq <= snapSeq {
+			mu.Unlock()
+			solace.Logf(*role, "#%d is already in the snapshot: skipped", seq)
+			if err := rcv.Ack(msg); err != nil {
+				solace.Errf(*role, "could not acknowledge: %s", err)
+			}
+			return
+		}
+		// The bikes number a new stream from #1 with every bike at rest; a
+		// count from the old stream does not carry over to it.
+		if r := solace.FieldString(payload, "run"); run != "" && r != run {
+			solace.Logf(*role, "the bikes started a new stream (run %s): counting from zero", r)
+			t.out = map[string]bool{}
+		}
 		note := t.apply(payload)
+		run = solace.FieldString(payload, "run")
 		published, _ = solace.FieldInt(payload, "inUse")
 		if note != "" {
 			fmt.Printf("[%s] #%d%s\n", *role, t.seq, note)
@@ -176,10 +211,14 @@ func Counter(args []string) {
 				bikesOut = append(bikesOut, b)
 			}
 			sort.Strings(bikesOut)
-			if err := os.WriteFile(snap, []byte(strings.Join(bikesOut, " ")), 0o644); err != nil {
+			if err := solace.WriteFileAtomic(snap, []byte(fmt.Sprintf("at %s %d %s", run, t.seq, strings.Join(bikesOut, " ")))); err != nil {
 				solace.Errf(*role, "could not write the snapshot: %s", err)
 				mu.Unlock()
 				return // not acknowledged: it will come back
+			}
+			if t.seq == *crashAfter {
+				solace.Errf(*role, "test: exiting after the snapshot for #%d, before acknowledging it", t.seq)
+				os.Exit(137)
 			}
 		}
 		mu.Unlock()

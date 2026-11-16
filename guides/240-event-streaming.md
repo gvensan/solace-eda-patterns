@@ -17,8 +17,9 @@ If a mark on the page is unclear, point at it, or see
 
 ## How it differs from its neighbours
 
-- **Publish-Subscribe**: events delivered and gone. No order is kept and no
-  consumer has a position.
+- **Publish-Subscribe**: events delivered and gone. Nothing is retained, no
+  consumer has a position to resume from, and a missed event is not sent
+  again.
 - **Point-to-Point** and **Guaranteed Delivery**: a queue holding messages
   for one receiver. Here the queue is the consumer's position in an ordered
   stream, and the consumer's state depends on it.
@@ -36,8 +37,11 @@ acknowledges the event.
 - **The stream's queue**: `spooledMsgCount` is the length of the stream so
   far. `msgSpoolUsage` is how far the counter is behind: near zero while it
   keeps up.
-- **The counter on q.es.rides**: `ackedMsgCount` is its position;
-  `redeliveredMsgCount` counts events it was given again after a crash.
+- **The counter on q.es.rides**: `ackedMsgCount` counts the events it has
+  acknowledged on this connection, and starts again when it reconnects.
+  Its position is the queue itself: the oldest event still there is where
+  it resumes. `redeliveredMsgCount` counts events it was given again after
+  a crash.
 
 ## Break it
 
@@ -83,9 +87,12 @@ explains the cause and where you would meet it in production.
   they were published, and removes each one only when the consumer
   acknowledges it. That is the consumer's position. After a crash the
   unacknowledged events come back marked redelivered, then the rest.
-- State is the application's: a snapshot written before each
-  acknowledgement always matches the position, which is why the counter
-  resumes correctly. Solace can also keep the stream itself for replay (a
+- Unlike a log-based streaming platform, a queue does not keep an event
+  once it is acknowledged: the consumer cannot go back and read it again.
+- State is the application's: before each acknowledgement the counter
+  writes a snapshot of its count and the event it is at, which is why it
+  resumes correctly. An event that comes back after a crash and is already
+  in the snapshot is skipped: "#32 is already in the snapshot: skipped". Solace can also keep the stream itself for replay (a
   replay log, with the Go API's `WithMessageReplay`), so a consumer can
   rebuild state from further back. Event Sourcing covers that.
 - A direct subscriber has no position: it gets what is published while it

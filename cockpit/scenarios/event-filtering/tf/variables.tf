@@ -33,6 +33,6 @@ variable "client_password" {
   # Matches SOLACE_CLIENT_PASSWORD in cockpit/app/config.py. The dashboard passes
   # both from one value, so they cannot drift apart; this default only applies
   # when terraform is run by hand outside the cockpit.
-  default     = "solace-workshop"
-  sensitive   = true
+  default   = "solace-workshop"
+  sensitive = true
 }

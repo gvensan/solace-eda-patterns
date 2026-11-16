@@ -68,8 +68,11 @@ func Stores(args []string) {
 		}
 		r, s := *region, *store
 		if s == "" {
-			r = regions[rand.Intn(len(regions))]
-			s = fmt.Sprintf("store-%03d", 1+rand.Intn(12))
+			// Each store is in one region: 001 to 004 eu, 005 to 008 us,
+			// 009 to 012 apac.
+			i := rand.Intn(12)
+			r = regions[i/4]
+			s = fmt.Sprintf("store-%03d", i+1)
 		}
 		levels := r + "/" + s
 		if *extra != "" {

@@ -473,7 +473,9 @@ context and its message's application message id, in publishing order,
 `IsPersisted()` true. Receipts arrive in batches (all five within the same
 millisecond), so a publisher that waits for each receipt before sending the
 next goes at the speed of the broker's acknowledgements, about two a second
-here. Guaranteed Delivery's tills send a backlog all at once, in order:
+here. (2026-11-16: not a general limit. Event Filtering's sensors wait for
+each acknowledgement with `PublishAwaitAcknowledgement` and measured 5 a
+second at the normal rate and 50 a second in high resolution, as set.) Guaranteed Delivery's tills send a backlog all at once, in order:
 messages from one publisher reach the queue in the order they were sent.
 
 **A queue that cannot take a message.** Ingress turned off over SEMP:
@@ -681,6 +683,11 @@ default `rejectMsgToSenderOnDiscardBehavior: when-queue-enabled`.
   queue.
 - `severity = = 4` fails at bind: `error while creating receiver flow:
   Invalid Selector` (as in section 2).
+- 2026-11-16, fill rates on q.ef.alarms with the scenario's apps: at the
+  normal rate (5 readings a second, about 134 bytes each), 672 bytes a
+  second left behind, so 10 MB in about 4.3 hours. In high resolution (50 a
+  second, 8 KB of padding), about 375 KB a second: full about 28 s after the
+  switch, then 50 refused a second (`maxMsgSpoolUsageExceededDiscardedMsgCount`).
 
 ## 19. Guaranteed messages over a loopback bridge, for Event Bridge
 
@@ -827,3 +834,106 @@ Tested 2026-10-23 on the workshop broker (10.26), SEMP v2 config.
 - `meta.paging.nextPageUri` was followed with `count=1` over three queues;
   `who-uses.sh` keeps only its path and query, so a mapped SEMP port
   (18080 on a host) cannot send the next request elsewhere.
+
+## 23. Rebuilding Event Sourcing state at start, without consuming events live
+
+Tested 2026-11-06 on the local broker with the scenario's own apps.
+
+- Replay into a temporary queue is refused. An anonymous one: "Replay Not
+  Supported on Anonymous Queue Without Subscriptions". A named temporary
+  queue fails the same way, and the Go API deletes it on unbind anyway. The
+  rebuild uses a durable exclusive queue, `q.esrc.rebuild`.
+- A receiver can add and remove a subscription on its queue
+  (`AddSubscription`, `RemoveSubscription`; the client profile must allow
+  guaranteed endpoint creation). The ledger adds `esrc/bank/account/>`
+  before the replay and removes it after, so no live event collects in the
+  queue between restarts. After a run the queue's subscriptions were only
+  `esrc/bank/marker/>`, and `msgSpoolUsage` was 0 with no messages listed.
+  The queue's `spooledMsgCount` keeps climbing (115, then 180): it is a
+  running total, not what the queue holds now.
+- The replay replaces the queue's contents, and it delivers only logged
+  messages that match the queue's subscriptions.
+- End of replay: the ledger publishes a marker on
+  `esrc/bank/marker/<client>/<nanos>` once the replay has started, and the
+  queue subscribes to that topic statically. The marker arrived after every
+  replayed event each time: rebuilt from 24, 44 and 64 events, matching the
+  last `seq`, with no order errors.
+- Trimming the replay log (`trimLoggedMsgs`) leaves a ledger with nothing to
+  rebuild from, and it starts from 0.00. Nothing can tell an emptied
+  history from a new one without a record kept elsewhere. An earlier design
+  kept the newest event in a last-value queue for that; it was removed
+  because covering a stand-in's weakness is not event sourcing. The demo
+  states the assumption of a durable history instead.
+- Crash between recording an event and acknowledging its command
+  (`esrc ledger --crash-after-record 30`, test only): on restart the command
+  came again, and the rebuilt history (each event names its command) let the
+  ledger log "already recorded as event #30 ... not recorded twice".
+- Not forced: a publish whose confirmation never comes. The code exits so a
+  restart rebuilds, unverified.
+- 2026-11-16: the marker's place is documented, not only observed. The
+  message replay page says live messages "are not sent to the endpoint under
+  replay" and "When replay completes, the endpoint begins receiving live
+  messages"; replayed messages keep their original order across topics.
+- 2026-11-16, corrected the same day: that holds only for a marker the
+  replay log keeps. The same page says live messages during a replay are
+  written to the replay log and reach the endpoint from it. With the log
+  filtered to `esrc/bank/account/>`, the marker was not logged. A history of
+  3650 events (fast teller, about 690 KB of the 1 MB log): the replay
+  completed (`replayState` complete, the queue empty, every event acked),
+  but the marker never arrived and the ledger waited for good, with no
+  error. The earlier runs, with 24 to 64 events, finished the replay before
+  the marker was published, which hid it. Fix: the replay log also keeps
+  `esrc/bank/marker/>`, and the ledger skips markers from earlier starts.
+  Then five restarts in a row each rebuilt from 3650 events, in 0.1 to 1.4
+  s. The ledger also stops with "rebuild stalled" after 30 s with nothing
+  received and no marker (not forced).
+- 2026-11-16, history trimmed while the ledger ran, then the ledger killed
+  and started: the replay began at event #29, and the ledger stopped with
+  "the history starts at event #29, not #1: the events before it are
+  missing" (exit 1). Before this fix it logged the gap and carried on with
+  the balance the event carried, so the balances looked right. Trimmed
+  again with the ledger stopped: it rebuilt from 0 events; killed after 26
+  more, it rebuilt from 26.
+
+## 24. CQRS: a write side killed between saving and acknowledging
+
+Tested 2026-11-16 on the local broker with the scenario's own apps, using
+the test-only flags `cqrs write --crash-after-save N` and
+`--crash-after-publish N`.
+
+- Before the fix, a kill after saving an order but before acknowledging its
+  command (found in review, from the code): the command came back on
+  restart and was saved again under a new order number. A kill before the
+  publish also lost the first order's event, so the Order Service and Order
+  History tables disagreed for good.
+- After the fix (each order keeps its command id; a command that comes back
+  is recognised and its event published again; the read side skips an
+  order number it has applied):
+  - Killed after saving #16, before publishing: on restart "command
+    161920-16 was already placed as order #16 before the restart: not
+    placed twice, its event published again". The order history applied #16
+    once; the database held one #16.
+  - Killed after publishing #25, before acknowledging: the same log line,
+    and the order history logged "order #25 again: already applied,
+    ignored". One #25 in the database.
+  - Afterwards: "41 orders in all ... Latest: order #41" and "Built from 41
+    orders, up to order #41".
+
+## 25. Event Streaming: a counter killed between its snapshot and its acknowledgement
+
+Tested 2026-11-16 on the local broker, with the test-only
+`es counter --crash-after-snapshot N`.
+
+- Killed after the snapshot for #32, before acknowledging it: the counter
+  "restored 20 rides in use from the snapshot, taken at #32", "resumed at
+  #32, delivered again after the last stop", and "#32 is already in the
+  snapshot: skipped". Before the fix the snapshot had no position, so #32
+  was applied twice; for an end, that logged a false "end without a start".
+- Pause, then Play: the bikes number from #1 again with every bike at rest.
+  Before the fix the counter kept the old stream's bikes and read 24 in use
+  against the bikes' 4. With a run id on every event it logs "the bikes
+  started a new stream" and counts from zero: 11 against 11, then 9 and 9.
+- 2026-11-16: `ackedMsgCount` on q.es.rides/txFlows is per flow, not the
+  counter's position. The counter stopped and started: flow 115 had acked
+  129, the new flow 116 started from zero (45 after 8 s). The guide says
+  the position is the queue itself.

@@ -26,19 +26,31 @@ If a mark on the page is unclear, point at it, or see
 - **Exclusive Consumer**: still one reader at a time, but with a standby
   waiting to take over. Here there is no standby.
 
-## Watch it work
+## Run it
 
 The Order Service's log shows each job and the broker accepting it. The Label
 Printer's log shows the same job numbers, in order.
 
 The sender addresses the queue itself. Its topic is the queue's network
 topic, `#P2P/QUE/q.p2p.labels`, which delivers to that queue and nothing
-else. Under **On the broker**, open **Queue**: the queue has no topic
-subscriptions at all, yet it receives every job.
+else. In Solace Broker Manager, open **Queues**, then q.p2p.labels: its
+**Subscriptions** tab is empty. The queue has no topic subscriptions at all,
+yet it receives every job.
 
 Many systems do point-to-point with an ordinary topic that exactly one
 queue subscribes to. That works too; addressing the queue by name just makes
 the "one destination" explicit.
+
+## On the broker
+
+- **Queue**: `msgSpoolUsage` is what waits for the printer, near zero while
+  it keeps up, against its 1 MB limit (`maxMsgSpoolUsage`).
+  `maxMsgSpoolUsageExceededDiscardedMsgCount` counts jobs refused because
+  the queue was full.
+- **Reader of q.p2p.labels**: the printer's connection to the queue, and the
+  jobs it has acknowledged.
+- **Client profile**: `rejectMsgToSenderOnNoSubscriptionMatchEnabled` is the
+  setting the second card relies on.
 
 ## Break it
 
@@ -69,5 +81,20 @@ explains the cause and where you would meet it in production.
 - Raise `max_msg_spool_usage` in
   `cockpit/scenarios/point-to-point/tf/queues.tf` to 5 and press **Play**. The
   same outage now lasts about two minutes before anything is refused.
+
+## How Solace does this
+
+- A durable queue keeps each guaranteed message until its receiver
+  acknowledges it. The sender's publish is confirmed once the broker has
+  stored the job, so the sender knows it is safe without knowing whether the
+  printer is there.
+- The sender can address the queue by name, with its network topic
+  `#P2P/QUE/<queue>`, or publish to a topic the queue subscribes to.
+- Delivery is at least once. If the printer crashed after printing a job but
+  before acknowledging it, the broker would send that job again, so a real
+  receiver must tolerate a repeat (here, it would print twice).
+- A full queue refuses new messages back to the sender, which is told; a
+  message that matches no queue or subscriber is dropped silently unless the
+  client profile says to refuse it.
 
 Next: [Request-Reply](230-request-reply.md).

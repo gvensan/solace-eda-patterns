@@ -26,8 +26,9 @@ pattern:
     Consumers want subsets of a large stream: one site, one kind of sensor,
     one severity.
   cost: >
-    Filtering on content is evaluated for every message, and on Solace a
-    selector leaves what it does not match on the queue.
+    Filtering on message properties with a selector is evaluated for every
+    message, and on Solace a selector leaves what it does not match on the
+    queue.
   solace: >
     Topic subscriptions with wildcards first. Message selectors on a queue
     binding when a property is needed; partitioned queues refuse them.
@@ -233,8 +234,8 @@ failure_modes:
       The sensors switch to high resolution: ten times the readings, each
       far bigger. Almost none of them are alarms.
     watch: >
-      The card shows the sensors. q.ef.alarms grows by hundreds of readings
-      a second: everything the selector does not match stays there. Within
+      The card shows the sensors. q.ef.alarms grows by about 45 readings a
+      second, 8 KB each: everything the selector does not match stays there. Within
       half a minute it reaches its 10 MB quota, and from then on the broker
       refuses the readings: "Spool Over Quota". Every reading is refused,
       not just at the alarm queue: Berlin temperatures stops receiving too,
@@ -246,7 +247,9 @@ failure_modes:
       decides which of them this consumer is given. The rest wait for a
       consumer that will never take them, and use the queue's quota. Once
       the quota is gone, the broker refuses the message outright, so the
-      publisher is told, and no queue gets it.
+      publisher is told, and no queue gets it: with the queue's
+      reject-msg-to-sender-on-discard setting on, as here and by default, a
+      refused message is stored nowhere.
     real_world: >
       A filter on a field that was not designed into the topic, working fine
       in testing and filling a queue in production weeks later. Put what
@@ -258,6 +261,8 @@ failure_modes:
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
       - label: "Using selectors"
         url: https://docs.solace.com/API/API-Developer-Guide/Using-Selectors.htm
+      - label: "Broker: configuring queues (message discard handling)"
+        url: https://docs.solace.com/Messaging/Guaranteed-Msg/Configuring-Queues.htm
     node: sensors
     logs: sensors-hires
     trigger:
@@ -335,7 +340,7 @@ inspect:
     columns: [queueName, msgSpoolUsage, maxMsgSpoolUsage, spooledMsgCount]
     ui_hint: Manager → Queues
     empty: No queue yet. Press Play.
-  - label: What each queue subscribes to
+  - label: What q.ef.berlin subscribes to
     kind: semp
     path: /msgVpns/{vpn}/queues/q.ef.berlin/subscriptions
     columns: [queueName, subscriptionTopic]

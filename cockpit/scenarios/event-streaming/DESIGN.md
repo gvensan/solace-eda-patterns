@@ -54,9 +54,19 @@ Go API's `WithMessageReplay`) is the broker's way to rebuild state from
 further back; Event Sourcing covers it.
 
 **Differs from neighbours.** Publish-Subscribe: events delivered and gone;
-no order kept, no position. Point-to-Point and Guaranteed Delivery: a queue
+nothing retained, no position to resume from, no redelivery. Point-to-Point and Guaranteed Delivery: a queue
 holding messages for one receiver; here the queue is a position in an
 ordered stream and the consumer's state depends on it.
 
 **Spike.** None: guaranteed consumption with client acknowledgement and
 redelivery after a kill are measured (sections 6 and 12).
+
+**Snapshot position, 2026-11-16 review.** The snapshot is `at <run> <seq>`
+and the bikes out: the state and the position it was taken at. An event
+delivered again after a crash between the snapshot and the acknowledgement
+is skipped (it used to be applied twice, and an end logged a false "end
+without a start"). The bikes stamp each start with a run id, numbering
+from #1; a counter that sees a new run counts from zero, since every bike
+is at rest in the new stream (Pause then Play used to leave the counter
+far from the bikes' figure). Tested with the test-only
+`--crash-after-snapshot`.

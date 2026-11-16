@@ -287,7 +287,9 @@ failure_modes:
       A guaranteed message is only the broker's responsibility once the
       broker has confirmed it. Until then it is the publisher's: the tills
       keep each purchase until its receipt says it was stored, and resend
-      one that was refused. This queue is set to refuse
+      one that was refused. Here that outbox is in memory, so it survives a
+      refusal but not a till crash; a real till keeps it on disk, as the
+      points service keeps its record. This queue is set to refuse
       (reject_msg_to_sender_on_discard_behavior "always"). With the default,
       "when-queue-enabled", a purchase sent to it with ingress off is
       confirmed to the tills and then dropped, without a word.

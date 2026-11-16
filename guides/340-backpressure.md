@@ -62,14 +62,16 @@ explains the cause and where you would meet it in production.
    against 40 arriving. Writes pile up in the reporter, and at 50 pending it
    pauses its own intake: "paused with 50 writes pending". The broker keeps
    sending until 100 are unacknowledged (**The reporter on q.bp.readings**,
-   `unackedMsgCount` 100), then stops, and the readings wait on the queue:
+   `unackedMsgCount` 100; the 50 not yet handed to the reporter wait in the
+   API's buffer), then stops, and the readings wait on the queue:
    the diagram counts them on `q.bp.readings`. **Reset** brings the database
    back. The reporter resumes, works through what waited, says "caught up",
    and no reading is missing.
 2. **The live display falls behind.** It now takes 250 ms to show a
    reading: 4 a second, against 40 arriving. Nothing waits for a direct
    subscriber. The API's buffer of 20 fills, and it drops the oldest to make
-   room: "dropped 60 readings in the last 2 s (oldest first)". The reading
+   room: "dropped 72 readings in the last 2 s (oldest first)", about 80
+   arriving against 8 shown. The reading
    on screen stays less than a second old, which is what a live display
    wants. The reporter misses nothing. **Reset** stops the drops.
 
@@ -77,9 +79,10 @@ explains the cause and where you would meet it in production.
 
 - Stop the **Live Display**, start **Start the live display, dropping the
   newest** from Step through it, and use the second card. Now the API keeps
-  the old readings and drops the new ones: the display keeps showing older
-  and older readings ("12.4 s old"). Drop-latest is also the Go API's
-  default, with a buffer of 50.
+  the old readings and drops the new ones: the display shows readings about
+  5 seconds old (20 waiting, shown at 4 a second), against under a second
+  with drop-oldest. The newest readings are the ones thrown away.
+  Drop-latest is also the Go API's default, with a buffer of 50.
 - Stop the **Reporter** for a minute, then start it again. The readings
   waited on the queue, and it writes every one.
 
@@ -88,10 +91,14 @@ explains the cause and where you would meet it in production.
 - Solace pushes messages to consumers. For guaranteed messages the brake is
   the number of messages a consumer holds unacknowledged: the queue's
   `max_delivered_unacked_msgs_per_flow`. A Go consumer can also `Pause()` and
-  `Resume()` its receiver.
+  `Resume()` its receiver, which stops the API handing it messages; the
+  broker still fills the API's buffer up to the unacknowledged limit.
 - A direct-published message is stored by any queue whose subscription
   matches it (measured: `docs/spikes.md`, section 13), so one stream can
-  feed a guaranteed consumer and a direct one.
+  feed a guaranteed consumer and a direct one. The guarantee then starts at
+  the queue: the sensors are not told whether a reading was stored, and a
+  reading lost before it is stored is never known. A real compliance feed
+  would publish guaranteed (see [Guaranteed Delivery](330-guaranteed-delivery.md)).
 - For direct messages there is no per-message brake. The Go API buffers
   them and, when the buffer is full, drops the oldest
   (`OnBackPressureDropOldest`) or the newest (`OnBackPressureDropLatest`),

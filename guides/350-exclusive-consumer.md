@@ -12,10 +12,19 @@ a time. The rest wait on standby.
 Press **Play**. It creates the queue, starts **Ledger A**, then **Ledger B**,
 then the **Payments Service**, which publishes a posting every half second.
 
-## Watch who is active
-
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
+
+## How it differs from its neighbours
+
+- **One consumer, no queue sharing**: a crash stops the ledger until someone
+  restarts it. Here a standby is already bound and takes over.
+- **Competing Consumers**: a non-exclusive queue with two consumers would
+  have both working at once. That is the right shape for throughput, but
+  two writers can apply postings out of order. The exclusive queue keeps one
+  writer and a spare.
+
+## Run it
 
 In the diagram, Ledger A says **active consumer** and Ledger B says
 **standby**. Both are running and both are bound to
@@ -33,17 +42,14 @@ Every consumer starts on standby. The Go API tells an app when the broker
 makes it active, through the receiver's activation and passivation listener,
 and that is the line each ledger prints.
 
-Under **On the broker**, open **Consumers on q.excl.postings**. Both ledgers
-are listed. `activityState` is `active-consumer` for A and `inactive` for B.
+## On the broker
 
-## Why not just one consumer, or a shared queue?
-
-With one consumer, a crash stops the ledger until someone restarts it.
-
-With a non-exclusive queue and two consumers, both would work at once. That
-is the right shape for throughput (see Competing Consumers), but two writers
-can apply postings out of order. The exclusive queue keeps one writer and a
-spare.
+- **Queue**: `accessType` is `exclusive`. `lastSpooledMsgId` minus
+  `highestAckedMsgId` is roughly the backlog.
+- **Consumers on q.excl.postings**: both ledgers are listed.
+  `activityState` is `active-consumer` for the active one and `inactive`
+  for the standby; `unackedMsgCount` is what the active one holds.
+- **Connected clients**: the two ledgers and the payments service.
 
 ## Break it
 
@@ -61,10 +67,14 @@ After a crash card, the ledgers have swapped roles, so the next card hits the
 other ledger.
 
 1. **The active ledger crashes.** The active ledger is killed while it is
-   applying postings. The standby turns active within a moment and carries on
-   from the posting after the crashed ledger's last. Anything the crashed
-   ledger had taken but not acknowledged comes first, marked
-   `(redelivered)`: at most 5, and fewer when it was keeping up. Reset starts
+   applying postings. The standby turns active within a moment and starts at
+   the oldest posting the broker had no acknowledgement for: usually the one
+   the crashed ledger was working on, sometimes one or two it had already
+   applied whose acknowledgement had not yet left the process. Those come
+   first, marked `(redelivered)`: at most 5, and fewer when it was keeping
+   up. Compare the crashed ledger's last number with the first here:
+   nothing is skipped, and a repeated number is the duplicate a real ledger
+   must recognise. Reset starts
    the crashed ledger again, and it joins as the new standby: the broker does
    not hand the queue back.
 2. **The active ledger hangs, so nothing is consumed.** The active ledger
@@ -77,8 +87,8 @@ other ledger.
    seconds), and only then does the standby take over, starting with those 5
    postings marked `(redelivered)`.
 
-The second card is the limit of the pattern. The broker fails over when a
-session ends. It cannot tell a slow consumer from a stuck one. In production,
+The second card is the limit of the pattern. The broker fails over when the
+active consumer unbinds or its session ends. It cannot tell a slow consumer from a stuck one. In production,
 pair an exclusive queue with a health check that restarts a consumer that
 stops making progress.
 
@@ -90,7 +100,22 @@ stops making progress.
   `lastSpooledMsgId` pull ahead of `highestAckedMsgId` under **Queue**. Start
   either ledger: it becomes active and works through the backlog in order.
 - Change `max_delivered_unacked_msgs_per_flow` in
-  `cockpit/scenarios/exclusive-consumer/tf/queues.tf`, press **Play**, and run
-  the second card again. A stalled ledger holds exactly that many postings.
+  `cockpit/scenarios/exclusive-consumer/tf/queues.tf`, press **Play**, then
+  stop and start both ledgers so they bind with the new limit, and run the
+  second card again. A stalled ledger holds exactly that many postings.
+
+## How Solace does this
+
+- A queue's access type is exclusive or non-exclusive. On an exclusive
+  queue the first consumer to bind is active and the rest are standbys;
+  the broker delivers to the active one only.
+- The Go API tells each receiver when it becomes active or standby, with
+  `WithActivationPassivationSupport` (`docs/spikes.md`, section 8).
+- When the active consumer unbinds or its session ends, the broker makes a
+  standby active and delivers, first and in order, every message the old
+  one had not acknowledged, marked redelivered.
+- A consumer that stalls but stays connected keeps the queue: it holds up
+  to `max_delivered_unacked_msgs_per_flow` messages and nothing moves on.
+  Detecting that is the application's job.
 
 Next: [Competing Consumers](410-competing-consumers.md).

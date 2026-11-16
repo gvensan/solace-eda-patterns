@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,8 +68,9 @@ func Tills(args []string) {
 		os.Exit(1)
 	}
 
-	// Ids carry this run, so a restarted till never reuses one.
-	run := fmt.Sprintf("%03d", time.Now().Unix()%1000)
+	// Ids carry this run, so a restarted till never reuses one: the points
+	// service keeps its record across runs, and would skip a reused id.
+	run := strconv.FormatInt(time.Now().UnixMilli(), 36)
 	topic := resource.TopicOf("gd/loyalty/points/earned/v1/tills")
 
 	var mu sync.Mutex
@@ -341,7 +343,9 @@ func Points(args []string) {
 		again := st.applied[id]
 		if err := st.award(id, customer, points); err != nil {
 			solace.Errf(*role, "could not record %s: %s", id, err)
-			return // not acknowledged: the broker will deliver it again
+			// Not acknowledged: it holds a slot in the window, and the
+			// broker delivers it again after a reconnect or restart.
+			return
 		}
 		note := ""
 		if prev, ok := last[run]; ok && seq > prev+1 {

@@ -164,5 +164,8 @@ func Ledger(args []string) {
 
 	solace.WaitForStop()
 	fmt.Println()
+	if stalled() {
+		solace.Logf(*role, "asked to stop, but frozen: it cannot finish the posting it holds")
+	}
 	solace.Logf(*role, "stopped after applying %d posting(s), %d of them redelivered.", applied, redelivered)
 }

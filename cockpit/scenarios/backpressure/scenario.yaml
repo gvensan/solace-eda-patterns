@@ -253,9 +253,13 @@ failure_modes:
       The broker pushes guaranteed messages to a consumer until the queue's
       max_delivered_unacked_msgs_per_flow is reached, then waits for
       acknowledgements. The reporter acknowledges a reading only once it is
-      written, so a slow database holds it at that limit. It also pauses its
-      own intake (Pause, then Resume), so the readings it has not started on
-      wait in the API's window and on the queue, not in its memory.
+      written, so the broker stops at 100 unacknowledged and the rest wait
+      on the queue. Pause stops the API handing the reporter more, so its
+      own write queue stops at 50; the other 50 sit in the API's buffer,
+      still in the process. The broker's limit, not Pause, is what keeps
+      memory flat. The readings are published direct, so the guarantee
+      starts at the queue: a reading lost before it is stored is never
+      known.
     real_world: >
       A database, a downstream API or a disk that slows down for a while. A
       consumer that keeps taking messages it cannot process grows its memory
@@ -294,7 +298,7 @@ failure_modes:
       The card shows the display. There is no queue and no broker-side
       brake for direct messages: the API's buffer of 20 fills, and it drops
       the oldest readings to make room. Every 2 seconds the display says
-      how many it dropped, "dropped 60 readings in the last 2 s (oldest
+      how many it dropped, about 70: "dropped 72 readings in the last 2 s (oldest
       first)", and yet the reading it shows stays less than a second old:
       on a live display, that is the right trade. The reporter, reading the
       same sensors through its queue, misses nothing. Reset brings the

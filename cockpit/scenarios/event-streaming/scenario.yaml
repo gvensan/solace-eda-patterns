@@ -28,8 +28,10 @@ pattern:
     A consumer has to keep its position and its state in step, and one that
     joins late has no history unless something replays it.
   solace: >
-    A queue per consumer keeps the order, and acknowledgements are the
-    position. A replay log can feed history to a consumer that needs it.
+    Here a queue per consumer stands in for the stream: it keeps the order,
+    and acknowledgements are the position. It is not a retained log: an
+    acknowledged event is gone, and a new consumer cannot read from the
+    start. A replay log can feed history to a consumer that needs it.
   related: [event-sourcing, publish-subscribe, partitioning]
   guide: https://solace.com/event-driven-architecture-patterns/#streaming
 
@@ -223,17 +225,20 @@ failure_modes:
       The card shows the counter. Its node goes red, and the count on
       q.es.rides in the diagram starts climbing: the stream goes on, and
       the queue holds the counter's place in it. Press Reset. The counter
-      says "restored 23 rides in use from the snapshot", then "resumed at
-      #812, delivered again after the last stop": the events it held
-      unacknowledged come back first, then the rest, in order. Its "in use"
+      says "restored 23 rides in use from the snapshot", then usually
+      "resumed at #812, delivered again after the last stop": the events it
+      held unacknowledged come back first, then the rest, in order. (Killed
+      between events, with none unacknowledged, it says "resumed at #812".) Its "in use"
       stays equal to what the bikes report, with no "end without a start".
     why: >
       A stream consumer has two things to keep: its position in the stream
       and the state it built from it. The queue keeps the position: an
       event is removed only when acknowledged, so a crashed consumer gets
       the unacknowledged ones again and everything after. The snapshot
-      keeps the state: the counter writes its set of bikes before each
-      acknowledgement, so what it restores matches where it resumes.
+      keeps the state: before each acknowledgement the counter writes its set
+      of bikes and the event it is at, so what it restores matches where it
+      resumes, and an event delivered again that the snapshot already holds
+      is skipped.
     real_world: >
       Running totals, sessions, fraud windows, inventory. A consumer that
       keeps state in memory alone starts from nothing after a restart and

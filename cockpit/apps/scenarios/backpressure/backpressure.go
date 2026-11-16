@@ -126,6 +126,7 @@ func Reporter(args []string) {
 	var mu sync.Mutex
 	pending, written, lastSeq := 0, 0, 0
 	paused, behind := false, false
+	var pauseDone chan struct{} // closed once the latest Pause has returned
 
 	go func() {
 		for msg := range writes {
@@ -152,7 +153,14 @@ func Reporter(args []string) {
 			}
 			if paused && pending <= *low {
 				paused = false
-				if err := rcv.Resume(); err != nil {
+				// Resume only after the Pause has happened, or a late Pause
+				// would leave the receiver paused for good.
+				done := pauseDone
+				mu.Unlock()
+				<-done
+				err := rcv.Resume()
+				mu.Lock()
+				if err != nil {
 					solace.Errf(*role, "could not resume: %s", err)
 				}
 				solace.Logf(*role, "resumed with %d writes pending; the queue sends the readings that waited", pending)
@@ -176,7 +184,10 @@ func Reporter(args []string) {
 		if !paused && pending >= *high {
 			paused, behind = true, true
 			// Pause from outside the handler: the API delivers no more to it.
+			done := make(chan struct{})
+			pauseDone = done
 			go func() {
+				defer close(done)
 				if err := rcv.Pause(); err != nil {
 					solace.Errf(*role, "could not pause: %s", err)
 				}

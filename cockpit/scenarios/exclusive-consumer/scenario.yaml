@@ -28,8 +28,8 @@ pattern:
     disconnecting keeps the queue to itself.
   solace: >
     An exclusive queue: the first consumer to bind is active and the rest
-    are standbys. The broker fails over when the active consumer's session
-    ends.
+    are standbys. The broker fails over when the active consumer unbinds
+    or its session ends.
   related: [competing-consumers, partitioning, consumer-groups]
   guide: https://solace.com/event-driven-architecture-patterns/#exclusive-consumer
 
@@ -244,12 +244,14 @@ failure_modes:
       chance to finish what it holds.
     watch: >
       The card shows the standby's log. It prints ACTIVE within a moment,
-      then carries on from the posting after the last one the crashed ledger
-      finished. Anything the crashed ledger had taken but not acknowledged
-      comes first, marked (redelivered). That is at most 5, the queue's
-      limit, and fewer when it was keeping up. Compare the last number in the
-      crashed ledger's log with the first after ACTIVE here: nothing is
-      skipped. In the diagram, the standby turns active. Reset starts the
+      then starts at the oldest posting the broker had no acknowledgement
+      for: usually the one the crashed ledger was working on, sometimes one
+      or two it had already applied whose acknowledgement had not yet left
+      the process. Those come first, marked (redelivered): at most 5, the
+      queue's limit, and fewer when it was keeping up. Compare the last
+      number in the crashed ledger's log with the first after ACTIVE here:
+      nothing is skipped, and a repeated number is the duplicate a real
+      ledger must recognise. In the diagram, the standby turns active. Reset starts the
       crashed ledger again, and it joins as the new standby. The broker does
       not hand the queue back.
     why: >

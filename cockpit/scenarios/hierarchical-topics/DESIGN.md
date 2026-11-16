@@ -11,7 +11,8 @@ publishers and subscribers.
 
 **Story.** A retail chain. Every sale is published to
 `ht/retail/<region>/<store>/<department>/sale/v1/<sale>`, four a second
-across three regions, twelve stores and four departments. Teams subscribe:
+across three regions, twelve stores (four per region: 001 to 004 eu, 005 to
+008 us, 009 to 012 apac) and four departments. Teams subscribe:
 electronics (`ht/retail/*/*/electronics/sale/v1/>`, one department across
 every store), eu (`ht/retail/eu/>`, one region, everything in it), audit
 (`ht/retail/>`, everything).

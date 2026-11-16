@@ -15,7 +15,8 @@ the fact.
 
 Press **Play**. It creates the usernames, starts the **Electronics**, **EU**
 and **Audit** teams, then the **Stores**, which publish four sales a second
-from twelve stores in three regions and four departments.
+from twelve stores in three regions (store-001 to 004 in eu, 005 to 008 in
+us, 009 to 012 in apac) and four departments.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
@@ -43,8 +44,9 @@ the subscriptions.
 ## On the broker
 
 - **Connected clients**: `dataTxMsgCount` is what the broker sent each
-  team. Audit's matches the stores' `dataRxMsgCount`; EU's is about a third
-  of it, electronics' about a quarter.
+  team. Audit's roughly matches the stores' `dataRxMsgCount` (counted since
+  each last connected); EU's is about a third of it, electronics' about a
+  quarter.
 - **What the electronics team subscribed to** and **What the EU team
   subscribed to**: the subscriptions as the broker holds them.
 
@@ -71,20 +73,26 @@ explains the cause and where you would meet it in production.
 
 ## Try this
 
-- Start a team of your own: edit the `eu-sales` action's `--topic` in
-  `cockpit/scenarios/hierarchical-topics/scenario.yaml` to
-  `ht/retail/*/store-007/>` and start it from Step through it. One store,
-  wherever it is: `*` for the region, the store by name, `>` for the rest.
-- Change it to `ht/retail/*/*/*/sale/v1/>` and start it again: every sale,
+- Start a team of your own, in a terminal at the repository's root:
+  `bash cockpit/apps/run.sh ht team --role mine --topic 'ht/retail/*/store-007/>' --client-name ht-mine`.
+  One store, wherever it is: `*` for the region, the store by name, `>` for
+  the rest. Stop it with Ctrl+C.
+- Run it again with `--topic 'ht/retail/*/*/*/sale/v1/>'`: every sale,
   spelled out level by level. It matches the same as `ht/retail/>` today,
   and would stop matching after the second card's change.
+- Run it with `--topic 'ht/retail/eu/store-00*/>'`: a `*` at the end of a
+  level after a prefix matches the rest of that level, here store-001 to
+  store-004.
 
 ## How Solace does this
 
 - A topic is a string of levels separated by `/`, up to 250 bytes. A
   subscription is a topic with optional wildcards: `*` matches exactly one
   level, and `>` as the last level matches one or more levels that follow.
-  The broker matches every published message against every subscription.
+  `*` can also end a prefix within a level: `store-00*` matches store-001
+  to store-009. A `*` anywhere else in a level, and a `>` anywhere but alone
+  as the last level, are ordinary characters. The broker matches every
+  published message against every subscription.
 - A well-formed subscription that matches nothing is accepted without
   comment. The broker does not know what topics a publisher intends to
   use, so it cannot warn.

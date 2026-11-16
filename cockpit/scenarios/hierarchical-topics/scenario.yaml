@@ -28,8 +28,10 @@ pattern:
     The levels are a contract: changing them, or adding one, quietly breaks
     subscriptions that relied on the old shape.
   solace: >
-    Topics are levels separated by /, with * for one level and > for
-    everything after. The broker matches them as it routes.
+    Topics are levels separated by /. In a subscription, * matches one
+    level (or the rest of a level after a prefix), and >, only as the last
+    level, matches one or more levels. The broker matches them as it
+    routes.
   related: [event-filtering, publish-subscribe, access-control]
   guide: https://solace.com/event-driven-architecture-patterns/#hierarchical-topics
 
@@ -189,8 +191,8 @@ actions:
     long_running: true
     variant: primary
     description: >
-      Publishes four sales a second from twelve stores in three regions and
-      four departments, direct.
+      Publishes four sales a second from twelve stores in three regions
+      (four stores each) and four departments, direct.
 
   - id: stores-till
     label: Start the stores with a new till system

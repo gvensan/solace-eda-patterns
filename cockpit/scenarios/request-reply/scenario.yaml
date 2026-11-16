@@ -5,8 +5,8 @@ eyebrow: Communication Patterns
 title: Request-Reply
 summary: >
   A supermarket till needs the price of an item before it can ring it up,
-  so it asks and waits for the answer. On Solace that is two direct
-  messages: the request goes to whoever is subscribed to the request topic
+  so it asks and waits for the answer. With the Solace Go API, as here,
+  that is two direct messages: the request goes to whoever is subscribed to the request topic
   right now, and the reply comes back on a topic made for the asker. No
   reply within the timeout is an answer too, and the till is told.
 
@@ -14,7 +14,7 @@ objectives:
   - See a request answered, and who answered it, in a few milliseconds
   - See what the asker is told when nobody is there to answer
   - See a reply that arrives after the asker gave up, and what happens to it
-  - Learn why request-reply on Solace is direct messaging, and what that means
+  - Learn why request-reply with the Go API is direct messaging, and what that means
 
 pattern:
   what: >
@@ -23,11 +23,13 @@ pattern:
   when: >
     The asker needs an answer now to carry on: a price, a balance, a check.
   cost: >
-    Both sides must be up at the same moment, a slow replier slows every
-    asker, and timeouts and retries are the asker's job.
+    With direct messages, as here, both sides must be up at the same
+    moment. A slow replier slows every asker, and timeouts and retries are
+    the asker's job.
   solace: >
-    Two direct messages: a request on a topic, and a reply on a topic made
-    for the asker. The Go API offers request-reply on direct messaging.
+    With the Go API, as here, two direct messages: a request on a topic,
+    and a reply on a topic made for the asker. Other Solace APIs can also
+    send a request as a guaranteed message to a queue.
   related: [point-to-point, publish-subscribe, cqrs]
   guide: https://solace.com/event-driven-architecture-patterns/#request-reply
 
@@ -235,10 +237,12 @@ failure_modes:
       The pricing service restarts taking 3 seconds per answer, longer than
       the till waits.
     watch: >
-      The card shows the till. Every request times out after 2 seconds. A
-      second later the pricing service's log says it replied: the reply
-      arrived after the till had given up, and the till's API discarded it
-      without a word. Reset restarts the pricing service at normal speed.
+      The card shows the till. Every request times out after 2 seconds. The
+      pricing service answers one request at a time, 3 seconds each, while
+      the till asks one a second, so requests pile up in front of it. Its
+      log still says "replied" for each, later and later, long after the
+      till gave up, and the till's API discards those replies without a
+      word. Reset restarts the pricing service at normal speed.
     why: >
       The timeout is the asker's. Once it passes, the API reports the error
       and stops waiting for that request; a reply that comes later has no

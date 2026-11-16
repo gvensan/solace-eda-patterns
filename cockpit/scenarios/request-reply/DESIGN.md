@@ -35,9 +35,10 @@ instance).
    `has: ["request #\d+ for SKU-\d+: .*imeout"]` (exact text from the run).
    Reset: till `has: ["answered by pricing in \d+ ms"]`.
 2. *The pricing service is slow.* Pricing restarts with `--work 3s`, longer
-   than the till waits. Every request times out at the till, and a second
-   later pricing logs that it replied: the reply arrives after the asker
-   gave up, and the API discards it. Reset restarts pricing at normal speed.
+   than the till waits. Every request times out at the till. Pricing
+   handles one request at a time, 3 s each, against one a second from the
+   till, so requests pile up and its "replied" lines come later and later;
+   every reply arrives after the asker gave up, and the API discards it. Reset restarts pricing at normal speed.
    `expect:` break: till `has: ["imeout"]`, pricing `has: ["replied"]`.
    Reset: till `has: ["answered by pricing"]`, `lacks: ["imeout"]` after
    `settle:`.
@@ -54,3 +55,8 @@ and nothing is queued.
 handler run twice, or does the API take the first reply and drop the
 second? Also the exact timeout error text. Run after the current
 regression finishes.
+
+**Wording, 2026-11-16 review.** Request-reply is direct only in the Go API
+(docs.solace.com, Request-Reply Messaging in the Solace Go API). Other
+Solace APIs can send a guaranteed request to a queue, so the text says
+"with the Go API, as here", not "on Solace".

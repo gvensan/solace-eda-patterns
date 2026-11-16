@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +129,10 @@ func Pricing(args []string) {
 		payload := solace.PayloadOf(req)
 		n, _ := solace.FieldInt(payload, "request")
 		sku := solace.FieldString(payload, "sku")
-		price := fmt.Sprintf("%.2f", 1+float64(len(sku)*7+n%13)+0.99)
+		// A fixed price list: the same SKU always costs the same, whoever
+		// answers.
+		item, _ := strconv.Atoi(strings.TrimPrefix(sku, "SKU-"))
+		price := fmt.Sprintf("%d.99", 2*item)
 		reply, err := svc.MessageBuilder().BuildWithStringPayload(fmt.Sprintf(`{"sku":"%s","price":"%s","by":"%s"}`, sku, price, *role))
 		if err == nil {
 			err = replier.Reply(reply)

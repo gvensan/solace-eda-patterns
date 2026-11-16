@@ -9,8 +9,9 @@ resource "solacebroker_msg_vpn_client_profile" "ht" {
   msg_vpn_name        = var.msg_vpn
   client_profile_name = "cp-ht"
 
-  allow_guaranteed_msg_send_enabled        = true
-  allow_guaranteed_msg_receive_enabled     = true
+  # Direct messaging only.
+  allow_guaranteed_msg_send_enabled        = false
+  allow_guaranteed_msg_receive_enabled     = false
   allow_guaranteed_endpoint_create_enabled = false
 
   max_connection_count_per_client_username = 10

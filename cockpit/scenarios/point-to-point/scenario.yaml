@@ -21,14 +21,15 @@ pattern:
     A sender addresses one named destination, and exactly one receiver takes
     each message from it.
   when: >
-    A piece of work must be done once, by a known service: print a label,
-    send an invoice.
+    A piece of work belongs to one known service: print a label, send an
+    invoice.
   cost: >
     Sender and receiver are tied by the destination's name, and another kind
     of consumer needs another destination.
   solace: >
     A durable queue, addressed by its name, that keeps each message until
-    the receiver takes it.
+    the receiver acknowledges it. Delivery is at least once: a message not
+    yet acknowledged when the receiver crashes is sent again.
   related: [publish-subscribe, competing-consumers, request-reply]
   guide: https://solace.com/event-driven-architecture-patterns/#point-to-point
 

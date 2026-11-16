@@ -122,7 +122,7 @@ func Subscriber(args []string) {
 		}
 		fmt.Printf("[%s] event #%d: order %s, %s, total %s\n", *role, n,
 			solace.FieldString(payload, "order"), solace.FieldString(payload, "region"), solace.FieldString(payload, "total"))
-		_ = os.WriteFile(mark, []byte(run+" "+strconv.Itoa(n)), 0o644)
+		_ = solace.WriteFileAtomic(mark, []byte(run+" "+strconv.Itoa(n)))
 	}); err != nil {
 		solace.Errf(*role, "could not register the message handler: %s", err)
 		os.Exit(1)

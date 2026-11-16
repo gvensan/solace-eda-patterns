@@ -29,9 +29,9 @@ If a mark on the page is unclear, point at it, or see
 ## Run it
 
 Open the three subscribers' logs. Each order the shop publishes appears in
-shipping's log and email's log: "event #12: order O-12, eu, total 84.10".
+shipping's log and email's log: "event #20: order O-20, eu, total 84.10".
 Analytics shows only the EU ones. The shop's log names the topic of every
-tenth event: `ps/shop/order/placed/v1/eu/O-12`. The region is a topic level,
+tenth event: `ps/shop/order/placed/v1/eu/O-20`. The region is a topic level,
 and analytics subscribed to `ps/shop/order/placed/v1/eu/>`; the shop
 published the same way for everyone.
 
@@ -71,8 +71,10 @@ explains the cause and where you would meet it in production.
   are consecutive. Shipping and email, which get every event, can count
   what they missed.
 - Edit the analytics action in `cockpit/scenarios/publish-subscribe/scenario.yaml`
-  to subscribe to `ps/shop/order/placed/v1/*/O-*0` and restart it: only
-  orders whose number ends in 0, by topic alone. Put it back afterwards.
+  to subscribe to `ps/shop/order/placed/v1/*/O-1*` and restart it: only
+  orders whose number starts with 1, by topic alone. A `*` after a prefix
+  matches the rest of that level; it only works at the end of a level, so
+  `O-*0` would not match. Put it back afterwards.
 
 ## How Solace does this
 
@@ -86,6 +88,6 @@ explains the cause and where you would meet it in production.
   topic and keeps a copy (Point-to-Point, Guaranteed Delivery).
 - To share one topic's events among several copies of an app rather than
   fan out to each, Solace has shared subscriptions (`#share/<group>/<topic>`;
-  Consumer Groups shows them), or a queue (Competing Consumers).
+  Consumer Groups mentions them), or a queue (Competing Consumers).
 
 Next: [Point-to-Point](220-point-to-point.md).

@@ -7,20 +7,24 @@
 # q.ef.alarms subscribes to every reading, because severity is not in the
 # topic, and its consumer binds with a selector. Readings the selector does
 # not match stay on the queue (docs/spikes.md, sections 2 and 18). Its 10 MB
-# quota lasts about two hours at the normal rate, and under a minute in high
-# resolution.
+# quota lasts about four hours at the normal rate (about 670 bytes a second
+# left behind), and about 30 seconds in high resolution (about 375 KB a
+# second), measured 2026-11-16.
 # ---------------------------------------------------------------------------
 
 resource "solacebroker_msg_vpn_queue" "berlin" {
   msg_vpn_name = var.msg_vpn
   queue_name   = "q.ef.berlin"
 
-  access_type                         = "exclusive"
-  ingress_enabled                     = true
-  egress_enabled                      = true
-  permission                          = "consume"
-  max_msg_spool_usage                 = 50
-  max_delivered_unacked_msgs_per_flow = 10
+  access_type         = "exclusive"
+  ingress_enabled     = true
+  egress_enabled      = true
+  permission          = "consume"
+  max_msg_spool_usage = 50
+  # The default, stated: a reading this queue cannot take is refused to the
+  # sensors and stored on no other queue either.
+  reject_msg_to_sender_on_discard_behavior = "when-queue-enabled"
+  max_delivered_unacked_msgs_per_flow      = 10
 }
 
 resource "solacebroker_msg_vpn_queue_subscription" "berlin" {
@@ -33,12 +37,15 @@ resource "solacebroker_msg_vpn_queue" "alarms" {
   msg_vpn_name = var.msg_vpn
   queue_name   = "q.ef.alarms"
 
-  access_type                         = "exclusive"
-  ingress_enabled                     = true
-  egress_enabled                      = true
-  permission                          = "consume"
-  max_msg_spool_usage                 = 10
-  max_delivered_unacked_msgs_per_flow = 10
+  access_type         = "exclusive"
+  ingress_enabled     = true
+  egress_enabled      = true
+  permission          = "consume"
+  max_msg_spool_usage = 10
+  # The default, stated: a reading this queue cannot take is refused to the
+  # sensors and stored on no other queue either.
+  reject_msg_to_sender_on_discard_behavior = "when-queue-enabled"
+  max_delivered_unacked_msgs_per_flow      = 10
 }
 
 resource "solacebroker_msg_vpn_queue_subscription" "alarms" {

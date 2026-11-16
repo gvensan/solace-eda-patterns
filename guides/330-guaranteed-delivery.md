@@ -4,11 +4,12 @@ A loyalty programme. Every purchase at the tills earns points, and the
 points service awards them. Losing an award cheats a customer; awarding it
 twice costs the business. Both show up in a customer's balance.
 
-Guaranteed delivery is three promises kept together: **the broker confirms
-a message to its publisher once it has stored it, the broker deletes it
-only when the consumer acknowledges it, and the consumer recognises a
-message it has already handled.** The first two mean nothing is lost; the
-third means nothing is done twice.
+Guaranteed delivery is two promises kept together: **the broker confirms a
+message to its publisher once it has stored it, and deletes it only when
+the consumer acknowledges it.** Together they mean nothing is lost. Delivery
+is then at least once, so it asks one more thing of the consumer: recognise
+a message it has already handled (an idempotent receiver), so that nothing
+is done twice.
 
 Press **Play**. It creates the queue `q.gd.awards`, starts the **Points
 Service**, then the **Tills**, which make a purchase every half second.
@@ -76,7 +77,9 @@ explains the cause and where you would meet it in production.
    keep it, and every purchase after it, in an outbox, retrying the oldest
    once a second. **Reset** turns ingress back on: the retry gets through,
    the tills send the rest of the outbox at once, in order, and say "outbox
-   empty". The points service awards every one, with no GAP.
+   empty". The points service awards every one, with no GAP. The outbox
+   here is in memory: it survives a refusal, not a till crash. A real till
+   keeps it on disk.
 
 ## Try this
 
@@ -95,9 +98,10 @@ explains the cause and where you would meet it in production.
 
 ## How Solace does this
 
-- A publisher chooses per message: direct (best effort, no confirmation) or
+- Each message is sent direct (best effort, no confirmation) or
   persistent, also called guaranteed: the broker stores it before
-  confirming. The Go API confirms through a publish receipt, with the
+  confirming. In the Go API you choose by building a direct or a persistent
+  publisher. The Go API confirms through a publish receipt, with the
   context you passed to `Publish`.
 - The broker deletes a guaranteed message from a queue when the consumer
   acknowledges it. Until then, if the consumer goes, the message is
