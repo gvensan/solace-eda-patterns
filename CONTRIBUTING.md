@@ -274,6 +274,71 @@ diagram:
     # - { from: broker, to: sink, source: enrich, delay: 1.8 }
 ```
 
+A publish can also name the box it goes into, so the line ends at the
+queue whose subscription takes it rather than at the broker's edge. When a
+topic goes into several queues, write one flow per queue and label one of
+them: the lines fork from the publisher. Event-Carried State Transfer does
+this, so orders visibly go into both queues and customer records into one.
+
+```yaml
+    - { from: orders, to: broker, via: shipq, label: orders, delay: 0 }
+    - { from: orders, to: broker, via: invq, delay: 0 }
+```
+
+A label sits near the arrow end of a curved line. Where that crowds a
+node, `labelAt:` (0 to 1 along the line) moves it.
+
+Where lines meet nodes is worked out for you. An app's lines are pinned
+across its side (one in the middle, two at 30% and 70% down), a direct
+line meets the broker level with its pin and never level with a queue
+box, and the lines on one side keep their order so they do not cross.
+Lines into one queue box land apart, and a publish landing on the side a
+delivery leaves from lands clear of it; the box grows to hold them.
+Keep labels and step badges off arrowheads and the points where lines
+meet a box or the broker: move them with `labelAt:` or the step's `at:`.
+Give every publish into a queue its `via:`, and only into a queue whose
+subscription takes it. If lines still cross in the screenshot, move an
+app to another row (the order of nodes in a column) or another column.
+
+Where the broker itself moves messages from one of its boxes into another
+(a replay log read back into a queue), draw it as a hop:
+`{ id: read-back, from: broker, to: broker, via: <from box>, into: <to box>, label: read back at start }`.
+The two boxes sit further apart, with a short line and its label between
+them. Nothing animates on it, so the label must say when it happens. A
+hop may open a path, because what it moves was stored earlier.
+
+A diagram can number the route each message takes. Give the flows an
+`id:` and list `paths:`, one per message, each step a flow and one
+sentence. The page puts the step numbers on the lines, lists the paths
+under the diagram as **Follow a message**, and highlights a whole path
+when its name or one of its lines is clicked. Numbers run on from one
+path to the next. Each line carries one number, so a line two messages
+share belongs to the first path that uses it, and the second path's text
+points to it. The checker makes each path join up: after the first step,
+a step starts where an earlier one ended (or where the first began, for a
+fan-out), and a step out of a queue needs an earlier step into it. So
+draw every hop a message really takes. `at:` on a step (0 to 1) moves its
+number along the line. `also: [ids]` on a step names the other branches of
+the same publish, when one publish forks into several queue boxes: they are
+one step, so they share one number (on the step's own line) and highlight
+with it. Without it, a fork would read as several writes by the app.
+
+```yaml
+  flows:
+    - { id: query, from: account, to: broker, label: query }
+    - { id: query-in, from: broker, to: history, label: query, source: account }
+  paths:
+    - label: The account page asks, the read side answers
+      steps:
+        - flow: query
+          text: "The account page asks about a customer: a direct message, kept on no queue."
+        - flow: query-in
+          text: The broker delivers the question to the order history.
+```
+
+Write step text in block style, as above: in an inline `{ ... }` mapping,
+YAML reads a comma in the text as the end of the value.
+
 A consumer node can also say which queue it binds and the client name it
 connects with. The dashboard then asks the broker whether that consumer is
 the one being delivered to, labels the node "active consumer" or "standby", and
@@ -333,6 +398,41 @@ box to its reader, if that reader is running. Each label has its own
 counter, so a hop cannot take another's reason. When several counters move
 between two polls, all their hops run one after another, at most three per
 reason, the last saying how many more there were.
+
+#### What an app holds: `holds:`
+
+Where the lesson is what an app keeps because of the events it receives (a
+copy of another service's data, a read model, a database), the node can
+show it. Event-Carried State Transfer uses it for the customer database,
+shipping's copy and invoicing's lookups.
+
+```yaml
+    - id: shipping
+      action: shipping
+      holds: { kept: memory, count: customers }
+```
+
+- `kept:` is `memory` or `disk`. The card says which, and when the app is
+  not running, in-memory state shows as gone rather than as old rows.
+- `count:` is optional: the unit for the row count drawn in the node's
+  bottom row (`8 customers`, orange at 0).
+- `role:` is optional: one sentence, shown on the card, saying what this
+  app is in the pattern ("A copy, built only from customer events").
+- `copyOf: <node>` is optional: the card compares its rows with that
+  node's, on the first column and every column both share, and says
+  `Matches Customer Service: 8 of 8`, or how many are missing or different.
+- `counters: true` marks a table of counters, whose rows are never marked
+  as changed (they change on every read).
+- The diagram needs a `holdsCaption:` once any node has `holds:`: a lead
+  sentence over the cards that says what to compare.
+
+The app reports it itself, through `solace.NewHolding(title, columns...)`
+and `Set(rows, note)` in `cockpit/apps/internal/solace/state.go`, whenever
+it changes. Each report is one stdout line, `@state {json}`, at most twice a
+second; the dashboard keeps the latest of the run now in place, leaves it
+out of the log, and returns it in `/state` as the node's `holds`. The page
+draws a card per node under the diagram and marks rows that changed since
+the last read.
 
 #### Settings: a choice on a node
 
@@ -436,7 +536,10 @@ Rules the checker enforces, because they are what the workshop teaches:
 ### Failure modes
 
 Each entry becomes a card under **Break it**. Aim for two per scenario, each
-showing a real error from the Go API or the broker.
+showing a real error from the Go API or the broker. The cards show as a row
+of tiles; clicking a tile opens its card underneath, one at a time. A card
+stays open after Reset, on the recovery, until **Done** closes it and puts
+a tick on its tile.
 
 ```yaml
 failure_modes:
@@ -444,7 +547,13 @@ failure_modes:
     title: The consumer goes offline
     needs: running            # running (default) or applied (config-only scenarios)
     breaks: One line on what goes wrong.
-    watch: What to look for once it has.
+    watch:                    # what to look for once it has: four parts, all required
+      normally: What the app does when all is well, and what is unaffected.
+      broke: What is gone or failing, and the exact lines to find in the output.
+      impact: What stops, what keeps working, and any risk left behind.
+      recover: What Reset does, what you see when it worked, whether anything was lost.
+    # watch: can still be one paragraph of plain text (older scenarios);
+    # new and reworked scenarios use the four parts.
     why: Why it breaks. Shown in a closed shade.
     real_world: Where you meet this in production. Same shade.
     docs:                     # https links, Go API page first, then broker docs
@@ -552,6 +661,16 @@ block.
   A rise above the count fails at once; a count of 0 waits the full window.
   The checker also requires each `arrivals:` label to name a different
   counter, and only counters that count moves to a dead message queue.
+- A node with `holds:` can check how many rows it reports, at some point
+  in the window:
+
+  ```yaml
+        holds:
+          - { node: shipping, max: 2, missing: { min: 6 } }
+  ```
+
+  `matched:` and `missing:` need a node with `copyOf:`.
+
 - A scenario can also say what must hold once Play has finished, before any
   card, with the same checks under a top-level `expect: play:`.
 - `check_scenarios.py` validates the block: known phases, a `logs:` list or
@@ -631,6 +750,32 @@ the existing guides: what the scenario shows, what to look at while it runs,
 a **Break it** section matching the failure modes, a short "Try this" list,
 and a `Next:` link to the following guide. Add a row to the sections table in
 the root `README.md`.
+
+### Audio overview
+
+A scenario can have a spoken overview of its use case, played from
+**Listen: the use case** in the top bar, which opens a column on the right
+with the controls and the transcript.
+
+- `cockpit/scenarios/<id>/narration.md` is the script: plain paragraphs,
+  about 1,500 characters (100 seconds). Lines starting with `#` are notes
+  and are not spoken. Open with an accurate definition of the pattern, in
+  the terms its usual sources use (the pattern guide, Fowler, the
+  technology's own docs), then move into the use case: why this kind of
+  system needs it, the usual alternative and what it costs, what the
+  scenario does, the pattern's price, and which Break it cards show it.
+  Never open on a formula such as "Picture a ...", and vary the wording
+  from one script to the next. Use the page's own words (card titles,
+  table names, **Play**).
+- `python3 cockpit/scripts/narrate.py <id>` voices it with ElevenLabs and
+  writes `cockpit/static/audio/<id>.mp3` and its entry in
+  `cockpit/static/audio/index.json` (length, and when each sentence starts,
+  shown as the caption). `--dry` counts characters without calling
+  anything. It needs a key in `ELEVENLABS_API_KEY`, set in `.env.dev` (see
+  `.env.dev.example`) or in the environment; attendees never do, because the
+  audio is committed. Takes are cached in `~/.cache/eda-patterns-narration`.
+- `check_scenarios.py` fails when a `narration.md` has no audio, or has
+  changed since it was voiced.
 
 ## Checking your work
 

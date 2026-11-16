@@ -70,11 +70,39 @@ def run(page, sid: str, problems: list) -> None:
     time.sleep(6)
     shot("01-play")
 
+    # Follow a message: a path's name highlights its route, Esc clears it.
+    titles = page.locator(".paths__title")
+    if titles.count():
+        titles.first.click()
+        if not page.locator(".dg.has-path").count():
+            problems.append(f"{sid}: clicking a path in Follow a message highlighted nothing")
+        shot("01-play-path")
+        page.keyboard.press("Escape")
+        if page.locator(".dg.has-path").count():
+            problems.append(f"{sid}: Esc did not clear the highlighted path")
+
+    # Expand fills the window with the canvas; Esc brings it back.
+    page.click(".canvas__expand")
+    if not page.locator(".canvas.is-expanded").count():
+        problems.append(f"{sid}: Expand did not fill the window")
+    page.keyboard.press("Escape")
+    if page.locator(".canvas.is-expanded").count():
+        problems.append(f"{sid}: Esc did not collapse the expanded canvas")
+
+    # Each card opens from its tile; one card shows at a time.
     cards = page.locator(".fm")
+    tiles = page.locator(".fm-tile")
     for i in range(cards.count()):
         card = cards.nth(i)
+        tile = tiles.nth(i)
         title = (card.locator(".fm__title").first.text_content() or f"card {i + 1}").strip()
-        card.scroll_into_view_if_needed()
+        tile.scroll_into_view_if_needed()
+        tile.click()
+        if not card.is_visible():
+            problems.append(f"{sid}: {title}: card did not open from its tile")
+            continue
+        if not tile.is_disabled():
+            problems.append(f"{sid}: {title}: the open tile can still be pressed")
         card.get_by_role("button", name="Break it", exact=True).click()
         time.sleep(BREAK_SECONDS)
         if badge_of(card) != "Broken":
@@ -84,7 +112,17 @@ def run(page, sid: str, problems: list) -> None:
         time.sleep(BREAK_SECONDS)
         if badge_of(card) not in ("Recovered", "Ready"):
             problems.append(f"{sid}: {title}: badge says {badge_of(card)!r} after Reset")
+        if not card.is_visible():
+            problems.append(f"{sid}: {title}: card closed at Reset; it should stay open on the recovery")
         shot(f"{3 + 2 * i:02d}-card{i + 1}-reset")
+        card.get_by_role("button", name="Done", exact=True).click()
+        time.sleep(1)
+        if card.is_visible():
+            problems.append(f"{sid}: {title}: card still open after Done")
+        if tile.is_disabled():
+            problems.append(f"{sid}: {title}: tile still disabled after Done")
+        if not tile.locator(".fm-tile__tried").is_visible():
+            problems.append(f"{sid}: {title}: tile has no tick after Done")
 
     page.click("#tp-cleanup")
     sequence_done(page, sid)

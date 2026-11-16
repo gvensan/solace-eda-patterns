@@ -35,6 +35,14 @@
        a reset (a backlog draining, a queued command arriving, a gap that
        never fills) is half of what the failure teaches. */
     recovered: null,
+    /* The Break it tile whose card is open, as { scenarioId, modeId }. One
+       card shows at a time, under the row of tiles; the card in effect is
+       always the open one. Cards tried and closed with Done keep a tick on
+       their tile, as "<scenario>:<mode>", for this visit. */
+    selectedFailure: null,
+    triedFailures: new Set(),
+    // The last paint's inputs, so a tile click can repaint between polls.
+    failurePaint: { live: false, starting: false },
     // Inspect shades the attendee has opened, as "<scenario>:<label>".
     openInspect: new Set(),
   };
@@ -450,19 +458,53 @@
 
   /* -------------------------------------------------------- failure modes */
 
-  /* Each failure mode is a card: what breaks, a button that breaks it, what
+  /* Each failure mode is a tile in a row, and a card that opens under the
+     row when its tile is picked: what breaks, a button that breaks it, what
      to look for once it has, and a reset that puts the scenario back so the
-     next one starts from a working system. They need the scenario running,
-     so they stay locked until Play has brought it up. */
+     next one starts from a working system. One card is open at a time, so
+     the row shows every choice at once and the open card has the room.
+     Breaking needs the scenario running, so Break it stays locked until
+     Play has brought it up; reading a card does not. */
   function makeFailureModes(scenario) {
-    return h(
+    const tiles = h(
+      "div",
+      { class: "fm-tiles", role: "group", "aria-label": "Break it cards" },
+      scenario.failureModes.map((mode, i) =>
+        h(
+          "button",
+          {
+            class: "fm-tile",
+            id: `fmt-${mode.id}`,
+            type: "button",
+            "data-mode": mode.id,
+            "data-state": "locked",
+            "aria-controls": `fm-${mode.id}`,
+            onClick: () => selectFailure(scenario, mode),
+          },
+          h("span", { class: "fm__num", text: String(i + 1) }),
+          h(
+            "span",
+            { class: "fm-tile__body" },
+            h("span", { class: "fm-tile__title", text: mode.title }),
+            h("span", { class: "fm-tile__status" },
+              h("span", { class: "badge badge--idle fm-tile__badge", text: "Not ready" }),
+              h("span", { class: "fm-tile__tried", hidden: true, text: "✓ tried" }))
+          )
+        )
+      )
+    );
+    const hint = h("p", {
+      class: "fm-hint",
+      text: "Pick a card to see what it breaks, then break it, watch, and reset.",
+    });
+    return h("div", { class: "fm-board" }, tiles, hint, h(
       "div",
       { class: "fm-list" },
       scenario.failureModes.map((mode, i) => {
         const id = `fm-${mode.id}`;
         return h(
           "article",
-          { class: "fm", id, "data-mode": mode.id, "data-state": "locked" },
+          { class: "fm", id, "data-mode": mode.id, "data-state": "locked", hidden: true },
           h(
             "div",
             { class: "fm__head" },
@@ -485,6 +527,13 @@
               text: "Reset",
               disabled: true,
               onClick: () => resetFailure(scenario, mode),
+            }),
+            h("button", {
+              class: "btn btn--secondary btn--sm fm__done",
+              text: "Done",
+              hidden: true,
+              indicator: ["card-done", "Close this card and go back to the cards. Its tile keeps a tick"],
+              onClick: () => doneFailure(scenario, mode),
             })
           ),
           (mode.why || mode.real_world) &&
@@ -531,7 +580,7 @@
                 h("p", { class: "fm__output-hint", text: "Errors from the broker show in red. The same output is under this node's logs button in the diagram while the failure is in effect." })
               ),
             h("p", { class: "fm__watch-title", text: "What to look for" }),
-            h("p", { class: "fm__watch-text", text: mode.watch })
+            watchStory(mode.watch)
           ),
           /* Where to read more: the Go API's reference for this failure, and
              the broker documentation for the behaviour behind it. Always
@@ -547,7 +596,62 @@
             )
         );
       })
+    ));
+  }
+
+  /* `watch:` is plain text, or the four parts of the story in order: what
+     the app does normally, what broke, the impact, and what Reset does. The
+     parts are labelled the same on every card, so they scan. */
+  const WATCH_PARTS = [
+    ["normally", "Normally"],
+    ["broke", "What broke"],
+    ["impact", "Impact"],
+    ["recover", "To recover"],
+  ];
+
+  function watchStory(watch) {
+    if (!watch || typeof watch !== "object") {
+      return h("p", { class: "fm__watch-text", text: watch || "" });
+    }
+    return h(
+      "dl",
+      { class: "fm__story" },
+      WATCH_PARTS.filter(([key]) => watch[key]).map(([key, label]) =>
+        h("div", { class: `fm__part fm__part--${key}` },
+          h("dt", { class: "fm__part-label", text: label }),
+          h("dd", { class: "fm__part-text", text: watch[key] }))
+      )
     );
+  }
+
+  /* Open a card under the row. While a card is in effect no other can open:
+     its tile is the one marked, and Reset or the bar at the top lead back to
+     it. A recovered card that is left for another counts as done. */
+  function selectFailure(scenario, mode, scroll = true) {
+    if (state.failure) return;
+    const rec = state.recovered;
+    if (rec && rec.scenarioId === scenario.id && rec.modeId !== mode.id) {
+      state.triedFailures.add(`${scenario.id}:${rec.modeId}`);
+      state.recovered = null;
+      closeFailureSocket();
+    }
+    state.selectedFailure = { scenarioId: scenario.id, modeId: mode.id };
+    paintFailureModes(state.failurePaint.live, state.failurePaint.starting);
+    if (scroll) {
+      document.getElementById(`fm-${mode.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  // Done: close the card, stop its log, and give its tile a tick.
+  function doneFailure(scenario, mode) {
+    state.triedFailures.add(`${scenario.id}:${mode.id}`);
+    if (state.recovered?.scenarioId === scenario.id && state.recovered?.modeId === mode.id) {
+      state.recovered = null;
+    }
+    closeFailureSocket();
+    state.selectedFailure = null;
+    paintFailureModes(state.failurePaint.live, state.failurePaint.starting);
+    document.getElementById(`fmt-${mode.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   /* A failure mode's `node` and `logs` can name a role rather than a fixed
@@ -598,8 +702,15 @@
   /* Keep every card honest about whether it can be used. Called on each run
      poll, since "the scenario is running" is what unlocks them. */
   function paintFailureModes(live, starting = false) {
+    state.failurePaint = { live, starting };
     const scenario = state.scenarios.find((s) => s.id === state.activeId);
     if (!scenario) return;
+    /* The open card: the one in effect, else the one just reset (it stays
+       open on the recovery until Done), else the one picked. */
+    const mine = (ref) => (ref?.scenarioId === scenario.id ? ref.modeId : null);
+    const openId = mine(state.failure) || mine(state.recovered) || mine(state.selectedFailure);
+    const hint = document.querySelector(".fm-hint");
+    if (hint) hint.hidden = Boolean(openId);
     /* Most failures need apps running to break. A scenario with no apps, like
        the broker tour, marks its modes `needs: applied`: they unlock once its
        configuration has been applied. */
@@ -649,8 +760,32 @@
       card.querySelector(".fm__break").disabled = cardState !== "ready" && cardState !== "recovered";
       card.querySelector(".fm__reset").disabled = !active;
       card.querySelector(".fm__watch").hidden = !active && cardState !== "recovered";
+      card.querySelector(".fm__done").hidden = cardState !== "recovered";
       const label = card.querySelector(".fm__output-label");
       if (label) label.textContent = cardState === "recovered" ? "After reset" : "What the app printed";
+
+      // Only the open card shows; its tile is marked and cannot be pressed.
+      const open = mode.id === openId;
+      card.hidden = !open;
+      const tile = document.getElementById(`fmt-${mode.id}`);
+      if (!tile) continue;
+      const tried = state.triedFailures.has(`${scenario.id}:${mode.id}`);
+      tile.dataset.state = cardState;
+      tile.classList.toggle("is-open", open);
+      tile.classList.toggle("is-tried", tried);
+      tile.setAttribute("aria-expanded", String(open));
+      tile.disabled = open || other;
+      const tileBadge = tile.querySelector(".fm-tile__badge");
+      tileBadge.className = `badge badge--${cls} fm-tile__badge`;
+      tileBadge.textContent = cardState === "waiting" ? "Locked" : text;
+      tile.querySelector(".fm-tile__tried").hidden = !tried;
+      indicator(tile, "card-tile", open
+        ? "This card is open below"
+        : other
+        ? "Another card is in effect. Reset it first"
+        : "Open this card to see what it breaks");
+      indicator(tile.querySelector(".fm-tile__tried"), "card-tried",
+        "You have broken and reset this card on this visit. You can open it and try again");
     }
   }
 
@@ -748,6 +883,7 @@
       return;
     }
     state.recovered = null;
+    state.selectedFailure = { scenarioId: scenario.id, modeId: mode.id };
     state.failure = { scenarioId: scenario.id, modeId: mode.id, bound, since: Date.now() };
     paintFailureModes(true);
     markDiagramNode(bound.node, true);
@@ -790,6 +926,7 @@
     }
     state.failure = null;
     state.recovered = { scenarioId: scenario.id, modeId: mode.id, bound };
+    state.triedFailures.add(`${scenario.id}:${mode.id}`);
     markDiagramNode(null, false);
     paintFailureModes(true);
     paintFailBar();
@@ -978,15 +1115,30 @@
     const panelHost = h("aside", { class: "stage__panel", id: "panel-host" });
     const stage = h("section", { class: "stage" }, diagramHost, panelHost);
 
+    let pathList = null;
     if (scenario.diagram && (scenario.diagram.nodes || []).length) {
       Diagram.render(diagramHost, scenario.diagram, {
         onSelect: (id) => selectNode(scenario, id),
         onLogs: (id) => selectNode(scenario, id, "logs"),
+        onPath: (k) => markPath(pathList, k),
       });
+      // Under the diagram and its panel, full width, so opening a node's
+      // panel narrows the diagram but never reflows the list.
+      pathList = makePathList(scenario, diagramHost);
       refreshDiagramState(scenario);
       watchPartitions(scenario, diagramHost);
     }
 
+    const holds = makeHolds(scenario);
+
+    /* The diagram, its side panel and what each app holds, as one canvas
+       that can fill the window. It stays below the Broken bar, so Reset is
+       always in reach. */
+    const expand = h("button", { class: "btn btn--ghost btn--sm canvas__expand", type: "button",
+      onClick: () => setExpanded(!document.getElementById("canvas")?.classList.contains("is-expanded")) });
+    const canvas = h("div", { class: "canvas", id: "canvas" }, expand, stage, pathList, holds);
+    document.body.classList.remove("canvas-expanded");
+    paintExpand(expand, false);
     const stats = h("section", { class: "stats", id: "stats" });
 
     /* Transport controls: the primary way to drive a scenario. The action flow
@@ -1022,7 +1174,7 @@
       "Run it",
       "Press Play to bring the scenario up. The diagram shows what is running and where events go.",
       null,
-      transport, stage, stats
+      transport, canvas, stats
     );
 
     part(
@@ -1100,7 +1252,62 @@
         h("div", { class: "pattern__related" },
           related.map((r) => h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))),
       p.guide && h("a", { class: "pattern__guide", href: p.guide, target: "_blank", rel: "noopener",
-        text: "Read about it in the Solace pattern guide" }));
+        text: "Read about it in Solace's Event-Driven Architecture Patterns" }));
+  }
+
+  /* The paths a message takes (`paths:`), listed under the diagram with
+     the same numbers as on its lines. Clicking a path, or a line on it,
+     highlights the whole route; the list marks the one shown. */
+  function makePathList(scenario, diagramHost) {
+    const paths = scenario.diagram?.paths || [];
+    if (!paths.length) return null;
+    let n = 0;
+    return h("section", { class: "paths", "aria-label": "Follow a message" },
+      h("p", { class: "paths__head", text: "Follow a message" }),
+      h("p", { class: "paths__hint", text: "Click a path, or any numbered line on the diagram, to highlight its whole route. Esc clears it." }),
+      h("div", { class: "paths__list" },
+        paths.map((path, k) => {
+          const start = n + 1;
+          n += (path.steps || []).length;
+          return h("div", { class: "paths__path", "data-path": k },
+            h("button", {
+              class: "paths__title", type: "button", "aria-pressed": "false", text: path.label,
+              indicator: ["path-pick", `Highlight this path on the diagram: steps ${start} to ${n}. Click again, or press Esc, to clear`],
+              onClick: () => {
+                const host = diagramHost;
+                const on = host.querySelector(".dg")?.__paths?.current === k;
+                Diagram.selectPath(host, on ? null : k);
+              },
+            }),
+            h("ol", { class: "paths__steps", start: String(start) },
+              (path.steps || []).map((st) => h("li", { text: st.text }))));
+        })));
+  }
+
+  function markPath(list, k) {
+    for (const p of list?.querySelectorAll(".paths__path") || []) {
+      const on = Number(p.dataset.path) === k;
+      p.classList.toggle("is-active", on);
+      p.querySelector(".paths__title")?.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  function paintExpand(btn, on) {
+    btn.textContent = on ? "Collapse" : "Expand";
+    btn.setAttribute("aria-pressed", String(on));
+    indicator(btn, "canvas-expand", on
+      ? "Back to the page. Esc does the same"
+      : "Fill the window with the diagram, its side panel and what each app holds. Esc or Collapse brings it back");
+  }
+
+  function setExpanded(on) {
+    const canvas = document.getElementById("canvas");
+    if (!canvas) return;
+    canvas.classList.toggle("is-expanded", on);
+    document.body.classList.toggle("canvas-expanded", on);
+    const btn = canvas.querySelector(".canvas__expand");
+    if (btn) paintExpand(btn, on);
+    if (!on) canvas.scrollIntoView({ block: "start" });
   }
 
   /* While a failure is in effect a bar stays at the top of the page: which
@@ -1114,6 +1321,7 @@
     if (!mode) {
       bar.hidden = true;
       bar.replaceChildren();
+      measureFailBar();
       return;
     }
     const jump = (selector) => document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1130,6 +1338,14 @@
       h("button", { class: "btn btn--secondary btn--sm", text: "Reset", onClick: () => resetFailure(scenario, mode) })
     );
     tickFailBar();
+    measureFailBar();
+  }
+
+  // The expanded canvas sits below the Broken bar, however tall it wraps.
+  function measureFailBar() {
+    const bar = document.getElementById("failbar");
+    const px = bar && !bar.hidden ? bar.offsetHeight : 0;
+    document.documentElement.style.setProperty("--failbar-h", `${px}px`);
   }
 
   function tickFailBar() {
@@ -1506,12 +1722,140 @@
     }
   }
 
+  /* ------------------------------------------------------------ holds
+
+     What each app holds (a copy, a read model, a database), as a table under
+     the diagram, for the nodes whose yaml has holds:. The app reports it
+     itself (solace.NewHolding in Go); the dashboard keeps the latest report
+     of the run now in place, so a restarted app starts from nothing. Kept
+     in memory means gone when the app stops, and the card says so rather
+     than showing rows that no longer exist anywhere. The diagram's
+     holdsCaption says what to look for; each card's role: says what that
+     app is in the pattern. */
+
+  function holdNodes(scenario) {
+    return (scenario.diagram?.nodes || []).filter((n) => n.holds);
+  }
+
+  function makeHolds(scenario) {
+    const nodes = holdNodes(scenario);
+    if (!nodes.length) return null;
+    const caption = scenario.diagram?.holdsCaption;
+    return h("section", { class: "holds", id: "holds", "aria-label": "What each app holds" },
+      h("p", { class: "holds__head", text: "What each app holds" }),
+      caption && h("p", { class: "holds__lead", text: caption }),
+      h("div", { class: "holds__cards" },
+        nodes.map((n) => h("article", { class: "hold", "data-hold": n.id },
+          h("div", { class: "hold__top" },
+            h("span", { class: "hold__app", text: n.label }),
+            h("span", { class: "hold__kept", "data-kept": n.holds.kept || "memory" })),
+          h("p", { class: "hold__role", text: n.holds.role || "" }),
+          h("p", { class: "hold__match", hidden: true }),
+          h("div", { class: "hold__body" }),
+          h("p", { class: "hold__change", hidden: true })))));
+  }
+
+  /* What changed between two reports of the same table, in words: "C-03:
+     city Lyon to Leeds, version 6 to 7". Rows are matched on their first
+     cell. Several rows at once (a fill, a republish) are summed up. */
+  function describeChange(columns, before, rows) {
+    const old = new Map(before.map((r) => [r[0], r]));
+    const now = new Set(rows.map((r) => r[0]));
+    const said = [];
+    const changed = new Set();
+    for (const r of rows) {
+      const was = old.get(r[0]);
+      if (!was) { said.push(`${r[0]} added`); changed.add(r[0]); continue; }
+      const diffs = r.map((c, i) => (i && c !== was[i] ? `${columns[i] || "value"} ${was[i]} to ${c}` : null))
+        .filter(Boolean);
+      if (diffs.length) { said.push(`${r[0]}: ${diffs.join(", ")}`); changed.add(r[0]); }
+    }
+    for (const r of before) if (!now.has(r[0])) said.push(`${r[0]} gone`);
+    if (!said.length) return null;
+    return { changed, text: said.length > 2 ? `${said.length} rows changed` : said.join("; ") };
+  }
+
+  function paintHolds(scenario) {
+    const nodes = holdNodes(scenario);
+    const byId = new Map((scenario.diagram?.nodes || []).map((n) => [n.id, n]));
+    for (const n of nodes) {
+      const card = document.querySelector(`[data-hold="${n.id}"]`);
+      if (!card) continue;
+      const s = state.diagramState?.nodes?.[n.id] || {};
+      const disk = n.holds.kept === "disk";
+      const kept = card.querySelector(".hold__kept");
+      kept.textContent = disk ? "on disk" : "in memory";
+      indicator(kept, "hold-kept", disk
+        ? `${n.label} keeps this on disk, so it is still there after a restart`
+        : `${n.label} keeps this in memory only: a restart or a crash loses all of it`);
+
+      const body = card.querySelector(".hold__body");
+      const match = card.querySelector(".hold__match");
+      const change = card.querySelector(".hold__change");
+      const report = s.running ? s.holds : null;
+      card.dataset.state = report ? "live" : s.running ? "starting" : "stopped";
+      if (!report) {
+        card.__rows = null;
+        match.hidden = true;
+        change.hidden = true;
+        body.replaceChildren(h("p", { class: "hold__empty", text: s.running
+          ? `${n.label} is starting. Nothing reported yet.`
+          : !s.run
+          ? `${n.label} is not running.`
+          : disk
+          ? `${n.label} is not running. What it keeps stays on disk, and shows here when it starts again.`
+          : `Held in memory: gone when ${n.label} stopped.` }));
+        continue;
+      }
+
+      // A copy says, in one line, how much of the owner's data it has.
+      const m = s.match;
+      if (m) {
+        const owner = byId.get(n.holds.copyOf)?.label || n.holds.copyOf;
+        const whole = m.matched === m.of && m.of > 0;
+        const gaps = [m.missing && `${m.missing} missing`, m.different && `${m.different} different`].filter(Boolean);
+        match.textContent = (whole
+          ? `Matches ${owner}: ${m.matched} of ${m.of}`
+          : `Matches ${owner} on ${m.matched} of ${m.of}: ${gaps.join(", ")}`)
+          + (m.ownerUp ? "" : `, with ${owner} down`);
+        match.dataset.whole = String(whole);
+        match.hidden = false;
+        indicator(match, "hold-match", `${n.label}'s copy compared with what ${owner} holds${m.ownerUp ? "" : " (as it last reported before it stopped)"}, row by row on every column both share. `
+          + (whole ? "Every row is there and the same." : "Missing rows have not reached the copy; different rows are older or newer than the owner's."));
+      } else {
+        match.hidden = true;
+      }
+
+      const columns = report.columns || [];
+      const rows = report.rows || [];
+      const before = card.__rows;
+      // Counters change on every read, so marking them would mark everything.
+      const diff = before && !n.holds.counters ? describeChange(columns, before, rows) : null;
+      if (diff) {
+        change.textContent = `Last change, ${new Date().toLocaleTimeString([], { hour12: false })}: ${diff.text}`;
+        change.hidden = false;
+        indicator(change, "hold-last-change", `The last time ${n.label}'s table changed, read every 3 seconds. The rows that changed are green until the next read`);
+      }
+      const table = h("table", { class: "hold__table" },
+        h("thead", {}, h("tr", {}, columns.map((c) => h("th", { text: c })))),
+        h("tbody", {}, rows.length
+          ? rows.map((r) => h("tr", diff?.changed.has(r[0])
+              ? { class: "is-changed", indicator: ["hold-changed", "This row changed since the last read, a few seconds ago"] }
+              : {}, r.map((c) => h("td", { text: c }))))
+          : h("tr", {}, h("td", { class: "hold__none", colspan: String(columns.length || 1),
+              text: "Holds nothing yet" }))));
+      card.__rows = rows;
+      body.replaceChildren(...[table, report.note && h("p", { class: "hold__note", text: report.note })].filter(Boolean));
+    }
+  }
+
   async function refreshDiagramState(scenario) {
     try {
       state.diagramState = await API.scenarioState(scenario.id);
       const host = document.getElementById("diagram-host");
       if (host) Diagram.paint(host, scenario.diagram, state.diagramState, gatedNodes(scenario));
       paintSettings(scenario);
+      paintHolds(scenario);
       // Keep an open Detail tab honest as things start and stop, but update it
       // in place rather than rebuilding: a full re-render on every poll would
       // replace the Start/Stop button out from under a click in progress.
@@ -1694,7 +2038,12 @@
     }
     const card = section.match(/^break-(\d+)$/);
     const mode = card && (scenario.failureModes || [])[Number(card[1]) - 1];
-    const target = mode ? document.getElementById(`fm-${mode.id}`) : document.getElementById(`part-${section}`);
+    // A link to one card opens it, unless another is in effect.
+    if (mode) selectFailure(scenario, mode, false);
+    const target = mode
+      ? (document.getElementById(`fm-${mode.id}`)?.hidden ? document.getElementById("part-break")
+        : document.getElementById(`fm-${mode.id}`))
+      : document.getElementById(`part-${section}`);
     if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
     else if (content) content.scrollTop = 0;
   }
@@ -1708,6 +2057,7 @@
     closeSockets();
     closeFailureSocket();
     state.recovered = null;
+    state.selectedFailure = null;
     closePanel();
     state.diagramState = null;
     state.activeId = scenarioId;
@@ -1715,12 +2065,164 @@
     renderNav();
     if (scenario) {
       renderScenario(scenario);
+      mountNarration(scenario);
       scrollToSection(scenario, section);
+    } else {
+      unmountNarration();
     }
     const hash = section ? `${scenarioId}/${section}` : scenarioId;
     if (decodeURIComponent(location.hash.slice(1)) !== hash) history.replaceState(null, "", `#${hash}`);
     // The sidebar is long; keep the open scenario's entry in view.
     el.nav.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
+  }
+
+  /* ------------------------------------------------------------ narration */
+
+  /* A spoken overview of the scenario's use case. Closed, it is a Listen
+     button in the top bar; opened, a column on the right of the page with
+     the controls and the whole transcript, and the page narrows to make
+     room. The audio and its sentence timings are made by
+     cockpit/scripts/narrate.py and listed in /static/audio/index.json; a
+     scenario without an entry has no button. Nothing plays until the
+     attendee presses play, and every page visit starts closed. */
+  let narration = null;
+  const appEl = document.querySelector(".app");
+  const topbarActions = document.querySelector(".topbar__actions");
+
+  function fmtTime(s) {
+    const t = Math.max(0, Math.floor(s || 0));
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+  }
+
+  function unmountNarration() {
+    if (!narration) return;
+    narration.audio.pause();
+    narration.audio.removeAttribute("src");
+    narration.side.remove();
+    narration.launcher.remove();
+    appEl.classList.remove("narration-open");
+    narration = null;
+  }
+
+  function mountNarration(scenario) {
+    // Clear broker config and Reset draw the page again: the same scenario
+    // keeps its player, and whatever it is playing.
+    if (narration?.id === scenario.id) return;
+    unmountNarration();
+    const entry = state.narrations?.[scenario.id];
+    if (!entry) return;
+    const audio = new Audio();
+    // Nothing is fetched until play, so leaving the page cancels no download.
+    audio.preload = "none";
+    audio.src = entry.src;
+    const duration = () => (Number.isFinite(audio.duration) ? audio.duration : entry.duration);
+    // A play cut short by pause (pressed twice quickly, or the page left) is
+    // not a failure.
+    const playFailed = (err) => { if (err.name !== "AbortError") toast(`Audio did not play: ${err.message}`, true); };
+    const icon = (kind) => h("span", { class: `narration__icon narration__icon--${kind}`, "aria-hidden": "true" });
+
+    const launcher = h("button", { class: "btn btn--secondary btn--sm narration-launch", type: "button",
+      "aria-controls": "narration", "aria-expanded": "false" });
+    const close = h("button", { class: "narration__close", type: "button", text: "×",
+      "aria-label": "Close the audio overview",
+      indicator: ["narration-close", "Close this column. The audio keeps playing; Listen in the top bar opens it again"] });
+    const play = h("button", { class: "narration__btn narration__btn--main", type: "button" });
+    const rewind = h("button", { class: "narration__btn", type: "button", text: "-10s",
+      "aria-label": "Back 10 seconds",
+      indicator: ["narration-rewind", "Back 10 seconds. Press again to go further back"] });
+    const stop = h("button", { class: "narration__btn", type: "button", "aria-label": "Stop",
+      indicator: ["narration-stop", "Stop, and go back to the start"] }, icon("stop"));
+    const bar = h("input", { class: "narration__bar", type: "range", min: "0", max: "1000", value: "0",
+      "aria-label": "Position in the audio overview" });
+    const time = h("span", { class: "narration__time" });
+    const lines = entry.sentences.map((s) => {
+      const line = h("button", { class: "narration__line", type: "button", text: s.text,
+        indicator: ["narration-line", `Play from here (${fmtTime(s.start)})`] });
+      line.addEventListener("click", () => {
+        audio.currentTime = s.start;
+        if (audio.paused) audio.play().catch(playFailed);
+        paint();
+      });
+      return line;
+    });
+    const side = h("aside", { class: "narration", id: "narration", "aria-label": "Audio overview of this scenario" },
+      h("header", { class: "narration__head" },
+        h("div", {},
+          h("p", { class: "eyebrow", text: "Audio overview" }),
+          h("h2", { class: "narration__title", text: "The use case" }),
+          h("p", { class: "narration__sub", text: `${scenario.title}, ${fmtTime(entry.duration)}` })),
+        close),
+      h("div", { class: "narration__controls" },
+        h("div", { class: "narration__row" }, rewind, play, stop),
+        h("div", { class: "narration__row" }, bar, time)),
+      h("p", { class: "narration__label", text: "Transcript" }),
+      h("div", { class: "narration__transcript" }, lines),
+      h("p", { class: "narration__credit", text: "Voice generated with ElevenLabs." }));
+
+    let current = -1;
+    function paint() {
+      const playing = !audio.paused && !audio.ended;
+      play.replaceChildren(icon(playing ? "pause" : "play"));
+      play.setAttribute("aria-label", playing ? "Pause" : "Play");
+      indicator(play, "narration-play", playing
+        ? "Pause. Play carries on from here"
+        : audio.currentTime > 0 ? "Play, from where it paused" : "Play the spoken overview of this scenario's use case");
+      const d = duration();
+      bar.value = d ? String(Math.round((audio.currentTime / d) * 1000)) : "0";
+      bar.setAttribute("aria-valuetext", `${fmtTime(audio.currentTime)} of ${fmtTime(d)}`);
+      indicator(bar, "narration-progress",
+        `How far through the overview you are. Drag or click to jump; ${fmtTime(audio.currentTime)} of ${fmtTime(d)}`);
+      time.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(d)}`;
+      indicator(time, "narration-time", `Time played, then the overview's length (${fmtTime(d)})`);
+
+      const started = audio.currentTime > 0 || playing;
+      const now = started ? entry.sentences.findLastIndex((s) => s.start <= audio.currentTime + 0.05) : -1;
+      if (now !== current) {
+        lines.forEach((ln, i) => {
+          ln.classList.toggle("is-current", i === now);
+          ln.classList.toggle("is-past", i < now);
+        });
+        if (now >= 0 && open()) lines[now].scrollIntoView({ block: "nearest", behavior: "smooth" });
+        current = now;
+      }
+
+      launcher.replaceChildren(icon(playing ? "pause" : "play"),
+        h("span", { text: playing ? `Listening ${fmtTime(audio.currentTime)}` : "Listen: the use case" }));
+      launcher.classList.toggle("is-playing", playing);
+      launcher.setAttribute("aria-label", playing ? `Audio overview, playing ${fmtTime(audio.currentTime)}` : "Listen: the use case");
+      indicator(launcher, "narration-open", playing
+          ? "The audio overview is playing. Click to show its controls and transcript"
+          : "Open the audio overview: a spoken story of this scenario's use case, with its transcript");
+    }
+
+    const open = () => appEl.classList.contains("narration-open");
+    function setOpen(on) {
+      appEl.classList.toggle("narration-open", on);
+      launcher.setAttribute("aria-expanded", String(on));
+      if (on) current = -2;
+      paint();
+      if (on) play.focus({ preventScroll: true });
+    }
+
+    launcher.addEventListener("click", () => setOpen(!open()));
+    close.addEventListener("click", () => { setOpen(false); launcher.focus(); });
+    play.addEventListener("click", () => {
+      if (audio.paused || audio.ended) audio.play().catch(playFailed);
+      else audio.pause();
+    });
+    rewind.addEventListener("click", () => { audio.currentTime = Math.max(0, audio.currentTime - 10); paint(); });
+    stop.addEventListener("click", () => { audio.pause(); audio.currentTime = 0; paint(); });
+    bar.addEventListener("input", () => { audio.currentTime = (Number(bar.value) / 1000) * duration(); paint(); });
+    for (const ev of ["play", "pause", "ended", "timeupdate", "loadedmetadata", "seeked"]) {
+      audio.addEventListener(ev, paint);
+    }
+    audio.addEventListener("ended", () => { audio.currentTime = 0; });
+    audio.addEventListener("error", () => toast("The audio overview could not be loaded.", true));
+
+    topbarActions.prepend(launcher);
+    appEl.append(side);
+    narration = { id: scenario.id, audio, side, launcher, close: () => { if (open()) { setOpen(false); launcher.focus(); } } };
+    setOpen(false);
   }
 
   /* ----------------------------------------------------------------- boot */
@@ -1789,6 +2291,17 @@
   }
 
   async function init() {
+    /* Esc clears a highlighted path first, then collapses an expanded
+       canvas, one step per press. */
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || e.target === el.navSearch) return;
+      const host = document.getElementById("diagram-host");
+      if (host?.querySelector(".dg.has-path")) Diagram.selectPath(host, null);
+      else if (document.getElementById("canvas")?.classList.contains("is-expanded")) setExpanded(false);
+      else narration?.close();
+    });
+    window.addEventListener("resize", measureFailBar);
+
     let collapsed = false;
     try { collapsed = localStorage.getItem("eda.sidebarCollapsed") === "1"; } catch (_) { /* private window */ }
     setSidebar(collapsed);
@@ -1813,6 +2326,13 @@
 
     state.env = await API.env();
     el.brokerLink.href = brokerUiUrl(state.env);
+    // Which scenarios have an audio overview. Without the list, no player.
+    try {
+      const resp = await fetch("/static/audio/index.json");
+      state.narrations = resp.ok ? await resp.json() : {};
+    } catch (_) {
+      state.narrations = {};
+    }
 
     if (!state.env.terraformAvailable) {
       toast("Terraform is not installed in this container; terraform actions will fail.", true);

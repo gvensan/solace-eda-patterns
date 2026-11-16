@@ -7,6 +7,16 @@
 
 @import url("../ds/styles.css");
 
+/* The design system's dark-mode muted grey (#7E94A3) reads at 3.7:1 on a
+   card, below the 4.5:1 that small text needs, and most of this page's small
+   labels use it. This one is about 6:1 on a card and still sits clearly
+   below body text. --text-default is used by diagram labels and is not a
+   design system token. */
+[data-mode="dark"] {
+  --text-muted: #A9BCC9;
+  --text-default: var(--text-body);
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body {
@@ -394,7 +404,7 @@ a { color: var(--text-link); }
 .btn:active:not(:disabled) { transform: scale(0.98); }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -639,6 +649,103 @@ a { color: var(--text-link); }
 
 /* ------------------------------------------------------------------ stat row */
 
+/* What each app holds, under the diagram: one card per holding node. */
+.holds { margin-bottom: var(--space-4); }
+.holds__head {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.holds__lead {
+  margin: 0 0 var(--space-4);
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  color: var(--text-strong);
+}
+.holds__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.hold {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+.hold[data-state="stopped"] { border-style: dashed; }
+.hold__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.hold__app { font-weight: var(--fw-semibold); color: var(--text-strong); }
+.hold__kept {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hold__kept[data-kept="memory"] { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 50%, transparent); }
+.hold__role { margin: var(--space-1) 0 var(--space-3); color: var(--text-body); }
+.hold__role:empty { display: none; }
+/* "Matches Customer Service: 8 of 8": the lesson in one line, so it sits
+   above the table, green when whole and orange when not. */
+.hold__match {
+  margin: 0 0 var(--space-3);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-body-sm);
+  color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+}
+.hold__match[data-whole="true"] {
+  color: var(--green-bright);
+  background: color-mix(in srgb, var(--green-bright) 10%, transparent);
+  border-color: color-mix(in srgb, var(--green-bright) 40%, transparent);
+}
+.hold__change {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.hold__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.hold__table th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  padding: 2px 6px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hold__table td { padding: 3px 6px; color: var(--text-body); }
+.hold__table tr.is-changed td {
+  background: color-mix(in srgb, var(--green-bright) 16%, transparent);
+  color: var(--text-strong);
+}
+.hold__none, .hold__empty { color: var(--orange); margin: 0; font-size: var(--fs-body-sm); }
+.hold__note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-body-sm);
+  color: var(--orange);
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -762,11 +869,159 @@ a { color: var(--text-link); }
 
 /* ------------------------------------------------------------ failure modes */
 
-.fm-list {
+/* A row of tiles, one per card, and the open card under it. */
+.fm-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fm-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: var(--space-4);
-  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.fm-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 76px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-body);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: border-color var(--dur-base) var(--ease-standard),
+    background var(--dur-base) var(--ease-standard);
+}
+.fm-tile:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+.fm-tile:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* The open tile is the one being looked at: marked, not faded, and joined
+   to the card under the row by a notch. */
+.fm-tile.is-open {
+  cursor: default;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-card));
+}
+.fm-tile.is-open::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 14px;
+  height: 14px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+.fm-tile.is-open[data-state="broken"] {
+  border-color: var(--status-danger);
+  background: color-mix(in srgb, var(--status-danger) 12%, var(--surface-card));
+}
+.fm-tile.is-open[data-state="broken"]::after { border-color: var(--status-danger); }
+.fm-tile.is-open[data-state="recovered"] {
+  border-color: var(--green-classic);
+  background: color-mix(in srgb, var(--green-classic) 10%, var(--surface-card));
+}
+.fm-tile.is-open[data-state="recovered"]::after { border-color: var(--green-classic); }
+/* Locked behind another card in effect. */
+.fm-tile:disabled:not(.is-open) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.fm-tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.fm-tile__title {
+  font-size: var(--fs-body-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  line-height: var(--lh-snug);
+}
+.fm-tile__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.fm-tile__tried {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--green-bright);
+}
+.fm-tile__tried[hidden] { display: none; }
+
+.fm-hint {
+  font-size: var(--fs-body-sm);
+  color: var(--text-muted);
+}
+.fm-hint[hidden] { display: none; }
+
+.fm-list {
+  display: flex;
+  flex-direction: column;
+}
+.fm[hidden] { display: none; }
+.fm__done[hidden] { display: none; }
+
+/* The four parts of "What to look for", beside the app's own output. */
+.fm__story {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+}
+.fm__part {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-sunk);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.fm__part--normally { border-left-color: var(--green-classic); }
+.fm__part--broke { border-left-color: var(--status-danger); }
+.fm__part--impact { border-left-color: var(--orange); }
+.fm__part--recover { border-left-color: var(--accent); }
+.fm__part-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.fm__part-text {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-body-sm);
+  color: var(--text-body);
+}
+@media (min-width: 1100px) {
+  .fm__watch:has(.fm__story) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "title output" "story output";
+    align-items: start;
+    column-gap: var(--space-5);
+  }
+  .fm__watch:has(.fm__story)[hidden] { display: none; }
+  .fm__watch:has(.fm__story) > .fm__watch-title { grid-area: title; }
+  .fm__watch:has(.fm__story) > .fm__story { grid-area: story; }
+  .fm__watch:has(.fm__story) > .fm__output { grid-area: output; margin-bottom: 0; }
+  .fm__watch:has(.fm__story) .fm__log { max-height: 420px; }
 }
 
 .fm {
@@ -781,14 +1036,12 @@ a { color: var(--text-link); }
 }
 
 .fm[data-state="locked"],
-.fm[data-state="waiting"] { opacity: 0.7; }
+.fm[data-state="waiting"] { opacity: 0.85; }
 .fm[data-state="recovered"] {
   border-color: color-mix(in srgb, var(--green-classic) 55%, transparent);
-  grid-column: 1 / -1;
 }
 .fm[data-state="broken"] {
   border-color: color-mix(in srgb, var(--status-danger) 60%, transparent);
-  grid-column: 1 / -1;
 }
 
 .fm__head {
@@ -1308,11 +1561,103 @@ a { color: var(--text-link); }
 
 .dg {
   display: block;
-  width: 100%;
-  max-width: 820px;
+  /* --dg-w and --dg-f come from diagram.js: the same scale on every page */
+  width: min(var(--dg-w, 820px), calc(100% * var(--dg-f, 1)));
+  max-width: 100%;
   height: auto;
   margin: 0 auto;
   color: var(--text-body);
+}
+
+@media (max-width: 700px) {
+  .dg { width: 100%; }
+}
+
+/* The paths under the diagram: one column per path, numbered as on the
+   lines. The highlighted one is marked. */
+.paths {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+}
+.paths__head {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.paths__hint { margin: var(--space-1) 0 var(--space-3); font-size: var(--fs-body-sm); color: var(--text-muted); }
+.paths__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+.paths__path {
+  padding: var(--space-3);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid transparent;
+}
+.paths__path.is-active { border-color: var(--green-bright); }
+.paths__title {
+  all: unset;
+  cursor: pointer;
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.paths__title:focus-visible { outline: 2px solid var(--green-bright); outline-offset: 2px; }
+.paths__path.is-active .paths__title { color: var(--green-bright); text-decoration: none; }
+.paths__steps {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.6em;
+  font-size: var(--fs-body-sm);
+  color: var(--text-body);
+}
+.paths__steps li { margin: 2px 0; }
+.paths__steps li::marker { font-family: var(--font-mono); color: var(--green-bright); }
+
+/* The canvas: diagram, side panel and holds, which can fill the window.
+   Expanded, it sits below the Broken bar (its height in --failbar-h), so
+   Reset stays in reach. */
+.canvas { position: relative; }
+.canvas__expand {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 2;
+}
+.canvas:has(.stage.is-open) > .canvas__expand { right: calc(340px + var(--space-4) + var(--space-3)); }
+.canvas.is-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: auto;
+  background: var(--surface-page);
+  padding: calc(var(--failbar-h, 0px) + var(--space-5)) var(--space-6) var(--space-6);
+}
+.canvas.is-expanded > .canvas__expand {
+  top: calc(var(--failbar-h, 0px) + var(--space-5) + var(--space-3));
+  right: calc(var(--space-6) + var(--space-3));
+}
+.canvas.is-expanded .dg { width: 100%; max-width: none; max-height: calc(100vh - var(--failbar-h, 0px) - 140px); }
+.canvas.is-expanded .stage__panel { max-height: calc(100vh - var(--failbar-h, 0px) - 80px); }
+body.canvas-expanded { overflow: hidden; }
+body.canvas-expanded .failbar:not([hidden]) {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 41;
+  margin: 0;
+}
+@media (max-width: 1100px) {
+  .canvas:has(.stage.is-open) > .canvas__expand { right: var(--space-3); }
 }
 
 .dg-caption {
@@ -1417,6 +1762,14 @@ a { color: var(--text-link); }
 
 .dg-node__check[data-complete="true"] { fill: var(--green-bright); }
 
+/* "8 customers": how much the app holds, from its own report. */
+.dg-node__holds {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-body);
+}
+.dg-node__holds[data-empty="true"] { fill: var(--orange); }
+
 /* Per-node way into that node's logs, so nothing has to live down the page. */
 .dg-node__logbtn { cursor: pointer; }
 
@@ -1461,12 +1814,49 @@ a { color: var(--text-link); }
 .dg-arrowhead {
   fill: var(--border-strong);
 }
+.dg-arrowhead--on { fill: var(--green-bright); }
 
 .dg-edge__label {
   font-family: var(--font-mono);
   font-size: 9.5px;
   fill: var(--text-muted);
 }
+
+/* Paths: a numbered step on each line of a path, a wide invisible twin
+   of the line that takes the click, and the highlight. The highlight only
+   dims what is off the path; a packet that is not moving stays hidden. */
+.dg-edge__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.dg-step { cursor: pointer; }
+.dg-step circle {
+  fill: var(--surface-card);
+  stroke: var(--green-classic);
+  stroke-width: 1.25;
+}
+.dg-step text {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
+  fill: var(--green-bright);
+}
+.dg.has-path .dg-edge:not(.on-path),
+.dg.has-path .dg-edge__label:not(.on-path),
+.dg.has-path .dg-step:not(.on-path) { opacity: 0.18; }
+.dg.has-path .dg-packet:not(.on-path) { fill-opacity: 0.18; }
+.dg.has-path .dg-node:not(.on-path) { opacity: 0.35; }
+.dg.has-path .dg-node__child:not(.on-path) { opacity: 0.35; }
+.dg.has-path .dg-edge.on-path {
+  stroke: var(--green-bright);
+  stroke-width: 2;
+}
+.dg.has-path .dg-edge__label.on-path { fill: var(--text-strong); }
+.dg.has-path .dg-step.on-path circle { fill: var(--green-bright); }
+.dg.has-path .dg-step.on-path text { fill: var(--surface-card); }
 
 /* The moving part. Packets are hidden when the publishing process is not
    actually running, so the diagram can never imply traffic that is not there. */
@@ -1964,3 +2354,235 @@ td.is-false { color: var(--text-muted); }
   color: var(--text-muted);
 }
 .nav-group:first-child { margin-top: 0; }
+
+/* ---------------------------------------------------------------- narration */
+
+/* The audio overview is a third column of the page grid. Opening it narrows
+   the main column rather than covering the diagram; on a narrow window it
+   slides over the page instead. */
+:root { --narration-w: 360px; }
+
+.app.narration-open { grid-template-columns: 264px 1fr var(--narration-w); }
+.app.is-collapsed.narration-open { grid-template-columns: 68px 1fr var(--narration-w); }
+.app:not(.narration-open) > .narration { display: none; }
+.app.narration-open ~ .toasts { right: calc(var(--narration-w) + var(--space-6)); }
+.app.narration-open .canvas.is-expanded { right: var(--narration-w); }
+
+.narration {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-sunk);
+  border-left: 1px solid var(--border-subtle);
+  font-family: var(--font-sans);
+}
+
+.narration__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.narration__head .eyebrow { margin: 0 0 var(--space-2); }
+
+.narration__title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.25rem;
+}
+
+.narration__sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-body-sm);
+}
+
+.narration__close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.narration__close:hover { color: var(--text-strong); border-color: var(--border-strong); }
+
+.narration__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.narration__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.narration__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  color: var(--text-strong);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.narration__btn:hover { border-color: var(--accent); }
+
+.narration__btn--main {
+  width: 52px;
+  height: 52px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.narration__btn:focus-visible,
+.narration__close:focus-visible,
+.narration__line:focus-visible,
+.narration__bar:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.narration__icon { display: inline-block; flex: none; }
+.narration__icon--play {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-style: solid;
+  border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent currentColor;
+}
+.narration__icon--pause {
+  width: 10px;
+  height: 12px;
+  border-left: 3px solid currentColor;
+  border-right: 3px solid currentColor;
+}
+.narration__icon--stop {
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.narration__bar {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.narration__time {
+  flex: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+}
+
+.narration__label {
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+/* The transcript is the only part that scrolls. */
+.narration__transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-3) var(--space-4);
+}
+
+.narration__line {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--space-1);
+  padding: var(--space-2);
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
+  font: inherit;
+  font-size: var(--fs-body-sm);
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+.narration__line:hover { background: rgba(255, 255, 255, 0.04); }
+.narration__line.is-past { color: var(--text-muted); }
+.narration__line.is-current {
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left-color: var(--accent);
+}
+
+.narration__credit {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+}
+
+.narration-launch .narration__icon--play { border-width: 5px 0 5px 8px; }
+.narration-launch .narration__icon--pause { width: 8px; height: 10px; }
+.narration-launch.is-playing { border-color: var(--accent); }
+/* Open, the column has its own close button, so the launcher steps aside. */
+.app.narration-open .narration-launch { display: none; }
+
+@media (max-width: 1100px) {
+  .app.narration-open,
+  .app.is-collapsed.narration-open { grid-template-columns: 264px 1fr; }
+  .app.is-collapsed.narration-open { grid-template-columns: 68px 1fr; }
+  .app.narration-open > .narration {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(var(--narration-w), 100vw);
+    z-index: 45;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+  }
+  .app.narration-open .canvas.is-expanded { right: 0; }
+  /* Toasts stay left of the column, which now lies over the page. */
+  .app.narration-open ~ .toasts { right: calc(min(var(--narration-w), 100vw) + var(--space-4)); }
+}
+
+/* Below 900px the sidebar is hidden and the page is one column. */
+@media (max-width: 900px) {
+  .app.narration-open,
+  .app.is-collapsed.narration-open { grid-template-columns: 1fr; }
+}
+
+/* On a phone the button shows its icon only; its label stays for screen
+   readers and in the hover text. */
+@media (max-width: 600px) {
+  .narration-launch > span:last-child { display: none; }
+  .app.narration-open ~ .toasts { right: var(--space-4); left: var(--space-4); z-index: 46; }
+}
+
+/* The Broken bar of an expanded diagram stops at the column. */
+@media (min-width: 1101px) {
+  body.canvas-expanded .app.narration-open .failbar:not([hidden]) { right: var(--narration-w); }
+}

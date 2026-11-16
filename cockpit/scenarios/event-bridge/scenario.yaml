@@ -113,7 +113,7 @@ diagram:
         - label: svc-br-store
           semp: /msgVpns/{vpn}/clientUsernames/svc-br-store
   flows:
-    - { from: hq, to: broker, label: prices, delay: 0 }
+    - { from: hq, to: broker, via: tostores, label: prices, delay: 0 }
     - { from: promos, to: broker, label: promotions, delay: 0 }
     - { from: broker, to: store, via: storeq, traffic: q.br.store, delay: 1.0 }
 

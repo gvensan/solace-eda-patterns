@@ -7,6 +7,7 @@ publisher can never take the cockpit UI down with it.
 """
 
 import asyncio
+import json
 import os
 import signal
 import time
@@ -53,6 +54,9 @@ class Run:
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._lines: deque = deque(maxlen=LOG_RING_SIZE)
         self._seq = 0
+        # The latest "@state {json}" the app printed: what it holds, for the
+        # table under the diagram. Kept out of the log.
+        self.holds: Optional[dict] = None
         # Subscribers are per-websocket queues. A slow browser tab must never
         # block process output, so queues are bounded and drop oldest-first.
         self._subscribers: set = set()
@@ -60,6 +64,12 @@ class Run:
     # ---- output plumbing -------------------------------------------------
 
     def _emit(self, stream: str, text: str) -> None:
+        if stream == "stdout" and text.startswith("@state "):
+            try:
+                self.holds = {**json.loads(text[len("@state "):]), "ts": time.time()}
+                return
+            except ValueError:
+                pass  # not a report after all: show it as output
         self._seq += 1
         line = LogLine(seq=self._seq, stream=stream, text=text)
         self._lines.append(line)

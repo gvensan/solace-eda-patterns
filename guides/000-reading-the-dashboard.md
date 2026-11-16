@@ -58,6 +58,36 @@ second; nothing moves on a timer.
 | <!-- indicator: seq-chip --> `A3`, `C1` in a consumer | The last updates this consumer handled, as a line packed against the right end: each one enters at the left of the line and leaves from the right end, oldest first, and the rest slide right as it drains: the order's letter and its sequence number. One order's numbers should rise one at a time. Each leaves after a few seconds, so the row shows recent work, not a backlog. |
 | <!-- indicator: seq-chip-flagged --> `A3!` with a red outline | The consumer's own log flagged that update: a **gap** (a number was skipped, so it went to another consumer) or an **out of order** arrival. It stays for 20 seconds, so you have time to point at it; newer updates wait behind it, in order. |
 
+## Following a message
+
+Some diagrams number their lines. Each number is one step a message takes,
+and the list under the diagram, **Follow a message**, says what happens at
+each step, grouped by the message it belongs to.
+
+| Mark | What it means |
+| --- | --- |
+| <!-- indicator: flow-step --> `1`, `2` in a circle on a line | The step this line is, in the list under the diagram. Numbers run on from one message's path to the next, so no two lines share one. Click it to highlight the whole path. |
+| <!-- indicator: flow-path --> A line you can click | Every numbered line can be clicked. Its whole path stays bright, with the apps and queues it passes, and everything else fades. Click it again, click empty space, or press Esc to clear it. |
+| <!-- indicator: box-hop --> A short line between two boxes inside the broker | The broker moving messages from one of its boxes into another, with no app sending them. The label says when it happens (Event Sourcing: "read back at start", the event history copied into the ledger's queue when the ledger starts). Nothing moves along it, because it happens only then. |
+| <!-- indicator: path-pick --> A path's name in **Follow a message** | Highlights that path on the diagram, the same as clicking one of its lines. The highlighted path is outlined in the list. |
+| <!-- indicator: canvas-expand --> **Expand** and **Collapse**, top right of the diagram | Fills the window with the diagram, its side panel and what each app holds, for a bigger picture or a projector. The **Broken** bar stays above it, so Reset is in reach. **Collapse** or Esc brings the page back. |
+
+## What each app holds
+
+Some scenarios are about what an app keeps because of the events it
+receives: a copy of another service's data, a read model, a database. Those
+show a card per app under the diagram, filled from the app's own reports
+and read every 3 seconds. An app that is not running shows no rows: what it
+held in memory went with it.
+
+| Mark | What it means |
+| --- | --- |
+| <!-- indicator: hold-count --> `8 customers` in a box's bottom row | How many rows the app holds right now, as it last reported. **0** (orange) means it holds nothing: a consumer that has lost its copy, say. Blank when the app is not running. |
+| <!-- indicator: hold-kept --> **in memory** or **on disk** on a card | Where the app keeps it. **in memory** (orange): a restart or a crash loses all of it. **on disk**: it is still there after a restart. |
+| <!-- indicator: hold-changed --> Green row in a card's table | That row changed since the last read, a few seconds ago: a new version arrived, or a row was added. Counters (lookups asked, say) are never marked: they change on every read. |
+| <!-- indicator: hold-last-change --> `Last change, 12:37:40: C-03: city Lyon to Leeds, version 6 to 7` under a table | The last time that table changed, and what changed. When one app keeps a copy of another's data, the same change shows on both cards, a moment apart. |
+| <!-- indicator: hold-match --> `Matches Customer Service: 8 of 8` on a card | The app keeps a copy of another app's data, and this compares the two on every column both share. Green: every row is there and the same. Orange: some rows are **missing** from the copy, or **different** (older or newer). **with Customer Service down** means it is compared with what the owner last reported before it stopped. |
+
 ## The rest of the page
 
 | Mark | What it means |
@@ -65,12 +95,19 @@ second; nothing moves on a timer.
 | <!-- indicator: broker-total --> `2 on broker` under the diagram | How many queues, client profiles, ACL profiles and client usernames the message VPN holds right now, across every scenario and including the broker's own defaults. Read every 5 seconds. The broker box in the diagram lists this scenario's own. |
 | <!-- indicator: running-count --> `3 running` in the top bar | Apps or steps running across every scenario. **Stop everything** ends them all. |
 | <!-- indicator: step-dot --> Dots on the Step through it flowchart | Each step's state, as on the diagram. Click a step to see what it does, and to run or stop it on its own. |
-| <!-- indicator: card-badge --> Badge on a Break it card | **Ready**: you can break it. **Not ready**: press Play first. **Starting**: Play is still starting the apps; wait for it. **Broken**: the failure is in effect, press Reset. **Reset the other first**: another card is in effect. **Recovered**: Reset is done and the log shows the recovery. |
+| <!-- indicator: card-tile --> The row of tiles in Break it | One tile per card. Click a tile to open its card underneath. The open tile is outlined and cannot be pressed again: red while its failure is in effect, green once it has been reset. While a card is in effect the other tiles are faded and locked (**Locked**); reset it first. |
+| <!-- indicator: card-tried --> `✓ tried` on a tile | You have broken and reset that card during this visit. You can open it and try it again. |
+| <!-- indicator: card-badge --> Badge on a Break it card or tile | **Ready**: you can break it. **Not ready**: press Play first. **Starting**: Play is still starting the apps; wait for it. **Broken**: the failure is in effect, press Reset. **Reset the other first** (**Locked** on a tile): another card is in effect. **Recovered**: Reset is done and the log shows the recovery. |
+| <!-- indicator: card-done --> **Done** on a recovered card | The card stays open after Reset so you can watch the recovery in the log. **Done** closes it and goes back to the tiles. |
 | <!-- indicator: failure-bar, failure-timer --> **Broken** bar at the top of the page, with `0:42` | A Break it card is in effect, and for how long. It stays at the top while you scroll. **Diagram** and **Card** jump to either; **Reset** puts things back, as on the card. |
 | <!-- indicator: inspect-updated, refresh-button --> `Updated 10:31:05` and **Refresh** in On the broker | When the tables were last read from the broker. They are read again every 5 seconds while the page is open; **Refresh** reads them now. |
 | <!-- indicator: broker-status --> Event broker, bottom left | **Ready** means the dashboard can reach the broker. **Starting** means it is still booting, which takes about a minute. **Unreachable** means the broker container is not running. |
 | <!-- indicator: sidebar-toggle, nav-collapsed --> `«` and `»`, left of the page title | Shrinks the sidebar to pattern numbers, for more room, and back. Collapsed, point at a number to see its pattern's name. The dot at the bottom is still the broker's status. Your choice is remembered in this browser. |
 | <!-- indicator: nav-search --> Find a pattern, the box under the logo | Type part of a pattern's name or its category and the list shortens to the matches. Enter opens the first match; Escape clears the box. |
+| <!-- indicator: narration-open, narration-close --> **Listen: the use case** in the top bar | A spoken overview of the pattern and the scenario's use case, a minute and a half to two minutes. It opens a column on the right with the controls and the transcript, and the page narrows to make room; the button hides while the column is open. `×` or Esc closes the column and the audio keeps playing: the button then says **Listening** and the time. Patterns without an overview have no button. |
+| <!-- indicator: narration-play, narration-rewind, narration-stop --> Play, `-10s` and the square, in the player | Play and pause; go back 10 seconds; stop and go back to the start. Nothing plays until you press play. |
+| <!-- indicator: narration-progress, narration-time --> The bar and `0:42 / 1:31` in the player | How far through the overview you are, and its length. Drag or click the bar to jump. |
+| <!-- indicator: narration-line --> A sentence in the transcript | The sentence being spoken is marked with a green bar and tint; those already spoken are greyed. Click any sentence to play from there. |
 
 | <!-- indicator: close-panel --> `×` on the side panel | Closes the panel. |
 

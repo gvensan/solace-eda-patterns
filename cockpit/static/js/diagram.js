@@ -111,13 +111,24 @@ const Diagram = (() => {
     return PART_HEAD + k * LANE_H + (k - 1) * LANE_GAP + PART_PAD;
   }
 
+  /* A hop inside the broker (a flow with into:) runs between two of its
+     boxes, so those two sit further apart, with room for the line and its
+     label. hopPairs is set on a copy of the broker node by render. */
+  const HOP_GAP = 30;
+  const hopKey = (a, b) => [a, b].sort().join("|");
+  function childGap(n, k) {
+    const kids = n.contains || [];
+    return kids[k + 1] && n.hopPairs?.has(hopKey(kids[k].id, kids[k + 1].id)) ? HOP_GAP : CHILD_GAP;
+  }
+  const isHop = (f) => f.into !== undefined;
+
   function nodeHeight(n) {
     // A point above and below the usual box, so the text keeps its room.
     if (isProcessor(n)) return NODE_H + HEX_POINT * 2;
     const kids = n.contains || [];
     if (!kids.length) return NODE_H + (n.seqRow ? SEQ_ROW : 0);
-    return CHILD_TOP + kids.reduce((t, c) => t + childHeight(c), 0)
-      + (kids.length - 1) * CHILD_GAP + CHILD_BOTTOM;
+    return CHILD_TOP + kids.reduce((t, c, k) => t + childHeight(c) + (k ? childGap(n, k - 1) : 0), 0)
+      + CHILD_BOTTOM;
   }
 
   /* A node holding configuration grows to fit its longest child label, so a
@@ -285,11 +296,12 @@ const Diagram = (() => {
        is the whole point: an object on the broker is part of the broker, not
        a separate destination something is sent to. */
     let slot = n.y + CHILD_TOP;
-    (n.contains || []).forEach((child) => {
+    (n.contains || []).forEach((child, k) => {
       const box = n.childBoxes?.get(child.id);
       const cyTop = box ? box.y : slot;
-      slot += childHeight(child) + CHILD_GAP;
+      slot += childHeight(child) + childGap(n, k);
       const kid = el("g", { class: "dg-node__child", "data-child": child.id || "" });
+      const textY = box?.grown ? cyTop + box.h / 2 + 4 : cyTop + 17;
 
       kid.append(el("rect", {
         x: n.x + CHILD_INSET, y: cyTop,
@@ -298,14 +310,14 @@ const Diagram = (() => {
       }));
       if (child.partitions) drawLanes(kid, n, child, cyTop);
       kid.append(el("text", {
-        x: n.x + CHILD_INSET + 8, y: cyTop + 17,
+        x: n.x + CHILD_INSET + 8, y: textY,
         class: "dg-node__child-label", "text-anchor": "start",
       }, child.label));
 
       // How many messages the queue holds now, read from the broker.
       if (child.depth) {
         kid.append(el("text", {
-          x: n.x + n.w - CHILD_INSET - 34, y: cyTop + 17,
+          x: n.x + n.w - CHILD_INSET - 34, y: textY,
           class: "dg-node__child-depth", "text-anchor": "end",
           "data-child-depth": child.id || "",
         }, ""));
@@ -314,7 +326,7 @@ const Diagram = (() => {
       /* The count is filled in from SEMP on each poll, like the node-level
          check, so a box reads as present or missing rather than assumed. */
       kid.append(el("text", {
-        x: n.x + n.w - CHILD_INSET - 8, y: cyTop + 17,
+        x: n.x + n.w - CHILD_INSET - 8, y: textY,
         class: "dg-node__child-count", "text-anchor": "end",
         "data-child-count": child.id || "",
       }, ""));
@@ -337,6 +349,15 @@ const Diagram = (() => {
       x: n.x + 12, y: n.y + n.h - 10 - base,
       class: "dg-node__check", "text-anchor": "start",
     }, ""));
+
+    // How many rows of what it holds (holds: count:), between the check and
+    // the logs button. The table under the diagram has the rows themselves.
+    if (n.holds?.count) {
+      g.append(el("text", {
+        x: n.x + (n.w - 8) / 2, y: n.y + n.h - 10 - base,
+        class: "dg-node__holds", "text-anchor": "middle",
+      }, ""));
+    }
 
     if (n.action) {
       const btn = el("g", { class: "dg-node__logbtn", "data-log": n.id,
@@ -413,27 +434,187 @@ const Diagram = (() => {
 
   function processorPath(from, to) {
     const r = PROC_CORNER;
+    /* Lines leave and arrive on the side facing the other end, so a
+       processor left of the broker is not reached by a line drawn across
+       the whole broker (and through the queues in it). */
     if (isProcessor(to)) {
-      const x1 = from.x + from.w;
       const cx = to.x + to.w / 2;
+      const right = cx > from.x + from.w / 2;
+      const x1 = right ? from.x + from.w : from.x;
+      const s = right ? 1 : -1;
       const lane = to.y - PROC_LANE;
       return {
-        d: `M ${x1} ${lane} H ${cx - r} Q ${cx} ${lane} ${cx} ${lane + r} V ${to.y}`,
+        d: `M ${x1} ${lane} H ${cx - s * r} Q ${cx} ${lane} ${cx} ${lane + r} V ${to.y}`,
         label: { x: (x1 + cx) / 2, y: lane - 6 },
       };
     }
     const cx = from.x + from.w / 2;
     const base = from.y + from.h;
     const lane = base + PROC_LANE;
-    const x2 = to.x + to.w;
+    const right = to.x + to.w / 2 > cx;
+    const x2 = right ? to.x : to.x + to.w;
+    const s = right ? 1 : -1;
     return {
-      d: `M ${cx} ${base} V ${lane - r} Q ${cx} ${lane} ${cx - r} ${lane} H ${x2}`,
+      d: `M ${cx} ${base} V ${lane - r} Q ${cx} ${lane} ${cx + s * r} ${lane} H ${x2}`,
       label: { x: (cx + x2) / 2, y: lane - 6 },
     };
   }
 
+  /* Where a queue box sits inside the broker: its placed position when the
+     broker moved its boxes (placeQueueBoxes), otherwise its stacked slot. */
+  function boxRectIn(broker, childId) {
+    const kids = broker.contains || [];
+    if (!kids.some((c) => c.id === childId)) return null;
+    const x = broker.x + CHILD_INSET;
+    const w = broker.w - CHILD_INSET * 2;
+    const placedBox = broker.childBoxes?.get(childId);
+    if (placedBox) return { x, w, y: placedBox.y, h: placedBox.h };
+    let top = broker.y + CHILD_TOP;
+    for (const [k, c] of kids.entries()) {
+      if (c.id === childId) return { x, w, y: top, h: childHeight(c) };
+      top += childHeight(c) + childGap(broker, k);
+    }
+    return null;
+  }
+
+  /* A processor publishing into a queue box: out of its bottom point and
+     along the lane below it, as processorPath, then up outside the broker's
+     edge, and level into the side of the box. Outside rather than up the
+     gap inside the broker, so the line reads as arriving from outside and
+     never runs past another queue on the way: that would read as going
+     into that queue too. It lands a little off the box's middle, on the
+     side it comes from (below the middle coming up, above it coming down),
+     so it stops short of a line leaving the box level and never crosses
+     it. */
+  /* One drawn size per layout unit for every diagram, so text and boxes
+     look the same on every page. Event Sourcing's diagram set the look: at
+     1.3 its text reads comfortably. Where the panel is too narrow for that,
+     every diagram shrinks by the same factor, as if it were as wide as
+     DIAGRAM_REF_W (about the widest diagram, Hierarchical Topics, 1006). */
+  const DIAGRAM_SCALE = 1.3;
+  const DIAGRAM_REF_W = 1010;
+  const OUTSIDE_RUN = 16;
+  const FORK_GAP = 14;
+  function processorIntoBox(from, broker, box, landing, run = OUTSIDE_RUN) {
+    const r = PROC_CORNER;
+    const cx = from.x + from.w / 2;
+    const base = from.y + from.h;
+    const lane = base + PROC_LANE;
+    const right = broker.x > cx;
+    const xv = right ? broker.x - run : broker.x + broker.w + run;
+    const xb = right ? box.x : box.x + box.w;
+    const mid = landing ?? box.y + box.h / 2;
+    const up = mid < lane;
+    const ye = landing ?? mid + (up ? 5 : -5);
+    const s = right ? 1 : -1;
+    // A landing within a few pixels of the lane would leave a small hook
+    // beside the box; the line runs straight in along the lane instead.
+    if (Math.abs(ye - lane) < 8) {
+      return {
+        d: `M ${cx} ${base} V ${lane - r} Q ${cx} ${lane} ${cx + s * r} ${lane} H ${xb}`,
+        label: { x: (cx + xv) / 2, y: lane - 6 },
+        badge: { x: (xv + xb) / 2, y: lane },
+      };
+    }
+    return {
+      d: `M ${cx} ${base} V ${lane - r} Q ${cx} ${lane} ${cx + s * r} ${lane} H ${xv - s * r} `
+        + `Q ${xv} ${lane} ${xv} ${up ? lane - r : lane + r} V ${up ? ye + 3 : ye - 3} `
+        + `Q ${xv} ${ye} ${xv + s * 3} ${ye} H ${xb}`,
+      label: { x: (cx + xv) / 2, y: lane - 6 },
+      // On the line's own upright, where a fork has split from its twin.
+      badge: { x: xv, y: (lane + ye) / 2 },
+    };
+  }
+
+  /* A direct line (no via:) meets the broker level with the pin at its
+     other end where the wall allows, so it runs straight across, and never
+     level with a queue box: there it reads as coming out of that queue.
+     The lines on one side keep their order and spacing. Repeats of one
+     line (a burst) stay one. */
+  function settleBrokerEnds(broker, flows, placed, ports) {
+    const boxes = (broker.contains || []).map((c) => boxRectIn(broker, c.id)).filter(Boolean);
+    const lo = broker.y + 12;
+    const hi = broker.y + broker.h - 12;
+    const clear = (y) => !boxes.some((b) => y > b.y - BOX_CLEAR && y < b.y + b.h + BOX_CLEAR);
+    const sides = new Map();
+    flows.forEach((f, i) => {
+      if (f.via || !ports[i]) return;
+      const k = f.from === broker.id ? 0 : f.to === broker.id ? 1 : -1;
+      if (k < 0 || !ports[i][k] || !ports[i][1 - k]) return;
+      const p = ports[i][k];
+      const key = `${p.x}`;
+      if (!sides.has(key)) sides.set(key, new Map());
+      const lines = sides.get(key);
+      const id = `${p.y}|${ports[i][1 - k].y}`;
+      if (!lines.has(id)) lines.set(id, { want: ports[i][1 - k].y, was: p.y, points: [] });
+      lines.get(id).points.push(p);
+    });
+    for (const lines of sides.values()) {
+      const ordered = [...lines.values()].sort((a, b) => a.want - b.want || a.was - b.was);
+      const spots = [];
+      for (let y = lo; y <= hi; y += 2) if (clear(y)) spots.push(y);
+      /* The closest fit that keeps every line in order and apart: a small
+         search over the clear heights. Tighter spacing if the wall is
+         short; if nothing fits, the lines stay where they were. */
+      for (const gap of [PORT_GAP, 10, 8]) {
+        const fit = fitInOrder(ordered.map((l) => Math.min(Math.max(l.want, lo), hi)), spots, gap);
+        if (!fit) continue;
+        ordered.forEach((l, k) => { for (const p of l.points) p.y = fit[k]; });
+        break;
+      }
+    }
+  }
+
+  /* Heights for wants (ascending) chosen from spots (ascending), in order,
+     at least gap apart, with the least total movement. Null if they do not
+     fit. Sizes here are a handful of lines and a few dozen spots. */
+  function fitInOrder(wants, spots, gap) {
+    const n = wants.length;
+    const m = spots.length;
+    let prev = spots.map((y) => Math.abs(y - wants[0]));
+    const from = [spots.map(() => -1)];
+    for (let j = 1; j < n; j++) {
+      const cur = new Array(m).fill(Infinity);
+      const back = new Array(m).fill(-1);
+      let best = Infinity;
+      let bestAt = -1;
+      let q = 0;
+      for (let c = 0; c < m; c++) {
+        // Best earlier spot at least gap above this one.
+        while (q < m && spots[q] <= spots[c] - gap) {
+          if (prev[q] < best) { best = prev[q]; bestAt = q; }
+          q += 1;
+        }
+        if (bestAt >= 0) {
+          cur[c] = best + Math.abs(spots[c] - wants[j]);
+          back[c] = bestAt;
+        }
+      }
+      prev = cur;
+      from.push(back);
+    }
+    let end = -1;
+    for (let c = 0; c < m; c++) if (prev[c] < Infinity && (end < 0 || prev[c] < prev[end])) end = c;
+    if (end < 0) return null;
+    const out = new Array(n);
+    for (let j = n - 1, c = end; j >= 0; j--) { out[j] = spots[c]; c = from[j][c]; }
+    return out;
+  }
+
   // Spacing between connection points on one edge of a node.
   const PORT_GAP = 14;
+  // How much of an app's side its lines spread over, when it has several.
+  const PIN_SPREAD = 0.4;
+  // Spacing between publishes that end in the same queue box.
+  const LANDING_GAP = 12;
+  // How far a direct line onto the broker stays from a queue box's edge.
+  const BOX_CLEAR = 8;
+  // Most space left between boxes spread over a tall broker (placeQueueBoxes).
+  const MAX_SPREAD = 60;
+  // How far a publish lands from a delivery leaving the same side of a box,
+  // and how far a grown box reaches past its outermost line.
+  const OUT_GAP = 30;
+  const LANDING_PAD = 9;
 
   /* Where each flow meets each node. Every edge of a node spreads its flows
      over separate points, ordered by where the other end sits, so a broker
@@ -450,9 +631,12 @@ const Diagram = (() => {
       if (!sides.has(key)) sides.set(key, { node, side, nx, ny, lanes: new Map() });
       const lanes = sides.get(key).lanes;
       /* Consumers of one queue leave the broker from one point, the queue's
-         box, so competing consumers read as a fan out of a single queue. */
-      const via = leaving && flows[i].via;
-      const lane = via ? `via:${via}` : `${other.id}${leaving ? ">" : "<"}`;
+         box, so competing consumers read as a fan out of a single queue. A
+         publish with via: lands on the box it goes into, the same way, so a
+         topic two queues subscribe to forks into both. Only the broker's end
+         is split by box: the publisher's end stays one point. */
+      const via = node.kind === "broker" && flows[i].via;
+      const lane = via ? `via:${via}${leaving ? ">" : "<"}` : `${other.id}${leaving ? ">" : "<"}`;
       if (!lanes.has(lane)) {
         lanes.set(lane, {
           otherY: 0,
@@ -484,11 +668,19 @@ const Diagram = (() => {
       const ordered = [...lanes.values()].sort(
         (a, b) => a.otherY - b.otherY || Number(a.back) - Number(b.back)
       );
-      const span = Math.min(node.h - 24, (ordered.length - 1) * PORT_GAP);
+      /* An app's lines are pinned across its whole side, not bunched in the
+         middle: one in the middle, two at either end of the side (30% and
+         70% down), more spread evenly between those, so each line is easy
+         to tell apart and to click. The broker's side is tall and meets
+         many apps, so there the lines stay close, aimed at the far ends. */
+      const pinned = node.kind !== "broker";
+      const span = pinned
+        ? (ordered.length > 1 ? Math.min(node.h - 24, Math.max(node.h * PIN_SPREAD, (ordered.length - 1) * PORT_GAP)) : 0)
+        : Math.min(node.h - 24, (ordered.length - 1) * PORT_GAP);
       const step = ordered.length > 1 ? span / (ordered.length - 1) : 0;
       // Centred on the far ends rather than on this node, so a tall broker
       // meets a short app level with it instead of from far above or below.
-      const aim = ordered.reduce((t, l) => t + l.otherY, 0) / ordered.length;
+      const aim = pinned ? node.y + node.h / 2 : ordered.reduce((t, l) => t + l.otherY, 0) / ordered.length;
       const centre = Math.min(Math.max(aim, node.y + 12 + span / 2), node.y + node.h - 12 - span / 2);
       ordered.forEach((lane, k) => {
         const point = { x: side === "L" ? node.x : node.x + node.w, y: centre - span / 2 + k * step };
@@ -513,11 +705,12 @@ const Diagram = (() => {
 
     if (![...placed.values()].some(isProcessor)) {
       let top = broker.y + CHILD_TOP;
-      kids.forEach((c) => {
+      kids.forEach((c, k) => {
         const mid = top + childHeight(c) / 2;
-        top += childHeight(c) + CHILD_GAP;
+        top += childHeight(c) + childGap(broker, k);
         flows.forEach((f, i) => {
           if (f.via === c.id && f.from === broker.id && ports[i][0]) ports[i][0].y = mid;
+          if (f.via === c.id && f.to === broker.id && ports[i][1]) ports[i][1].y = mid;
         });
       });
       return null;
@@ -558,17 +751,153 @@ const Diagram = (() => {
       boxes.set(c.id, { y: y1, h: y2 - y1 });
     }
 
-    // Fill the gaps from the top with the boxes nothing leaves through.
-    const taken = [...boxes.values()];
-    const clash = (y) => taken.some((b) => y < b.y + b.h + CHILD_GAP && y + CHILD_H + CHILD_GAP > b.y);
+    const gapTo = (a, b) => (broker.hopPairs?.has(hopKey(a, b)) ? HOP_GAP : CHILD_GAP);
+    const brokerMid = broker.x + broker.w / 2;
+    const sideOf = (n) => (n.x + n.w / 2 < brokerMid ? "left" : "right");
+    const intoOf = (id) => {
+      const into = [];
+      flows.forEach((f, i) => {
+        if (f.to !== broker.id || f.via !== id) return;
+        const from = placed.get(f.from);
+        if (!from) return;
+        // A processor's publish comes along the lane below it (processorIntoBox).
+        const fromY = isProcessor(from) ? from.y + from.h + PROC_LANE : ports[i][0]?.y ?? from.y;
+        into.push({ i, fromY, side: sideOf(from) });
+      });
+      return into;
+    };
+    /* A publish landing on the side of a box that a delivery leaves from
+       would arrive level with it, and the two read as one line. It lands
+       clear of the delivery instead, above it if it comes from above and
+       below if from below, and the box grows to hold both. Publishes on a
+       side with no delivery spread about the box's middle as before.
+       Returns false, changing nothing, when no publish shares a side with a
+       delivery or the taller box would not fit. */
+    const sideClearOfOuts = (id, box, into) => {
+      const outs = [];
+      flows.forEach((f, i) => {
+        if (f.from !== broker.id || f.via !== id) return;
+        const to = placed.get(f.to);
+        if (!to) return;
+        const y = isProcessor(to) ? clamp(to.y - PROC_LANE) : ports[i][0]?.y;
+        if (y !== undefined) outs.push({ side: sideOf(to), y });
+      });
+      if (!into.some((n) => outs.some((o) => o.side === n.side))) return false;
+      const landings = new Map();
+      const loose = [];
+      for (const side of ["left", "right"]) {
+        const ys = outs.filter((o) => o.side === side).map((o) => o.y);
+        const mine = into.filter((n) => n.side === side).sort((a, b) => a.fromY - b.fromY);
+        if (!ys.length) { loose.push(...mine); continue; }
+        const lo = Math.min(...ys);
+        const hi = Math.max(...ys);
+        const above = mine.filter((n) => n.fromY < (lo + hi) / 2);
+        const below = mine.filter((n) => n.fromY >= (lo + hi) / 2);
+        above.reverse().forEach((n, k) => landings.set(n.i, lo - OUT_GAP - k * LANDING_GAP));
+        below.forEach((n, k) => landings.set(n.i, hi + OUT_GAP + k * LANDING_GAP));
+      }
+      const ys = [...landings.values(), ...outs.map((o) => o.y)];
+      const y1 = Math.min(box.y, Math.min(...ys) - LANDING_PAD);
+      const y2 = Math.max(box.y + box.h, Math.max(...ys) + LANDING_PAD);
+      const fits = y1 >= top && y2 <= bottom
+        && [...boxes].every(([other, b]) => other === id
+          || y1 >= b.y + b.h + gapTo(other, id) || y2 + gapTo(other, id) <= b.y);
+      if (!fits) return false;
+      const span = (loose.length - 1) * LANDING_GAP;
+      loose.forEach((n, k) => landings.set(n.i, (y1 + y2) / 2 - span / 2 + k * LANDING_GAP));
+      box.y = y1;
+      box.h = y2 - y1;
+      box.grown = true;
+      box.landings = landings;
+      for (const [i, ly] of landings) if (ports[i][1]) ports[i][1].y = ly;
+      return true;
+    };
+    /* Boxes with deliveries leaving them grow first, so the boxes placed
+       freely below (fill) keep clear of the grown size. */
+    for (const [id, box] of [...boxes]) sideClearOfOuts(id, box, intoOf(id));
+
+    /* The boxes nothing leaves through go in the gap their place in
+       `contains:` puts them, between the placed boxes listed before and
+       after them, spread evenly there rather than packed at the top of a
+       tall broker. A gap too small for them falls back to the packing
+       below. */
+    const free = kids.filter((c) => !boxes.has(c.id));
+    const runs = [];
+    let run = null;
+    kids.forEach((c, k) => {
+      if (!free.includes(c)) { run = null; return; }
+      if (!run) { run = { before: kids[k - 1]?.id, ids: [] }; runs.push(run); }
+      run.ids.push(c.id);
+      run.after = kids[k + 1]?.id;
+    });
+    for (const r of runs) {
+      const lo = r.before && boxes.has(r.before) ? boxes.get(r.before) : null;
+      const hi = r.after && boxes.has(r.after) ? boxes.get(r.after) : null;
+      const from = lo ? lo.y + lo.h : top;
+      const to = hi ? hi.y : bottom;
+      const n = r.ids.length;
+      const room = to - from - n * CHILD_H;
+      if (room < (n + 1) * CHILD_GAP) continue;
+      // Equal space around each box, capped so a few boxes do not drift apart.
+      const gap = Math.min(room / (n + 1), MAX_SPREAD);
+      // A hop between two of them needs room for its line and label.
+      if (r.ids.some((id, k) => k && gap < gapTo(r.ids[k - 1], id))) continue;
+      let y = from + (room - gap * (n - 1)) / 2;
+      const placedHere = r.ids.map((id) => {
+        const box = { y, h: CHILD_H };
+        y += CHILD_H + gap;
+        return [id, box];
+      });
+      const ok = placedHere.every(([id, b]) => [...boxes].every(([other, o]) => other === id
+        || b.y >= o.y + o.h + gapTo(other, id) || b.y + b.h + gapTo(other, id) <= o.y));
+      if (ok) for (const [id, b] of placedHere) boxes.set(id, b);
+    }
+
+    // Any box still unplaced fills the gaps from the top, as close as fits.
+    const taken = [...boxes.entries()];
     for (const c of kids) {
       if (boxes.has(c.id)) continue;
+      const clash = (y) => taken.some(([id, b]) => y < b.y + b.h + gapTo(id, c.id) && y + CHILD_H + gapTo(id, c.id) > b.y);
       let y = top;
       while (clash(y) && y + CHILD_H < bottom) y += 2;
       const box = { y, h: CHILD_H };
       boxes.set(c.id, box);
-      taken.push(box);
+      taken.push([c.id, box]);
     }
+    // Publishes into a box arrive level with it.
+    flows.forEach((f, i) => {
+      const box = f.to === broker.id && boxes.get(f.via);
+      if (box && !box.grown && ports[i][1]) ports[i][1].y = box.y + box.h / 2;
+    });
+
+
+    /* Two or more publishes ending in one box would arrive at almost the
+       same point and read as one line. The box grows, about its middle, so
+       each lands at its own height, ordered by where it comes from so they
+       do not cross on the way in. Only where the taller box still clears
+       the other boxes and the broker's edges; otherwise it stays as it was. */
+    for (const [id, box] of boxes) {
+      if (displaced.has(id) || box.grown) continue;
+      const into = intoOf(id);
+      if (into.length < 2) continue;
+      const span = (into.length - 1) * LANDING_GAP;
+      const h = Math.max(box.h, span + CHILD_H);
+      const y = box.y + box.h / 2 - h / 2;
+      const clear = y >= top && y + h <= bottom
+        && [...boxes].every(([other, b]) => other === id
+          || y >= b.y + b.h + gapTo(other, id) || y + h + gapTo(other, id) <= b.y);
+      if (!clear) continue;
+      box.y = y;
+      box.h = h;
+      box.grown = true;
+      box.landings = new Map();
+      into.sort((a, b) => a.fromY - b.fromY).forEach(({ i }, k) => {
+        const ly = y + h / 2 - span / 2 + k * LANDING_GAP;
+        box.landings.set(i, ly);
+        if (ports[i][1]) ports[i][1].y = ly;
+      });
+    }
+
     /* A displaced box's lines leave from the box's own height, on the side
        facing their consumer, and curve to the consumer's near side. Flows
        into a processor have no ports of their own (they normally run on its
@@ -594,11 +923,21 @@ const Diagram = (() => {
     /* A consumer of a partitioned queue is a little taller, for the row of
        updates it handled. Copies, so the scenario's own data is untouched. */
     const lanesOf = partitionBox(diagram);
+    /* Hops inside the broker (into:) take no part in placing nodes or
+       routing lines between them; they are drawn between two boxes once
+       the boxes are placed. The routing code sees an empty stand-in, so
+       flow indexes stay the same everywhere. */
+    const hops = flows.filter(isHop);
+    const laid = flows.map((f) => (isHop(f) ? { id: f.id } : f));
     const nodes = (diagram.nodes || []).map((n) => (lanesOf
-      && n.flowOn?.queue === lanesOf.child.partitions.queue ? { ...n, seqRow: true } : n));
+      && n.flowOn?.queue === lanesOf.child.partitions.queue ? { ...n, seqRow: true } : n))
+      .map((n) => {
+        const mine = hops.filter((f) => f.from === n.id);
+        return mine.length ? { ...n, hopPairs: new Set(mine.map((f) => hopKey(f.via, f.into))) } : n;
+      });
     if (!nodes.length) return;
 
-    const { placed, canvasW, canvasH } = layout(nodes, flows);
+    const { placed, canvasW, canvasH } = layout(nodes, laid);
 
     const svg = el("svg", {
       viewBox: `0 0 ${canvasW} ${canvasH}`,
@@ -606,6 +945,8 @@ const Diagram = (() => {
       role: "img",
       "aria-label": diagram.caption || "Scenario data flow",
       preserveAspectRatio: "xMidYMid meet",
+      style: `--dg-w: ${Math.round(canvasW * DIAGRAM_SCALE)}px; `
+        + `--dg-f: ${Math.min(1, canvasW / DIAGRAM_REF_W).toFixed(4)}`,
     });
 
     const defs = el("defs");
@@ -613,6 +954,11 @@ const Diagram = (() => {
       id: "dg-arrow", viewBox: "0 0 10 10", refX: "9", refY: "5",
       markerWidth: "5", markerHeight: "5", orient: "auto-start-reverse",
     }, el("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "dg-arrowhead" })));
+    // The same arrowhead, bright, for a line on a highlighted path.
+    defs.append(el("marker", {
+      id: "dg-arrow-on", viewBox: "0 0 10 10", refX: "9", refY: "5",
+      markerWidth: "5", markerHeight: "5", orient: "auto-start-reverse",
+    }, el("path", { d: "M 0 0 L 10 5 L 0 10 z", class: "dg-arrowhead dg-arrowhead--on" })));
     svg.append(defs);
 
     const edges = el("g", { class: "dg-edges" });
@@ -620,12 +966,145 @@ const Diagram = (() => {
     const reduceMotion = window.matchMedia
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    const ports = assignPorts(flows, placed);
+    const ports = assignPorts(laid, placed);
     for (const n of placed.values()) {
-      if (n.kind === "broker") n.childBoxes = placeQueueBoxes(n, flows, placed, ports);
+      if (n.kind === "broker") n.childBoxes = placeQueueBoxes(n, laid, placed, ports);
     }
 
+    /* A direct message into a processor whose top lane already carries a
+       queue's messages would run along that lane from the queue's box, and
+       read as coming out of it (a request delivered to the service that
+       also reads the queue). It goes into the processor's near side
+       instead, level with its middle, from bare broker wall. */
     flows.forEach((f, i) => {
+      const from = placed.get(f.from);
+      const to = placed.get(f.to);
+      if (!from || !to || from.kind !== "broker" || !isProcessor(to) || f.via) return;
+      if (!flows.some((g) => g.from === f.from && g.to === f.to && g.via)) return;
+      const right = to.x > from.x;
+      const y = to.y + to.h / 2;
+      ports[i] = [
+        { x: right ? from.x + from.w : from.x, y, nx: right ? 1 : -1, ny: 0 },
+        { x: right ? to.x : to.x + to.w, y, nx: right ? -1 : 1, ny: 0 },
+      ];
+      ports[i].free = true;
+    });
+    for (const n of placed.values()) {
+      if (n.kind === "broker") settleBrokerEnds(n, laid, placed, ports);
+    }
+
+    /* Paths (`paths:`): the routes one message takes, as numbered steps.
+       Numbers run on from one path to the next, so every number on the
+       picture is different; the list under the diagram groups them. */
+    const stepOf = new Map();
+    const flowIndex = new Map(flows.map((f, i) => [f.id, i]));
+    let number = 0;
+    (diagram.paths || []).forEach((path, k) => {
+      for (const st of path.steps || []) {
+        const i = flowIndex.get(st.flow);
+        if (i === undefined) continue;
+        number += 1;
+        stepOf.set(i, { path: k, number, text: st.text, label: path.label, at: st.at });
+        // `also:` names the other branches of the same publish (a fork into
+        // several boxes): one step, one number, every branch on the path.
+        for (const id of [].concat(st.also || [])) {
+          const j = flowIndex.get(id);
+          if (j !== undefined) stepOf.set(j, { path: k, number, text: st.text, label: path.label, branch: true });
+        }
+      }
+    });
+    const steps = el("g", { class: "dg-steps" });
+
+    /* A line on a path gets its step number, and a wide invisible twin
+       that takes the click, since a 1px dashed line is hard to hit. */
+    const addStep = (i, d, f, labelBox) => {
+      const step = stepOf.get(i);
+      if (!step) return false;
+      const say = `Step ${step.number}, "${step.label}": ${step.text}. `
+        + "Click to highlight this message's whole path. Click again, or press Esc, to clear";
+      const hit = el("path", { d, class: "dg-edge__hit", "data-flow": i, "data-path": step.path });
+      indicator(hit, "flow-path", say);
+      edges.append(hit);
+      // A branch of a step's publish: on the path, numbered once, elsewhere.
+      if (step.branch) return true;
+      /* Beside the label rather than on it: before it on a level line,
+         and a little back along a curve from where the label sits. */
+      const probe = el("path", { d });
+      const len = probe.getTotalLength();
+      let pt;
+      if (step.at !== undefined) pt = probe.getPointAtLength(len * step.at);
+      else if (labelBox?.badge) pt = labelBox.badge;
+      else if (labelBox?.x !== undefined) {
+        pt = { x: labelBox.x - (f.label.length * LABEL_CHAR_W) / 2 - 12, y: labelBox.y };
+      } else if (labelBox) {
+        const t = labelBox.level ? labelBox.at : labelBox.at > 0.4 ? labelBox.at - 0.3 : labelBox.at + 0.3;
+        pt = probe.getPointAtLength(len * t);
+        if (labelBox.level) pt = { x: pt.x - (f.label.length * LABEL_CHAR_W) / 2 - 12, y: pt.y };
+      } else pt = probe.getPointAtLength(len * 0.5);
+      const badge = el("g", { class: "dg-step", "data-flow": i, "data-path": step.path },
+        el("circle", { cx: pt.x, cy: pt.y, r: 7.5 }),
+        el("text", { x: pt.x, y: pt.y + 3.2, "text-anchor": "middle" }, String(step.number)));
+      indicator(badge, "flow-step", say);
+      steps.append(badge);
+      return true;
+    };
+
+    /* Publishes from one processor into several boxes share its lane, then
+       fork. Each turns up its own upright, the one going furthest outermost,
+       so the uprights run side by side and never cross. */
+    const runOf = new Map();
+    const forks = new Map();
+    flows.forEach((f, i) => {
+      const from = placed.get(f.from);
+      const to = placed.get(f.to);
+      if (!from || !to || !isProcessor(from) || !f.via || to.kind !== "broker" || ports[i]?.free) return;
+      const box = boxRectIn(to, f.via);
+      if (!box) return;
+      const lane = from.y + from.h + PROC_LANE;
+      const y = to.childBoxes?.get(f.via)?.landings?.get(i) ?? box.y + box.h / 2;
+      if (!forks.has(from.id)) forks.set(from.id, []);
+      forks.get(from.id).push({ i, reach: Math.abs(lane - y) });
+    });
+    for (const list of forks.values()) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => a.reach - b.reach).forEach(({ i }, k) => runOf.set(i, OUTSIDE_RUN + k * FORK_GAP));
+    }
+
+    /* A hop inside the broker: a straight line across the gap between two
+       of its boxes, labelled beside it. Nothing animates on it, because it
+       happens only at the moment its label names, not all the time. */
+    const drawHop = (f, i) => {
+      const broker = placed.get(f.from);
+      const a = broker && boxRectIn(broker, f.via);
+      const b = broker && boxRectIn(broker, f.into);
+      if (!a || !b) return;
+      const name = (id) => (broker.contains || []).find((c) => c.id === id)?.label || id;
+      const x = a.x + a.w * 0.45;
+      const down = b.y > a.y;
+      const y0 = down ? a.y + a.h : a.y;
+      const y1 = down ? b.y : b.y + b.h;
+      const d = `M ${x} ${y0} V ${y1}`;
+      const say = `${f.label}: the broker moves messages from ${name(f.via)} into ${name(f.into)}. `
+        + "No app sends them, and nothing moves on this line, because it happens only then.";
+      const line = el("path", { d, class: "dg-edge dg-edge--hop", "marker-end": "url(#dg-arrow)", "data-flow": i });
+      const text = el("text", {
+        x: x + 12, y: (y0 + y1) / 2 + 3, class: "dg-edge__label", "data-flow": i,
+      }, f.label);
+      indicator(text, "box-hop", say);
+      edges.append(line, text);
+      // The number beside the line, not on it: the line is short.
+      if (!addStep(i, d, f, { badge: { x: x - 14, y: (y0 + y1) / 2 } })) {
+        const hit = el("path", { d, class: "dg-edge__hit", "data-flow": i });
+        indicator(hit, "box-hop", say);
+        edges.append(hit);
+      }
+    };
+
+    flows.forEach((f, i) => {
+      if (isHop(f)) {
+        drawHop(f, i);
+        return;
+      }
       const from = placed.get(f.from);
       const to = placed.get(f.to);
       // A flow naming a node that does not exist is a typo in the scenario, not
@@ -633,21 +1112,42 @@ const Diagram = (() => {
       if (!from || !to) return;
       // Lines out of a partitioned queue are drawn per lane, from broker
       // data, by paintPartitions.
-      if (lanesOf && f.via === lanesOf.child.id) return;
+      if (lanesOf && f.via === lanesOf.child.id && from.kind === "broker") return;
 
       const back = isBack(from, to);
-      const routed = (isProcessor(from) || isProcessor(to)) && !ports[i].free ? processorPath(from, to) : null;
-      const d = routed ? routed.d : flowPath(...ports[i]);
+      const intoBox = f.via && to.kind === "broker" ? boxRectIn(to, f.via) : null;
+      const routed = (isProcessor(from) || isProcessor(to)) && !ports[i].free
+        ? (intoBox && isProcessor(from)
+          ? processorIntoBox(from, to, intoBox, to.childBoxes?.get(f.via)?.landings?.get(i), runOf.get(i))
+          : processorPath(from, to))
+        : null;
+      let d = routed ? routed.d : flowPath(...ports[i]);
+      // On from the broker's edge to the queue box the publish goes into.
+      if (intoBox && !routed) d += ` H ${ports[i][1].x <= to.x + to.w / 2 ? intoBox.x : intoBox.x + intoBox.w}`;
+      /* A delivery starts at the queue box it comes out of, as a publish ends
+         at the box it goes into: the queue sends it, not the broker as a
+         whole. Only when the line leaves level with the box. */
+      const outBox = f.via && from.kind === "broker" && to.kind !== "broker" ? boxRectIn(from, f.via) : null;
+      const start = outBox && d.match(/^M\s*(-?[\d.]+)[\s,]+(-?[\d.]+)/);
+      if (start && +start[2] >= outBox.y && +start[2] <= outBox.y + outBox.h) {
+        const edge = +start[1] >= from.x + from.w / 2 ? outBox.x + outBox.w : outBox.x;
+        if (Math.abs(edge - +start[1]) > 0.5) d = `M ${edge} ${start[2]} H ${start[1]}` + d.slice(start[0].length);
+      }
       const pathId = `dg-flow-${i}`;
 
       edges.append(el("path", {
-        id: pathId, d, class: "dg-edge", "marker-end": "url(#dg-arrow)",
+        id: pathId, d, class: "dg-edge", "marker-end": "url(#dg-arrow)", "data-flow": i,
       }));
 
+      let labelBox = null;
+      // A fork's number goes on its own upright: the lane is shared.
+      if (routed?.badge && runOf.has(i)) labelBox = { badge: routed.badge };
+      else if (f.label && routed) labelBox = { x: routed.label.x, y: routed.label.y + 6, level: true };
       if (f.label && routed) {
         // A processor lane is level, so its label sits flat along it.
         edges.append(el("text", {
           x: routed.label.x, y: routed.label.y, class: "dg-edge__label", "text-anchor": "middle",
+          "data-flow": i,
         }, f.label));
       } else if (f.label) {
         /* Set flat rather than along the path: a textPath rotates with the
@@ -666,7 +1166,9 @@ const Diagram = (() => {
            and below its line: the app end is where it is distinct from the
            other flows arriving at the broker, and below keeps it clear of the
            label on the consume running the other way above it. */
-        const at = rise < 4 ? 0.5 : back ? 0.35 : 0.78;
+        // labelAt: on the flow overrides it, for a long label near a node.
+        const at = f.labelAt ?? (rise < 4 ? 0.5 : back ? 0.35 : 0.78);
+        labelBox = { at, level: rise < 4 };
 
         // Path geometry is measurable without being in the document, so this
         // works while the svg is still being assembled.
@@ -675,8 +1177,11 @@ const Diagram = (() => {
 
         edges.append(el("text", {
           x: pt.x, y: back ? pt.y + 16 : pt.y - 9, class: "dg-edge__label", "text-anchor": "middle",
+          "data-flow": i,
         }, f.label));
       }
+
+      addStep(i, d, f, labelBox);
 
       /* The moving part. Each flow's packet is offset in time so a fan-out
          reads as one message being copied outward rather than three unrelated
@@ -724,8 +1229,22 @@ const Diagram = (() => {
     }
 
     // Edges beneath nodes, packets above, so a packet passing a box is visible
-    // but a line never crosses a label.
-    svg.append(edges, nodeLayer, packets);
+    // but a line never crosses a label. Step numbers sit on top of both.
+    svg.append(edges, nodeLayer, packets, steps);
+
+    if (stepOf.size) {
+      svg.classList.add("has-paths");
+      svg.__paths = { diagram, flows, onPath: handlers.onPath };
+      svg.addEventListener("click", (e) => {
+        const on = e.target.closest?.("[data-path]");
+        if (on) {
+          const k = Number(on.dataset.path);
+          selectPath(host, svg.__paths.current === k ? null : k);
+        } else if (!e.target.closest?.(".dg-node")) {
+          selectPath(host, null);
+        }
+      });
+    }
 
     const figure = document.createElement("figure");
     figure.className = "dg-figure";
@@ -737,6 +1256,35 @@ const Diagram = (() => {
       figure.append(cap);
     }
     host.append(figure);
+  }
+
+  /* Highlight one path (index into diagram.paths), or none. Everything on
+     it stays bright: its lines, labels, packets and numbers, the nodes it
+     passes and the queue boxes it goes through. The rest dims, so the
+     message's whole route reads at a glance. */
+  function selectPath(host, k) {
+    const svg = host.querySelector(".dg");
+    const ctx = svg?.__paths;
+    if (!ctx) return;
+    const path = k === null || k === undefined ? null : ctx.diagram.paths?.[k];
+    ctx.current = path ? k : null;
+    svg.classList.toggle("has-path", Boolean(path));
+    for (const x of svg.querySelectorAll(".on-path")) x.classList.remove("on-path");
+    for (const x of svg.querySelectorAll(".dg-edge[marker-end]")) x.setAttribute("marker-end", "url(#dg-arrow)");
+    if (path) {
+      const index = new Map(ctx.flows.map((f, i) => [f.id, i]));
+      for (const id of (path.steps || []).flatMap((st) => [st.flow, ...[].concat(st.also || [])])) {
+        const i = index.get(id);
+        if (i === undefined) continue;
+        const f = ctx.flows[i];
+        for (const x of svg.querySelectorAll(`[data-flow="${i}"]`)) x.classList.add("on-path");
+        svg.querySelector(`.dg-edge[data-flow="${i}"]`)?.setAttribute("marker-end", "url(#dg-arrow-on)");
+        for (const id of [f.from, f.to]) svg.querySelector(`.dg-node[data-node="${id}"]`)?.classList.add("on-path");
+        if (f.via) svg.querySelector(`[data-child="${f.via}"]`)?.classList.add("on-path");
+        if (f.into) svg.querySelector(`[data-child="${f.into}"]`)?.classList.add("on-path");
+      }
+    }
+    ctx.onPath?.(ctx.current);
   }
 
   /* Apply live state to an already-rendered diagram.
@@ -775,7 +1323,7 @@ const Diagram = (() => {
     const flowLive = (f, seen = new Set()) => {
       // A flow that only carries the odd message (to a dead message queue,
       // say) is drawn but never animated, so it never looks busy.
-      if (f.animate === false) return false;
+      if (f.animate === false || isHop(f)) return false;
       if (f.from !== brokerId) return publishing(f.from, seen);
       if (!running(f.to)) return false;
       // Tied to a queue: moves only while messages are arriving on it, as the
@@ -833,6 +1381,17 @@ const Diagram = (() => {
         ? "missing"
         : "idle";
       node.setAttribute("data-status", status);
+
+      const holdsEl = node.querySelector(".dg-node__holds");
+      if (holdsEl) {
+        const spec = (diagram.nodes || []).find((x) => x.id === id);
+        const unit = spec?.holds?.count || "";
+        const rows = s.running && s.holds ? (s.holds.rows || []).length : null;
+        holdsEl.textContent = rows === null ? "" : rows === 1 ? `1 ${unit.replace(/s$/, "")}` : `${rows} ${unit}`;
+        holdsEl.setAttribute("data-empty", String(rows === 0));
+        indicator(holdsEl, "hold-count", rows === null ? null
+          : `${spec.label} holds ${holdsEl.textContent} right now, as it last reported. The table under the diagram lists them`);
+      }
       // The broker's action is applying configuration, so its states read
       // as that rather than as an app's.
       const holder = node.classList.contains("is-broker");
@@ -976,7 +1535,8 @@ const Diagram = (() => {
     let d = `M ${x1 - 8} ${y1} C ${x1 + 26} ${y1}, ${x2 + 26} ${y2}, ${x2 - 8} ${y2}`;
     // On along the line to the reader of this queue, if it is running.
     const flows = diagram.flows || [];
-    const i = flows.findIndex((f) => f.via === spec.id && state.nodes?.[f.to]?.running);
+    const brokerId = (diagram.nodes || []).find((n) => n.kind === "broker")?.id;
+    const i = flows.findIndex((f) => f.via === spec.id && f.from === brokerId && state.nodes?.[f.to]?.running);
     const line = i >= 0 ? svg.querySelector(`#dg-flow-${i}`) : null;
     const m = line?.getAttribute("d").match(/^M\s*([-\d.]+)[\s,]+([-\d.]+)\s*(.*)$/);
     if (m) d += ` L ${m[1]} ${m[2]} ${m[3]}`;
@@ -1480,5 +2040,5 @@ const Diagram = (() => {
     }
   }
 
-  return { render, paint, paintPartitions };
+  return { render, paint, paintPartitions, selectPath };
 })();

@@ -33,6 +33,9 @@ if [ -f .env.dev ]; then
   # shellcheck disable=SC1091
   source .env.dev
   set +a
+  # Only narrate.py uses it, and it reads .env.dev itself: keep it out of
+  # the environment every workshop app inherits.
+  unset ELEVENLABS_API_KEY
 fi
 
 export COCKPIT_DEV=1

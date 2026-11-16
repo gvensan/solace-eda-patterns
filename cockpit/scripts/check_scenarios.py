@@ -54,9 +54,25 @@ def check(path: pathlib.Path) -> list[str]:
         if not isinstance(line, str):
             bad.append(f"objective {i + 1} is not plain text; quote it if it contains ': '")
     for mode in spec.get("failure_modes", []) or []:
-        for key in ("title", "breaks", "watch", "why", "real_world"):
+        for key in ("title", "breaks", "why", "real_world"):
             if key in mode and not isinstance(mode[key], str):
                 bad.append(f"failure mode {mode.get('id', '?')!r} {key} is not plain text")
+        # watch: is plain text, or the four parts of the story, all of them,
+        # each plain text: normally, broke, impact, recover.
+        watch = mode.get("watch")
+        if isinstance(watch, dict):
+            parts = ("normally", "broke", "impact", "recover")
+            missing = [p for p in parts if p not in watch]
+            extra = [k for k in watch if k not in parts]
+            if missing or extra:
+                bad.append(f"failure mode {mode.get('id', '?')!r} watch needs exactly "
+                           f"{', '.join(parts)}" + (f"; missing {', '.join(missing)}" if missing else "")
+                           + (f"; unknown {', '.join(map(str, extra))}" if extra else ""))
+            for p in parts:
+                if p in watch and not isinstance(watch[p], str):
+                    bad.append(f"failure mode {mode.get('id', '?')!r} watch {p} is not plain text")
+        elif watch is not None and not isinstance(watch, str):
+            bad.append(f"failure mode {mode.get('id', '?')!r} watch is not plain text")
 
     for step in spec.get("run", []) + spec.get("cleanup", []):
         if step not in actions:
@@ -146,6 +162,21 @@ def check(path: pathlib.Path) -> list[str]:
     for flow in spec.get("diagram", {}).get("flows", []) or []:
         if flow.get("via") and flow["via"] not in boxes:
             bad.append(f"diagram flow via {flow['via']!r} is not a box the broker contains")
+        # A hop inside the broker, from one of its boxes to another:
+        # { from: broker, to: broker, via: <from box>, into: <to box> }.
+        if "into" in flow:
+            owner = next((n for n in spec.get("diagram", {}).get("nodes", [])
+                          if n.get("id") == flow.get("from")), {})
+            mine = {c.get("id") for c in owner.get("contains", []) or []}
+            if owner.get("kind") != "broker" or flow.get("to") != flow.get("from"):
+                bad.append(f"diagram flow into {flow['into']!r} needs from: and to: both naming the broker")
+            elif flow.get("via") not in mine or flow["into"] not in mine or flow["via"] == flow["into"]:
+                bad.append(f"diagram flow into {flow['into']!r} needs via: and into: naming two different boxes of {flow['from']!r}")
+            elif not (isinstance(flow.get("label"), str) and flow["label"].strip()):
+                bad.append(f"diagram flow into {flow['into']!r} needs a label: saying when the broker moves messages between the boxes")
+        at = flow.get("labelAt")
+        if at is not None and not (isinstance(at, (int, float)) and 0 <= at <= 1):
+            bad.append(f"diagram flow labelAt {at!r} must be a number from 0 to 1 along the line")
         src = flow.get("source")
         for s in ([src] if isinstance(src, str) else src or []):
             if s not in node_ids:
@@ -171,6 +202,8 @@ def check(path: pathlib.Path) -> list[str]:
     bad.extend(check_partitions(spec, here, actions))
     bad.extend(check_settings(spec, actions, node_ids))
     bad.extend(check_in_flight(spec))
+    bad.extend(check_holds(spec))
+    bad.extend(check_paths(spec))
 
     live = spec.get("diagram", {}).get("liveWhen")
     if live and live not in node_ids:
@@ -270,9 +303,12 @@ def check_expect(mid, expect, actions, spec) -> list:
         allowed = ("play",) if mid == "(play)" else ("break", "reset")
         if phase not in allowed:
             continue
-        if not isinstance(part, dict) or not (part.get("logs") or part.get("partitions") or part.get("boxes")):
-            bad.append(f"{where} {phase} needs a non-empty logs: list, partitions: or boxes: checks")
+        if not isinstance(part, dict) or not (part.get("logs") or part.get("partitions")
+                                              or part.get("boxes") or part.get("holds")):
+            bad.append(f"{where} {phase} needs a non-empty logs: list, partitions:, boxes: or holds: checks")
             continue
+        if "holds" in part:
+            bad.extend(check_holds_expect(f"{where} {phase}", part["holds"], spec))
         if "partitions" in part:
             bad.extend(check_partition_expect(f"{where} {phase}", part["partitions"], spec))
         if "boxes" in part:
@@ -327,6 +363,188 @@ def partition_box(spec):
             if child.get("partitions") is not None:
                 return node, child
     return None
+
+
+def check_holds(spec) -> list:
+    """holds: on a node shows what its app holds, from the app's own reports
+    (solace.NewHolding), as a table under the diagram.
+
+        holds:
+          kept: memory | disk
+          count: <unit>          # optional: row count drawn on the node
+          role: <one sentence>   # optional: what this app is in the pattern
+          copyOf: <node id>      # optional: compare with what that node holds
+          counters: true         # optional: rows are counters, never marked as changed
+
+    kept says whether it survives a restart, which the page states and acts
+    on (in memory is shown as gone once the app stops). A scenario with any
+    holds: has a diagram holdsCaption: saying what to look for."""
+    bad = []
+    nodes = spec.get("diagram", {}).get("nodes", []) or []
+    holders = {n.get("id") for n in nodes if n.get("holds")}
+    if holders and not (isinstance(spec["diagram"].get("holdsCaption"), str)
+                        and spec["diagram"]["holdsCaption"].strip()):
+        bad.append("diagram needs a holdsCaption: saying what to look for in what the apps hold")
+    for node in nodes:
+        holds = node.get("holds")
+        if holds is None:
+            continue
+        where = f"diagram node {node.get('id')!r} holds"
+        if not isinstance(holds, dict):
+            bad.append(f"{where} must be a mapping")
+            continue
+        if holds.get("kept") not in ("memory", "disk"):
+            bad.append(f"{where} needs kept: memory or kept: disk")
+        if "count" in holds and not (isinstance(holds["count"], str) and holds["count"].strip()):
+            bad.append(f"{where} count: must name a unit, like customers")
+        for key in ("role",):
+            if key in holds and not (isinstance(holds[key], str) and holds[key].strip()):
+                bad.append(f"{where} {key}: must be a sentence")
+        if "copyOf" in holds and (holds["copyOf"] not in holders or holds["copyOf"] == node.get("id")):
+            bad.append(f"{where} copyOf: must name another node that has holds:")
+        if "counters" in holds and not isinstance(holds["counters"], bool):
+            bad.append(f"{where} counters: must be true or false")
+        extra = set(holds) - {"kept", "count", "role", "copyOf", "counters"}
+        if extra:
+            bad.append(f"{where} has unknown key(s) {sorted(extra)}")
+        if not node.get("action"):
+            bad.append(f"{where} needs the node to have an action: the app that reports it")
+    return bad
+
+
+def check_paths(spec) -> list:
+    """paths: on the diagram names the routes a message takes, as steps
+    along flows. The page numbers the steps on the lines, lists them under
+    the diagram, and highlights a whole path when one of its lines is
+    clicked.
+
+        flows:
+          - { id: place-order, from: checkout, to: broker, via: commands }
+        paths:
+          - label: A command becomes an order
+            steps:
+              - { flow: place-order, text: Checkout sends a place-order command }
+              # at: 0.3 moves the step's number along its line (default 0.5)
+              # also: [ids] names the other branches of the same publish (a
+              # fork into several boxes): on the path, under one number
+
+    Each step names a flow by its id:, and the steps join up: after the
+    first, a step starts where an earlier step ended, or where the first
+    began (a fan-out). A step out of the broker through a queue needs an
+    earlier step into that queue, and one out of the broker with no queue
+    an earlier step into the broker with none, so a path never jumps
+    between messages that are not the same one."""
+    diagram = spec.get("diagram", {}) or {}
+    flows = diagram.get("flows", []) or []
+    paths = diagram.get("paths")
+    bad = []
+    ids = [f.get("id") for f in flows if f.get("id") is not None]
+    for dup in sorted({i for i in ids if ids.count(i) > 1}):
+        bad.append(f"diagram flow id {dup!r} is used twice")
+    if paths is None:
+        return bad
+    if not isinstance(paths, list) or not paths:
+        return bad + ["diagram paths: must be a non-empty list"]
+    by_id = {f["id"]: f for f in flows if f.get("id") is not None}
+    brokers = {n.get("id") for n in diagram.get("nodes", []) if n.get("kind") == "broker"}
+    used = set()
+    for k, path in enumerate(paths, 1):
+        where = f"diagram path {k}"
+        if not isinstance(path, dict):
+            bad.append(f"{where} must be a mapping")
+            continue
+        if not (isinstance(path.get("label"), str) and path["label"].strip()):
+            bad.append(f"{where} needs a label: saying what the message is")
+        extra = set(path) - {"label", "steps"}
+        if extra:
+            bad.append(f"{where} has unknown key(s) {sorted(extra)}")
+        steps = path.get("steps")
+        if not isinstance(steps, list) or not steps:
+            bad.append(f"{where} needs a non-empty steps: list")
+            continue
+        reached, into = set(), set()
+        for j, step in enumerate(steps, 1):
+            at = f"{where} step {j}"
+            if not isinstance(step, dict) or step.get("flow") not in by_id:
+                bad.append(f"{at} must name a flow by its id:")
+                continue
+            if not (isinstance(step.get("text"), str) and step["text"].strip()):
+                bad.append(f"{at} needs text: saying what happens")
+            if step["flow"] in used:
+                bad.append(f"{at}: flow {step['flow']!r} is already a step; each line carries one number")
+            used.add(step["flow"])
+            f = by_id[step["flow"]]
+            hop = "into" in f
+            if j == 1:
+                reached.add(f.get("from"))
+            elif f.get("from") not in reached:
+                bad.append(f"{at} starts at {f.get('from')!r}, which no earlier step reaches")
+            # A hop inside the broker may open a path: what it moves was
+            # stored before (a replay from a log, say).
+            if hop:
+                if j > 1 and f.get("via") not in into:
+                    bad.append(f"{at} moves messages out of {f.get('via')!r}, but no earlier step goes into it")
+                into.add(f.get("into"))
+            elif f.get("from") in brokers and f.get("via") not in into:
+                bad.append(f"{at} leaves the broker through {f.get('via') or 'no queue'!r}, "
+                           "but no earlier step goes into it")
+            if f.get("to") in brokers and not hop:
+                into.add(f.get("via"))
+            for other in ([step["also"]] if isinstance(step.get("also"), str) else step.get("also") or []):
+                g = by_id.get(other)
+                if g is None:
+                    bad.append(f"{at} also: names {other!r}, which is not a flow id")
+                    continue
+                if other in used:
+                    bad.append(f"{at}: flow {other!r} is already a step; each line carries one number")
+                used.add(other)
+                if (g.get("from"), g.get("to")) != (f.get("from"), f.get("to")) or "into" in g or not g.get("via"):
+                    bad.append(f"{at} also: {other!r} must be another branch of the same publish "
+                               f"(from {f.get('from')!r} to {f.get('to')!r}, into another box)")
+                    continue
+                into.add(g.get("via"))
+            reached.add(f.get("to"))
+            at_ = step.get("at")
+            if at_ is not None and not (isinstance(at_, (int, float)) and 0 <= at_ <= 1):
+                bad.append(f"{at} at: must be a number from 0 to 1 along the line")
+        extra = {key for st in steps if isinstance(st, dict) for key in st} - {"flow", "text", "at", "also"}
+        if extra:
+            bad.append(f"{where} steps have unknown key(s) {sorted(extra)}")
+    return bad
+
+
+def check_holds_expect(where, checks, spec) -> list:
+    """holds: [{node: <id>, min: n, max: n}]: the node's latest report has
+    between min and max rows within the window."""
+    nodes = spec.get("diagram", {}).get("nodes", []) or []
+    holders = {n.get("id") for n in nodes if n.get("holds")}
+    copies = {n.get("id") for n in nodes if (n.get("holds") or {}).get("copyOf")}
+    if not isinstance(checks, list) or not checks:
+        return [f"{where} holds: must be a non-empty list"]
+    bad = []
+    for i, entry in enumerate(checks, 1):
+        at = f"{where} holds entry {i}"
+        if not isinstance(entry, dict) or entry.get("node") not in holders:
+            bad.append(f"{at} must name a node that has holds:")
+            continue
+        for k in ("min", "max"):
+            if k in entry and not (isinstance(entry[k], int) and entry[k] >= 0):
+                bad.append(f"{at} {k}: must be a whole number")
+        for key in ("matched", "missing"):
+            if key not in entry:
+                continue
+            if entry["node"] not in copies:
+                bad.append(f"{at} {key}: needs a node with holds: copyOf:")
+            want = entry[key]
+            if not (isinstance(want, dict) and want and set(want) <= {"min", "max"}
+                    and all(isinstance(v, int) and v >= 0 for v in want.values())):
+                bad.append(f"{at} {key}: must be {{min: n}}, {{max: n}} or both")
+        if not set(entry) & {"min", "max", "matched", "missing"}:
+            bad.append(f"{at} needs min:, max:, matched: or missing:")
+        extra = set(entry) - {"node", "min", "max", "matched", "missing"}
+        if extra:
+            bad.append(f"{at} has unknown key(s) {sorted(extra)}")
+    return bad
 
 
 def check_settings(spec, actions, node_ids) -> list:
@@ -739,6 +957,32 @@ def check_indicators() -> list:
     return [f"indicators: {m}" for m in bad]
 
 
+def check_narrations() -> list:
+    """An audio overview follows the writing rules and was voiced from the
+    narration.md that is there now, so the page never plays a script that
+    has since changed. narrate.py voices it again."""
+    import json
+    sys.path.insert(0, str(pathlib.Path(__file__).parent))
+    import narrate
+    bad = []
+    index = json.loads(narrate.INDEX.read_text()) if narrate.INDEX.exists() else {}
+    for path in sorted(SCENARIOS.glob("*/narration.md")):
+        sid = path.parent.name
+        text = narrate.script_text(sid)
+        if "\u2014" in text or "\u2013" in text or "--" in text:
+            bad.append(f"{sid}: narration.md has an em dash, en dash or double hyphen")
+        entry = index.get(sid)
+        if not entry or not (narrate.AUDIO / f"{sid}.mp3").exists():
+            bad.append(f"{sid}: narration.md has no audio; run python3 cockpit/scripts/narrate.py {sid}")
+        elif entry.get("key") != narrate.take_key(text):
+            bad.append(f"{sid}: narration.md changed since it was voiced; run python3 cockpit/scripts/narrate.py {sid}")
+        elif " ".join(s["text"] for s in entry.get("sentences", [])).split() != text.split():
+            bad.append(f"{sid}: the transcript's sentences do not cover narration.md word for word; check narrate.py's sentence split")
+    for sid in sorted(set(index) - {p.parent.name for p in SCENARIOS.glob("*/narration.md")}):
+        bad.append(f"{sid}: audio/index.json lists a narration with no narration.md")
+    return [f"narration: {m}" for m in bad]
+
+
 def main() -> int:
     problems = []
     found = sorted(SCENARIOS.glob("*/scenario.yaml"))
@@ -746,6 +990,7 @@ def main() -> int:
         problems.extend(check(path))
     problems.extend(check_indicators())
     problems.extend(check_palette())
+    problems.extend(check_narrations())
 
     for p in problems:
         print(p)

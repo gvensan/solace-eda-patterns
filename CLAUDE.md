@@ -171,6 +171,14 @@ of them.
 - **Credentials stay local**: the broker's `admin` / `admin` and the shared
   client password from `cockpit/app/config.py`. Never add real secrets.
 
+## Presentation baseline
+
+`docs/baseline-pattern-presentation.md` is the living checklist for how
+every pattern is presented: orientation, diagram, state, language,
+guidance and proof. Work each scenario against it, record the result in
+its Progress table, and add any lesson from one scenario that applies to
+others, with the scenario it came from.
+
 ## Common tasks
 
 **Add a scenario.** Copy the closest existing one (`exclusive-consumer` for

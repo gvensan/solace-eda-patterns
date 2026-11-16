@@ -309,6 +309,38 @@ def judge_partitions(spec, data, since, node_for) -> tuple:
     return pending, failed
 
 
+async def judge_holds(client, sid: str, want) -> list:
+    """Checks not met yet for a holds: list: each node's latest report of
+    what it holds must have between min and max rows."""
+    resp = await client.get(f"/api/scenarios/{sid}/state")
+    if resp.status_code != 200:
+        return ["the dashboard did not answer the state request"]
+    nodes = resp.json().get("nodes", {})
+    pending = []
+    for entry in want:
+        node = entry["node"]
+        report = (nodes.get(node) or {}).get("holds")
+        if not (nodes.get(node) or {}).get("running") or report is None:
+            pending.append(f"{node} has not reported what it holds")
+            continue
+        n = len(report.get("rows") or [])
+        lo, hi = entry.get("min", 0), entry.get("max", float("inf"))
+        if not lo <= n <= hi:
+            pending.append(f"{node} holds {n} row(s), expected {lo} to {hi:g}")
+        # matched: / missing: compare a copy with its owner (holds: copyOf:).
+        match = (nodes.get(node) or {}).get("match")
+        for key in ("matched", "missing"):
+            if key not in entry:
+                continue
+            if match is None:
+                pending.append(f"{node} has no comparison with the data it copies")
+                continue
+            lo, hi = entry[key].get("min", 0), entry[key].get("max", float("inf"))
+            if not lo <= match[key] <= hi:
+                pending.append(f"{node} has {match[key]} {key} of {match['of']}, expected {lo} to {hi:g}")
+    return pending
+
+
 async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_for, snap,
                        node_for=None) -> None:
     """One phase of an expect: block. Every has: pattern must appear in its
@@ -351,6 +383,8 @@ async def check_expect(client, sid: str, mode_id: str, phase: str, part, action_
                     fail(f"{sid}: {mode_id} {phase}: boxes: {b}")
                 return
             pending += more
+        if part.get("holds"):
+            pending += await judge_holds(client, sid, part["holds"])
         missing, found = {}, {}
         for aid, has, lacks in checks:
             text = await lines_since(client, sid, aid, snap)

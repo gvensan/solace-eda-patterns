@@ -434,12 +434,57 @@ async def scenario_state(scenario_id: str):
             "checklist": checklist,
             "ready": all(c["present"] for c in checklist) if checklist else None,
             "flow": _flow_role(node.get("flowOn"), tx),
+            # What the app last said it holds, for nodes with holds:. Only
+            # from the run now in place, so a restart starts with nothing.
+            "holds": run.holds if run and node.get("holds") else None,
         }
+
+    # A copy (holds: copyOf: <node>) is compared with what that node holds,
+    # row by row on the first column and on every column both share. The
+    # owner's report counts while it runs, or, when it keeps its data on
+    # disk, its last report from before it stopped.
+    by_id = {n.get("id"): n for n in nodes}
+    for node in nodes:
+        owner_id = (node.get("holds") or {}).get("copyOf")
+        mine = out.get(node.get("id"), {})
+        if not owner_id or not (mine.get("running") and mine.get("holds")):
+            continue
+        owner_node = by_id.get(owner_id) or {}
+        action_id = owner_node.get("action")
+        owner_run = manager.get(f"{scenario_id}:{action_id}") if action_id else None
+        owner_up = bool(owner_run and owner_run.is_active)
+        theirs = owner_run.holds if owner_run else None
+        if not theirs or not (owner_up or (owner_node.get("holds") or {}).get("kept") == "disk"):
+            continue
+        mine["match"] = {**_compare_holds(mine["holds"], theirs), "ownerUp": owner_up}
 
     return {"nodes": out,
             "boxes": boxes,
             "traffic": traffic,
             "settings": {name: setting_value(scenario, name) for name in scenario.settings}}
+
+
+def _compare_holds(copy: dict, owner: dict) -> dict:
+    """How many of the owner's rows the copy has, the same on every column
+    both tables share. Rows are matched on the first column."""
+    ccols, ocols = copy.get("columns") or [], owner.get("columns") or []
+    shared = [c for c in ccols[1:] if c in ocols[1:]]
+    ci = {c: i for i, c in enumerate(ccols)}
+    oi = {c: i for i, c in enumerate(ocols)}
+    have = {r[0]: r for r in copy.get("rows") or [] if r}
+    matched = missing = different = 0
+    for row in owner.get("rows") or []:
+        if not row:
+            continue
+        mine = have.get(row[0])
+        if mine is None:
+            missing += 1
+        elif all(mine[ci[c]] == row[oi[c]] for c in shared):
+            matched += 1
+        else:
+            different += 1
+    return {"matched": matched, "of": len(owner.get("rows") or []),
+            "missing": missing, "different": different}
 
 
 async def _box_state(nodes) -> dict:
