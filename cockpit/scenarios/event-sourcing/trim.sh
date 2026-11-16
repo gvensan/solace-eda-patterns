@@ -4,9 +4,9 @@
 #
 #   trim.sh
 #
-# A SEMP action, not configuration, so it is not in terraform. Used by the
-# reset of "The replay log rolls over": the lost events cannot be brought
-# back, so the bank starts over with an empty log.
+# A SEMP action, not configuration, so it is not in terraform. Used by
+# "The event history is lost": with the events gone, the ledger has
+# nothing to rebuild its balances from.
 
 set -euo pipefail
 

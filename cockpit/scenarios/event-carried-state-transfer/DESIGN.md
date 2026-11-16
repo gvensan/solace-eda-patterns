@@ -19,7 +19,7 @@ so the copy is current when an order arrives), `q.ecst.invoicing` (orders).
 `-invoicing`.
 
 **Apps.** `ecst customers` (publishes all 8 records at start, then one change
-every 4 s; answers lookups; SIGUSR1 republishes all), `ecst orders`,
+every 15 s; answers lookups; SIGUSR1 republishes all), `ecst orders`,
 `ecst shipping` (copy in memory; holds an order whose customer it has no copy
 of), `ecst invoicing` (blocks on each order until the lookup succeeds).
 

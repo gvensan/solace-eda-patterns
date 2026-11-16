@@ -12,6 +12,7 @@ summary: >
   each can fail or slow down without stopping the other.
 
 objectives:
+  - See the same orders kept twice, in two shapes, by two services
   - See a command handled on the write side and the read side catch up from its event
   - See reads answered while the write side is down, and commands kept until it is back
   - See the read side fall behind, and what the account page is told
@@ -20,14 +21,15 @@ objectives:
 pattern:
   what: >
     Separate the model that handles commands (writes) from the model that
-    answers queries (reads), and keep the read side up to date from the
-    write side's events.
+    answers queries (reads). In event-driven systems the read model is
+    usually its own store, kept up to date from the write side's events.
   when: >
     Reads and writes have different shapes or loads: many lookups, few
     checked writes, or several views of the same data.
   cost: >
     The read side is always somewhat behind the writes, and the product has
-    to decide what users see in between.
+    to decide what users see in between. Two models are more to build and
+    run than one: use it where reads and writes really differ.
   solace: >
     Commands on a queue for the write side, events on topics with a queue
     per read side, and queries by request-reply.
@@ -44,13 +46,27 @@ run:
 
 cleanup:
   - destroy
+  - forget-database
 
 diagram:
   caption: >
-    Commands go to q.cqrs.commands for the order service (the write side),
-    which publishes an "order placed" event. q.cqrs.view takes those events
-    for the order history service (the read side), which keeps its own view
-    and answers the account page's questions by request-reply.
+    A shop. Checkout sends "place order" commands into q.cqrs.commands. The
+    order service (the write side) takes each one, saves the order in its
+    own database and publishes "order placed". q.cqrs.view keeps those
+    events for the order history service (the read side), which builds its
+    own view from them. The account page asks the order history, never the
+    order service. Questions and answers are direct request-reply messages:
+    they never wait on a queue.
+  holdsCaption: >
+    The same orders, kept twice in two shapes. The order service keeps each
+    order as it was placed. The order history keeps one line per customer,
+    built only from the "order placed" events, in the shape the account
+    page asks for. The account page is answered from the second table and
+    never touches the first. That is CQRS. Without it, one model would do
+    both, and every question would add up a customer's orders on the
+    tables checkout writes to. Compare the notes under the two tables: the
+    Order History is normally built from as many orders as the Order
+    Service holds, up to the same latest order, or one behind.
   duration: 2.6
   liveWhen: checkout
   nodes:
@@ -65,7 +81,7 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-checkout
     - id: account
       label: Account Page
-      sublabel: asks a question every 2 s
+      sublabel: asks every 2 s
       kind: app
       col: 0
       action: account
@@ -103,6 +119,9 @@ diagram:
       shape: processor
       col: 2
       action: orders
+      holds:
+        kept: disk
+        role: The write side. Saves every order it places, as it was placed.
       flowOn:
         queue: q.cqrs.commands
         client: cqrs-orders
@@ -116,6 +135,10 @@ diagram:
       shape: processor
       col: 2
       action: history
+      holds:
+        kept: memory
+        count: customers
+        role: The read side. One line per customer, built from the events. Never reads the order service's database.
       flowOn:
         queue: q.cqrs.view
         client: cqrs-history
@@ -123,13 +146,35 @@ diagram:
         - label: svc-cqrs-view
           semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-view
   flows:
-    - { from: checkout, to: broker, label: place order, delay: 0 }
-    - { from: broker, to: orders, via: commands, delay: 0.5 }
-    - { from: orders, to: broker, label: order placed, delay: 1.0 }
-    - { from: broker, to: history, via: events, source: orders, delay: 1.5 }
-    - { from: account, to: broker, label: query, delay: 0.2 }
-    - { from: history, to: broker, label: answer, source: account, delay: 0.8 }
-    - { from: broker, to: account, label: answer, source: history, delay: 1.3 }
+    - { id: place-order, from: checkout, to: broker, via: commands, label: place order, delay: 0 }
+    - { id: to-orders, from: broker, to: orders, via: commands, delay: 0.5 }
+    - { id: order-placed, from: orders, to: broker, via: events, label: order placed, delay: 1.0 }
+    - { id: to-history, from: broker, to: history, via: events, source: orders, delay: 1.5 }
+    - { id: query, from: account, to: broker, label: query, delay: 0.2 }
+    - { id: query-in, from: broker, to: history, label: query, source: account, delay: 0.5 }
+    - { id: answer, from: history, to: broker, label: answer, source: account, delay: 0.8 }
+    - { id: answer-back, from: broker, to: account, label: answer, source: history, delay: 1.3 }
+  paths:
+    - label: A command becomes an order, and the view catches up
+      steps:
+        - flow: place-order
+          text: Checkout sends a place-order command. The broker keeps it on q.cqrs.commands.
+        - flow: to-orders
+          text: The order service (the write side) takes it, numbers the order and saves it in its database.
+        - flow: order-placed
+          text: It publishes "order placed". q.cqrs.view keeps the event for the read side.
+        - flow: to-history
+          text: The order history applies the event to its view, a moment after the write.
+    - label: The account page asks, the read side answers
+      steps:
+        - flow: query
+          text: "The account page asks about a customer: a direct message, kept on no queue."
+        - flow: query-in
+          text: The broker delivers the question to the order history. Nothing goes to the order service.
+        - flow: answer
+          text: The order history answers from its own view, and says how far behind it is.
+        - flow: answer-back
+          text: The broker returns the answer to the account page.
 
 actions:
   - id: apply
@@ -173,8 +218,9 @@ actions:
     variant: secondary
     description: >
       The write side. Takes each command from q.cqrs.commands, gives the
-      order a number, publishes "order placed", then acknowledges the
-      command.
+      order the next number, saves it in its own database (a file, so a
+      restart carries on from the last number), publishes "order placed",
+      then acknowledges the command.
 
   - id: account
     label: Start the account page
@@ -228,6 +274,16 @@ actions:
       Kills the order service outright (SIGKILL), and returns once it has
       gone.
 
+  - id: forget-database
+    label: Delete the order database
+    kind: process
+    cmd: [bash, ../../apps/run.sh, cqrs, write, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes the order service's database, so the next Play starts from
+      order #1.
+
   - id: reconcile
     label: Reconcile with broker
     kind: process
@@ -253,13 +309,29 @@ failure_modes:
     breaks: >
       The order history service slows down to one event every 2 seconds,
       while checkout places one a second.
-    watch: >
-      The card shows the account page. It is still answered at once, but
-      from an older view: "view as of order #40, 9.0 s behind" and growing.
-      q.cqrs.view fills up. Checkout and the order service carry on as if
-      nothing happened: the write side does not wait for the read side.
-      Reset puts the order history service back to normal speed, and it
-      catches up within a second or two.
+    watch:
+      normally: >
+        The order history applies each order a few milliseconds after it is
+        placed, and the account page's answers say "0.0 s behind". Under the
+        diagram, the Order Service's latest order and the order the Order
+        History is built up to are the same, or one apart.
+      broke: >
+        The order history output says "slowed down: 2s to apply each
+        event", then applies one order every 2 seconds. The account page is
+        still answered at once, but from an older view: "view as of order
+        #40, 9.0 s behind", and the gap grows.
+      impact: >
+        Under the diagram, the Order History falls further behind the Order
+        Service's latest order, and q.cqrs.view fills with events not yet
+        applied. Checkout and the order service carry on at full speed: the
+        write side never waits for the read side. The hidden risk: a
+        customer is shown a history without their latest orders, and only
+        "s behind" says so.
+      recover: >
+        Press Reset. The order history says "back to normal speed", applies
+        the waiting events within a second or two, and the account page is
+        back to "0.0 s behind". Nothing was lost: the events waited on
+        q.cqrs.view.
     why: >
       The read side builds its view from events, after the write side has
       published them. It is always behind; normally by milliseconds. When it
@@ -291,6 +363,8 @@ failure_modes:
             has: ["slowed down: 2s to apply each event"]
           - log: account
             has: ["view as of order #\\d+, ([5-9]|\\d\\d+)\\.\\d s behind"]
+        holds:
+          - { node: history, min: 1 }
       reset:
         within: 30
         logs:
@@ -304,12 +378,29 @@ failure_modes:
     breaks: >
       The order service is killed. Checkout keeps sending commands and the
       account page keeps asking.
-    watch: >
-      The card shows checkout. Every command is still "accepted by the
-      broker": it is stored on q.cqrs.commands, which fills up, and no order
-      is placed. Open the account page's log: it is still answered, from a
-      view that stopped changing. Reset starts the order service, which
-      places every waiting order in turn, and the view catches up.
+    watch:
+      normally: >
+        The order service takes each command, saves the order and publishes
+        "order placed". Its latest order, under the diagram, climbs by one a
+        second.
+      broke: >
+        Checkout's output carries on: every command is still "accepted by
+        the broker". But no order is placed: q.cqrs.commands fills up, and
+        under the diagram the Order Service's card says it is not running
+        and its orders stay on disk.
+      impact: >
+        No new orders, but nothing is refused: the commands wait on
+        q.cqrs.commands. Reads carry on. The account page is still answered
+        from the order history's view, which has stopped changing ("view as
+        of order #" stays the same). The hidden risk: checkout only knows the
+        command was accepted, not that the order was placed. What to tell
+        the customer in between is a product decision.
+      recover: >
+        Press Reset. The order service opens its database ("opened its order
+        database"), carries on from the last order number, and places every
+        waiting command in turn. The view catches up. Nothing was lost: a
+        command is acknowledged only after its order is saved and its event
+        published.
     why: >
       The write side and the read side are separate services joined only by
       events. With the write side down, reads carry on from the read side's
@@ -337,14 +428,14 @@ failure_modes:
         within: 15
         logs:
           - log: checkout
-            has: ["command #\\d+: place an order for C-\\d+ .*accepted by the broker"]
+            has: ["command \\d+-\\d+: place an order for C-\\d+ .*accepted by the broker"]
           - log: account
             has: ["C-\\d+: \\d+ orders?, "]
       reset:
         within: 20
         logs:
           - log: orders
-            has: ["order #\\d+ placed for C-\\d+, event published"]
+            has: ["opened its order database: \\d+ orders", "order #\\d+ placed for C-\\d+, event published"]
           - log: history
             has: ["order #\\d+ applied"]
 

@@ -1,8 +1,10 @@
 # ---------------------------------------------------------------------------
 # Event sourcing: who may connect
 #
-# The ledger publishes every transaction as an event and rebuilds its
-# balances from the replay log. The statements job uses the same username.
+# The teller sends commands. The ledger takes them, publishes each accepted
+# one as an event, and rebuilds its balances from the replay log through
+# q.esrc.rebuild. It adds the events subscription to that queue for the
+# rebuild and removes it after, which needs endpoint create (spikes, 23).
 # ---------------------------------------------------------------------------
 
 resource "solacebroker_msg_vpn_client_profile" "esrc" {
@@ -11,10 +13,10 @@ resource "solacebroker_msg_vpn_client_profile" "esrc" {
 
   allow_guaranteed_msg_send_enabled        = true
   allow_guaranteed_msg_receive_enabled     = true
-  allow_guaranteed_endpoint_create_enabled = false
+  allow_guaranteed_endpoint_create_enabled = true
 
   max_connection_count_per_client_username = 10
-  max_endpoint_count_per_client_username   = 0
+  max_endpoint_count_per_client_username   = 4
 }
 
 resource "solacebroker_msg_vpn_acl_profile" "esrc" {
@@ -27,7 +29,7 @@ resource "solacebroker_msg_vpn_acl_profile" "esrc" {
 }
 
 locals {
-  esrc_roles = ["ledger"]
+  esrc_roles = ["ledger", "teller"]
 }
 
 resource "solacebroker_msg_vpn_client_username" "esrc" {

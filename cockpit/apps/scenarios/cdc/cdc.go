@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,9 @@ import (
 
 const changeTopic = "cdc/inventory/stock/changed/v1/"
 
+// skus is how many items the warehouse stocks.
+const skus = 6
+
 type change struct {
 	LSN    int    `json:"lsn"`
 	Table  string `json:"table"`
@@ -37,6 +41,23 @@ type change struct {
 	SKU    string `json:"sku"`
 	Before int    `json:"before"`
 	After  int    `json:"after"`
+}
+
+// stockRows is a stock table, one row per SKU in SKU order: the SKU, its
+// stock and the number of the change that last set it. The inventory
+// database and the search index report the same columns, so the page can
+// compare them row by row.
+func stockRows(stock map[string]int, last map[string]int) [][]string {
+	skus := make([]string, 0, len(stock))
+	for sku := range stock {
+		skus = append(skus, sku)
+	}
+	sort.Strings(skus)
+	rows := make([][]string, len(skus))
+	for i, sku := range skus {
+		rows[i] = []string{sku, strconv.Itoa(stock[sku]), "#" + strconv.Itoa(last[sku])}
+	}
+	return rows
 }
 
 // dataDir is where the inventory database and the connector's saved position
@@ -85,12 +106,22 @@ func Inventory(args []string) {
 		solace.Logf(*role, "deleted the inventory database and the connector's saved position")
 		return
 	}
-	stock := map[string]int{}
+	stock, last := map[string]int{}, map[string]int{}
 	lsn := 0
 	for _, c := range readLog(path) {
 		stock[c.SKU] = c.After
+		last[c.SKU] = c.LSN
 		lsn = c.LSN
 	}
+	held := solace.NewHolding("The inventory database: stock per SKU", "sku", "stock", "last change")
+	report := func() {
+		note := "No changes yet."
+		if lsn > 0 {
+			note = fmt.Sprintf("Its change log holds %d committed changes. Latest: change #%d.", lsn, lsn)
+		}
+		held.Set(stockRows(stock, last), note)
+	}
+	report()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		solace.Errf(*role, "could not open the database: %s", err)
@@ -98,7 +129,21 @@ func Inventory(args []string) {
 	}
 	defer f.Close()
 	if lsn == 0 {
-		solace.Logf(*role, "new database, every SKU starts with 20 in stock")
+		// The opening stock is committed like any other change, so it is in
+		// the change log and reaches the search index the same way.
+		for i := 1; i <= skus; i++ {
+			sku := fmt.Sprintf("SKU-%02d", i)
+			lsn++
+			line, _ := json.Marshal(change{LSN: lsn, Table: "stock", Op: "insert", SKU: sku, Before: 0, After: 20})
+			if _, err := f.Write(append(line, '\n')); err != nil {
+				solace.Errf(*role, "could not write to the database: %s", err)
+				os.Exit(1)
+			}
+			stock[sku], last[sku] = 20, lsn
+		}
+		_ = f.Sync()
+		report()
+		solace.Logf(*role, "new database: %d SKUs stocked with 20 each (changes #1 to #%d)", skus, lsn)
 	} else {
 		solace.Logf(*role, "database opened, last change was #%d", lsn)
 	}
@@ -113,7 +158,7 @@ func Inventory(args []string) {
 			return
 		case <-time.After(*every):
 		}
-		sku := fmt.Sprintf("SKU-%02d", 1+rand.Intn(6))
+		sku := fmt.Sprintf("SKU-%02d", 1+rand.Intn(skus))
 		before, ok := stock[sku]
 		if !ok {
 			before = 20
@@ -130,6 +175,8 @@ func Inventory(args []string) {
 		}
 		_ = f.Sync()
 		stock[sku] = after
+		last[sku] = lsn
+		report()
 		solace.Logf(*role, "%s %s: stock %d -> %d (change #%d written to the database)", what, sku, before, after, lsn)
 	}
 }
@@ -154,8 +201,18 @@ func Connector(args []string) {
 	logPath := filepath.Join(dataDir(), "inventory.log")
 	posPath := filepath.Join(dataDir(), "connector.position")
 	done := 0
-	if b, err := os.ReadFile(posPath); err == nil && !*fromStart {
-		done, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	held := solace.NewHolding("Its saved position in the change log", "position", "change")
+	report := func(latest int) {
+		held.Set([][]string{
+			{"saved position: published up to", "#" + strconv.Itoa(done)},
+			{"latest change in the database", "#" + strconv.Itoa(latest)},
+			{"still to publish", strconv.Itoa(max(latest-done, 0))},
+		}, "")
+	}
+	saved, readErr := os.ReadFile(posPath)
+	pos, parseErr := strconv.Atoi(strings.TrimSpace(string(saved)))
+	if readErr == nil && parseErr == nil && !*fromStart {
+		done = pos
 		solace.Logf(*role, "saved position found: resuming after change #%d", done)
 	} else if *fromStart {
 		solace.Logf(*role, "no saved position: reading the change log from the first change")
@@ -167,7 +224,13 @@ func Connector(args []string) {
 	stop := make(chan struct{})
 	go func() { solace.WaitForStop(); close(stop) }()
 	for {
-		for _, c := range readLog(logPath) {
+		changes := readLog(logPath)
+		latest := 0
+		if len(changes) > 0 {
+			latest = changes[len(changes)-1].LSN
+		}
+		report(latest)
+		for _, c := range changes {
 			if c.LSN <= done {
 				continue
 			}
@@ -177,7 +240,10 @@ func Connector(args []string) {
 				break
 			}
 			done = c.LSN
-			_ = os.WriteFile(posPath, []byte(strconv.Itoa(done)), 0o644)
+			if err := solace.WriteFileAtomic(posPath, []byte(strconv.Itoa(done))); err != nil {
+				solace.Errf(*role, "could not save the position: %s", err)
+			}
+			report(latest)
 			solace.Logf(*role, "change #%d published: %s %d -> %d", c.LSN, c.SKU, c.Before, c.After)
 		}
 		select {
@@ -205,15 +271,29 @@ func Search(args []string) {
 	defer solace.Terminate(rcv)
 	fmt.Println()
 
-	applied := map[string]int{}
+	applied, stock := map[string]int{}, map[string]int{}
+	held := solace.NewHolding("The search index: stock per SKU", "sku", "stock", "last change")
+	ignored := 0
+	report := func() {
+		note := ""
+		if ignored > 0 {
+			note = fmt.Sprintf("%d repeated changes ignored: already applied.", ignored)
+		}
+		held.Set(stockRows(stock, applied), note)
+	}
+	report()
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		var c change
 		if err := json.Unmarshal([]byte(solace.PayloadOf(msg)), &c); err != nil {
 			solace.Errf(*role, "not a change event: %s", err)
 		} else if c.LSN <= applied[c.SKU] {
+			ignored++
+			report()
 			solace.Logf(*role, "change #%d for %s again: already applied, ignored", c.LSN, c.SKU)
 		} else {
 			applied[c.SKU] = c.LSN
+			stock[c.SKU] = c.After
+			report()
 			solace.Logf(*role, "%s shows %d in stock (change #%d)", c.SKU, c.After, c.LSN)
 		}
 		if err := rcv.Ack(msg); err != nil {

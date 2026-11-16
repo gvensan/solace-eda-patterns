@@ -17,11 +17,15 @@
 package ecst
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,41 +49,95 @@ var (
 )
 
 type customer struct {
-	id, name, city string
-	version        int
+	ID      string `json:"customer"`
+	Name    string `json:"name"`
+	City    string `json:"city"`
+	Version int    `json:"version"`
 }
 
 func (c customer) json() string {
-	return fmt.Sprintf(`{"customer":"%s","version":%d,"name":"%s","city":"%s"}`, c.id, c.version, c.name, c.city)
+	return fmt.Sprintf(`{"customer":"%s","version":%d,"name":"%s","city":"%s"}`, c.ID, c.Version, c.Name, c.City)
 }
 
 func customerID(i int) string { return fmt.Sprintf("C-%02d", i+1) }
 
-// Customers owns the customer records. On start it publishes every record
-// once, then moves one customer to a new city every --every and publishes the
-// whole record again. It also answers lookups by request-reply. SIGUSR1 makes
-// it publish every record again, for a consumer that has lost its copy.
+// databasePath is the customer service's database: a file under the
+// dashboard's state folder, so Clear broker config removes it with the
+// scenario's state.
+func databasePath() string {
+	base := os.Getenv("COCKPIT_STATE_DIR")
+	if base == "" {
+		base = "../../.state"
+	}
+	dir := filepath.Join(base, "event-carried-state-transfer")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "customers.json")
+}
+
+// Customers owns the customer records and keeps them in its database, so a
+// restart carries on from the last version of each. On start it publishes
+// every record once, then moves one customer to a new city every --every and
+// publishes the whole record again. It also answers lookups by
+// request-reply. SIGUSR1 makes it publish every record again, for a consumer
+// that has lost its copy.
 func Customers(args []string) {
 	fs := flag.NewFlagSet("ecst customers", flag.ExitOnError)
 	user := fs.String("user", "svc-ecst-crm", "client username to connect as")
 	role := fs.String("role", "customers", "label for log lines")
 	clientName := fs.String("client-name", "ecst-customers", "client name the broker reports this app by")
-	every := fs.Duration("every", 4*time.Second, "pause between customer changes")
+	every := fs.Duration("every", 15*time.Second, "pause between customer changes")
+	forget := fs.Bool("forget", false, "delete the customer database, and exit")
 	fs.Parse(args)
+
+	path := databasePath()
+	if *forget {
+		_ = os.Remove(path)
+		solace.Logf(*role, "deleted the customer database")
+		return
+	}
+
+	var mu sync.Mutex
+	var book []customer
+	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &book) == nil && len(book) == len(names) {
+		solace.Logf(*role, "opened its customer database: %d customers", len(book))
+	} else {
+		book = make([]customer, len(names))
+		for i := range book {
+			book[i] = customer{ID: customerID(i), Name: names[i], City: cities[i], Version: 1}
+		}
+		solace.Logf(*role, "new customer database: %d customers at version 1", len(book))
+	}
+	held := solace.NewHolding("The customer database", "customer", "name", "city", "version")
+	report := func() {
+		rows := make([][]string, len(book))
+		for i, c := range book {
+			rows[i] = []string{c.ID, c.Name, c.City, strconv.Itoa(c.Version)}
+		}
+		held.Set(rows, "")
+	}
+	// Written whole and renamed into place, so a kill mid-write leaves the
+	// previous database rather than half a file.
+	save := func() {
+		b, _ := json.Marshal(book)
+		tmp := path + ".tmp"
+		err := os.WriteFile(tmp, b, 0o644)
+		if err == nil {
+			err = os.Rename(tmp, path)
+		}
+		if err != nil {
+			solace.Errf(*role, "could not save the customer database: %s", err)
+		}
+		report()
+	}
+	save()
 
 	svc := solace.ConnectAs(*role, *user, *clientName)
 	defer svc.Disconnect()
 	pub := solace.StartPersistentPublisher(*role, *user, svc)
 	defer solace.Terminate(pub)
-
-	var mu sync.Mutex
-	book := make([]customer, len(names))
-	for i := range book {
-		book[i] = customer{id: customerID(i), name: names[i], city: cities[i], version: 1}
-	}
 	publish := func(c customer) {
-		if err := solace.PublishConfirmed(svc, pub, customerTopic+c.id, c.json()); err != nil {
-			solace.Errf(*role, "could not publish %s: %s", c.id, err)
+		if err := solace.PublishConfirmed(svc, pub, customerTopic+c.ID, c.json()); err != nil {
+			solace.Errf(*role, "could not publish %s: %s", c.ID, err)
 		}
 	}
 	publishAll := func(why string) {
@@ -89,7 +147,8 @@ func Customers(args []string) {
 		for _, c := range all {
 			publish(c)
 		}
-		solace.Logf(*role, "published all %d customer records (%s)", len(all), why)
+		solace.Logf(*role, "published all %d customer records (%s), each whole, like %s on %s%s",
+			len(all), why, all[0].json(), customerTopic, all[0].ID)
 	}
 
 	// Lookups, for a service that keeps no copy.
@@ -108,7 +167,7 @@ func Customers(args []string) {
 		mu.Lock()
 		reply := `{"error":"no such customer"}`
 		for _, c := range book {
-			if c.id == id {
+			if c.ID == id {
 				reply = c.json()
 			}
 		}
@@ -149,16 +208,17 @@ func Customers(args []string) {
 		c := &book[i]
 		for {
 			city := cities[rand.Intn(len(cities))]
-			if city != c.city {
-				c.city = city
+			if city != c.City {
+				c.City = city
 				break
 			}
 		}
-		c.version++
+		c.Version++
 		changed := *c
+		save()
 		mu.Unlock()
 		publish(changed)
-		solace.Logf(*role, "%s moved to %s (version %d), published the whole record", changed.id, changed.city, changed.version)
+		solace.Logf(*role, "%s moved to %s (version %d), published the whole record: %s", changed.ID, changed.City, changed.Version, changed.json())
 	}
 }
 
@@ -184,10 +244,11 @@ func Orders(args []string) {
 	for n := 1; ; n++ {
 		order := fmt.Sprintf("O-%05d", 10000+n)
 		cust := customerID(rand.Intn(len(names)))
-		if err := solace.PublishConfirmed(svc, pub, orderTopic+cust, fmt.Sprintf(`{"order":"%s","customer":"%s"}`, order, cust)); err != nil {
+		payload := fmt.Sprintf(`{"order":"%s","customer":"%s"}`, order, cust)
+		if err := solace.PublishConfirmed(svc, pub, orderTopic+cust, payload); err != nil {
 			solace.Errf(*role, "order %s refused: %s", order, err)
 		} else {
-			solace.Logf(*role, "%s placed for %s", order, cust)
+			solace.Logf(*role, "%s placed for %s, published: %s", order, cust, payload)
 		}
 		select {
 		case <-stop:
@@ -200,7 +261,10 @@ func Orders(args []string) {
 // Shipping keeps its own copy of every customer, from the customer events on
 // its queue, and ships each order to the city in that copy. It never asks
 // anyone. An order for a customer it has no copy of waits until the copy
-// arrives. The copy lives in memory, so a restart starts with none.
+// arrives. The copy lives in memory, so a restart starts with none. Held
+// orders are acknowledged and kept in memory too: leaving them unacknowledged
+// would stall the queue at its unacknowledged limit, with the very records
+// that would release them stuck behind.
 func Shipping(args []string) {
 	fs := flag.NewFlagSet("ecst shipping", flag.ExitOnError)
 	user := fs.String("user", "svc-ecst-shipping", "client username to connect as")
@@ -218,27 +282,59 @@ func Shipping(args []string) {
 
 	copyOf := map[string]customer{}
 	held := map[string][]string{}
+	view := solace.NewHolding("Shipping's copy of the customers", "customer", "city", "version")
+	report := func() {
+		ids := make([]string, 0, len(copyOf))
+		for id := range copyOf {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		rows := make([][]string, len(ids))
+		for i, id := range ids {
+			c := copyOf[id]
+			rows[i] = []string{id, c.City, strconv.Itoa(c.Version)}
+		}
+		var waiting []string
+		parcels := 0
+		for id, orders := range held {
+			waiting = append(waiting, id)
+			parcels += len(orders)
+		}
+		sort.Strings(waiting)
+		note := ""
+		if parcels > 0 {
+			note = fmt.Sprintf("%d parcel(s) held, no copy yet of %s", parcels, strings.Join(waiting, ", "))
+		}
+		view.Set(rows, note)
+	}
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		p := solace.PayloadOf(msg)
 		id := solace.FieldString(p, "customer")
 		if strings.HasPrefix(msg.GetDestinationName(), customerTopic) {
 			v, _ := solace.FieldInt(p, "version")
-			c := customer{id: id, name: solace.FieldString(p, "name"), city: solace.FieldString(p, "city"), version: v}
-			copyOf[id] = c
-			solace.Logf(*role, "copy of %s updated: %s (version %d)", id, c.city, v)
-			for _, order := range held[id] {
-				solace.Logf(*role, "%s for %s: copy arrived, ships to %s", order, id, c.city)
+			// A record older than the copy (a redelivery, or an owner
+			// restored from an old backup) must not take the copy back.
+			if have, ok := copyOf[id]; ok && v < have.Version {
+				solace.Logf(*role, "ignored %s version %d: my copy already has version %d", id, v, have.Version)
+			} else {
+				c := customer{ID: id, Name: solace.FieldString(p, "name"), City: solace.FieldString(p, "city"), Version: v}
+				copyOf[id] = c
+				solace.Logf(*role, "copy of %s updated: %s (version %d)", id, c.City, v)
+				for _, order := range held[id] {
+					solace.Logf(*role, "%s for %s: copy arrived, ships to %s", order, id, c.City)
+				}
+				delete(held, id)
 			}
-			delete(held, id)
 		} else {
 			order := solace.FieldString(p, "order")
 			if c, ok := copyOf[id]; ok {
-				solace.Logf(*role, "%s for %s: ships to %s (from my copy, version %d)", order, id, c.city, c.version)
+				solace.Logf(*role, "%s for %s: ships to %s (from my copy, version %d)", order, id, c.City, c.Version)
 			} else {
 				held[id] = append(held[id], order)
 				solace.Logf(*role, "%s for %s: no copy of %s yet, parcel held", order, id, id)
 			}
 		}
+		report()
 		if err := rcv.Ack(msg); err != nil {
 			solace.Errf(*role, "could not acknowledge: %s", err)
 		}
@@ -250,7 +346,7 @@ func Shipping(args []string) {
 }
 
 // Invoicing keeps no copy. For each order it asks the customer service for
-// the customer's name, and waits up to --timeout. If nobody answers, it
+// the customer's name and city, and waits up to --timeout. If nobody answers, it
 // tries the same order again and does not take the next one: an invoice
 // needs the name.
 func Invoicing(args []string) {
@@ -278,6 +374,18 @@ func Invoicing(args []string) {
 	solace.Logf(*role, "asking the customer service about every order, waiting up to %s", *timeout)
 	fmt.Println()
 
+	view := solace.NewHolding("Invoicing keeps no copy: it asks", "", "count")
+	asked, answered, failed := 0, 0, 0
+	report := func() {
+		view.Set([][]string{
+			{"copies of customers kept", "0"},
+			{"lookups asked", strconv.Itoa(asked)},
+			{"answered, order billed", strconv.Itoa(answered)},
+			{"failed (no answer in time)", strconv.Itoa(failed)},
+		}, "")
+	}
+	report()
+
 	stopping := make(chan struct{})
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		p := solace.PayloadOf(msg)
@@ -289,12 +397,20 @@ func Invoicing(args []string) {
 				return
 			}
 			began := time.Now()
+			asked++
+			report()
 			reply, err := ask.PublishAwaitResponse(q, resource.TopicOf(lookupTopic+id), *timeout, nil)
 			if err == nil {
-				name := solace.FieldString(solace.PayloadOf(reply), "name")
-				solace.Logf(*role, "%s billed to %s (asked the customer service, %d ms)", order, name, time.Since(began).Milliseconds())
+				answered++
+				report()
+				r := solace.PayloadOf(reply)
+				v, _ := solace.FieldInt(r, "version")
+				solace.Logf(*role, "%s billed to %s in %s (asked the customer service, %d ms, version %d)",
+					order, solace.FieldString(r, "name"), solace.FieldString(r, "city"), time.Since(began).Milliseconds(), v)
 				break
 			}
+			failed++
+			report()
 			solace.Errf(*role, "%s: lookup of %s failed: %s", order, id, err)
 			solace.Errf(*role, "%s: not billed yet, asking again", order)
 			select {

@@ -45,15 +45,28 @@ run:
 
 cleanup:
   - destroy
+  - forget-database
 
 diagram:
   caption: >
     The customer service publishes every changed customer record, whole, and
-    answers lookups. Orders carry only the customer's id. Shipping's queue
-    gets both, and shipping keeps a copy of every customer. Invoicing's queue
-    gets orders only, and invoicing asks the customer service about each one.
+    answers lookups. Orders carry only the customer's id. Every order goes
+    into both queues; customer records go into q.ecst.shipping only, because
+    only that queue subscribes to them. Shipping reads both from its queue
+    and keeps a copy of every customer. Invoicing gets orders only, and asks
+    the customer service about each one.
+    Lookups and their replies are direct messages: they never wait on a
+    queue.
   duration: 2.4
   liveWhen: orders
+  holdsCaption: >
+    Every customer event carries the whole customer record, so shipping can
+    build its own copy of the customer database from the events alone.
+    Compare the Customer Service and Shipping tables: they match, and
+    shipping never asked the customer service for anything. That is
+    event-carried state transfer.
+    Invoicing shows the alternative: orders carry only the customer's id,
+    so it keeps nothing and asks for every order.
   nodes:
     - id: orders
       label: Order Service
@@ -64,16 +77,6 @@ diagram:
       requires:
         - label: svc-ecst-orders
           semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-orders
-    - id: customers
-      label: Customer Service
-      sublabel: whole records, lookups
-      kind: app
-      shape: processor
-      col: 0
-      action: customers
-      requires:
-        - label: svc-ecst-crm
-          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-crm
     - id: broker
       label: Solace Broker
       sublabel: two queues
@@ -98,18 +101,6 @@ diagram:
           semp: /msgVpns/{vpn}/clientProfiles/cp-ecst
         - label: acl-ecst
           semp: /msgVpns/{vpn}/aclProfiles/acl-ecst
-    - id: shipping
-      label: Shipping
-      sublabel: keeps a copy
-      kind: app
-      col: 2
-      action: shipping
-      flowOn:
-        queue: q.ecst.shipping
-        client: ecst-shipping
-      requires:
-        - label: svc-ecst-shipping
-          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-shipping
     - id: invoicing
       label: Invoicing
       sublabel: asks per order
@@ -117,19 +108,78 @@ diagram:
       shape: processor
       col: 2
       action: invoicing
+      holds:
+        kept: memory
+        counters: true
+        role: Keeps nothing. Asks the customer service for every order.
       flowOn:
         queue: q.ecst.invoicing
         client: ecst-invoicing
       requires:
         - label: svc-ecst-invoicing
           semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-invoicing
+    - id: customers
+      label: Customer Service
+      sublabel: whole records, lookups
+      kind: app
+      shape: processor
+      col: 2
+      action: customers
+      holds:
+        kept: disk
+        count: customers
+        role: The owner. Every change starts here.
+      requires:
+        - label: svc-ecst-crm
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-crm
+    - id: shipping
+      label: Shipping
+      sublabel: keeps a copy
+      kind: app
+      col: 2
+      action: shipping
+      holds:
+        kept: memory
+        count: customers
+        copyOf: customers
+        role: A copy, built from the whole records the customer events carry. Never asks.
+      flowOn:
+        queue: q.ecst.shipping
+        client: ecst-shipping
+      requires:
+        - label: svc-ecst-shipping
+          semp: /msgVpns/{vpn}/clientUsernames/svc-ecst-shipping
   flows:
-    - { from: orders, to: broker, label: orders, delay: 0 }
-    - { from: customers, to: broker, label: customer records, delay: 0.3 }
-    - { from: broker, to: shipping, via: shipq, delay: 0.8 }
-    - { from: broker, to: invoicing, via: invq, delay: 0.8 }
-    - { from: invoicing, to: broker, label: lookup, delay: 1.4 }
-    - { from: broker, to: customers, label: lookup, source: invoicing, delay: 1.9 }
+    # Orders go into both queues, customer records into shipping's only:
+    # each line ends at the queue whose subscription takes it.
+    - { id: orders-ship, from: orders, to: broker, via: shipq, label: orders, delay: 0 }
+    - { id: orders-inv, from: orders, to: broker, via: invq, delay: 0 }
+    - { id: records, from: customers, to: broker, via: shipq, label: whole customer records, delay: 0.3 }
+    - { id: to-shipping, from: broker, to: shipping, via: shipq, label: orders + records, labelAt: 0.45, delay: 0.8 }
+    - { id: to-invoicing, from: broker, to: invoicing, via: invq, label: orders only, delay: 0.8 }
+    - { id: lookup, from: invoicing, to: broker, label: lookup, delay: 1.4 }
+    - { id: lookup-in, from: broker, to: customers, label: lookup, source: invoicing, delay: 1.9 }
+  paths:
+    - label: A customer changes, and the whole record travels
+      steps:
+        - flow: records
+          text: The customer service publishes the whole customer record. Only q.ecst.shipping subscribes to it.
+        - flow: to-shipping
+          text: Shipping reads records and orders from its one queue, in the order the broker received them, and updates its copy.
+    - label: An order is placed, carrying only the customer's id
+      steps:
+        - flow: orders-ship
+          text: "The order goes into q.ecst.shipping. Shipping reads it with the records (line 2) and ships from its own copy."
+        - flow: orders-inv
+          text: The same order goes into q.ecst.invoicing too, because that queue subscribes to orders as well.
+        - flow: to-invoicing
+          text: Invoicing takes the order. It has no copy of the customer, so it has to ask.
+    - label: Invoicing asks the customer service
+      steps:
+        - flow: lookup
+          text: "Invoicing sends a lookup for the customer: a direct message, kept on no queue."
+        - flow: lookup-in
+          text: The broker delivers it to the customer service, which answers straight back to invoicing. If it is down, nobody answers.
 
 actions:
   - id: apply
@@ -174,7 +224,7 @@ actions:
     variant: secondary
     description: >
       Reads q.ecst.invoicing. For each order, asks the customer service for
-      the customer's name and waits up to 2 seconds. Without an answer it
+      the customer's name and city and waits up to 2 seconds. Without an answer it
       asks again, and takes no other order meanwhile.
 
   - id: customers
@@ -185,9 +235,10 @@ actions:
     long_running: true
     variant: secondary
     description: >
-      Publishes every customer record once, then moves a customer to a new
-      city every 4 seconds and publishes the whole record again. Answers
-      lookups.
+      Keeps its customers in its own database (a file), so a restart carries
+      on where it stopped. Publishes every customer record once, then moves a
+      customer to a new city every 15 seconds and publishes the whole record
+      again. Answers lookups.
 
   - id: orders
     label: Start the order service
@@ -222,6 +273,16 @@ actions:
       queue that subscribes to them. A consumer that lost its copy gets it
       back.
 
+  - id: forget-database
+    label: Delete the customer database
+    kind: process
+    cmd: [bash, ../../apps/run.sh, ecst, customers, --forget]
+    cwd: .
+    variant: danger
+    description: >
+      Deletes the customer service's database, so the next Play starts with
+      every customer at version 1.
+
   - id: reconcile
     label: Reconcile with broker
     kind: process
@@ -246,13 +307,26 @@ failure_modes:
     title: The customer service goes down
     breaks: >
       The customer service is killed. Orders keep coming.
-    watch: >
-      The card shows invoicing. Each lookup now fails after 2 seconds with
-      the API's timeout error, and invoicing asks again about the same
-      order: no invoice goes out, and q.ecst.invoicing fills up. Open the
-      shipping log: it carries on, "ships to Lyon (from my copy)". Shipping
-      already has what it needs. Reset starts the customer service, and
-      invoicing works through the orders that waited.
+    watch:
+      normally: >
+        Invoicing asks the customer service about every order and bills it a
+        few milliseconds later. Shipping ships every order from its own copy
+        and asks nobody.
+      broke: >
+        Nobody answers invoicing's lookups. In the invoicing output, each
+        lookup fails after 2 seconds with the API's timeout error, then "not
+        billed yet, asking again" for the same order.
+      impact: >
+        No invoices go out. Invoicing's failed count under the diagram
+        climbs, and unbilled orders pile up on q.ecst.invoicing. Shipping is
+        not affected: it keeps shipping from its own copy ("ships to Lyon
+        (from my copy)" in its log), and its copy under the diagram stays at
+        8 customers.
+      recover: >
+        Press Reset. The customer service starts again from its database,
+        invoicing's next lookup is answered, and it bills the orders that
+        waited. None were lost: invoicing acknowledges an order only once it
+        is billed, so they stayed on the queue.
     why: >
       Invoicing depends on the customer service being up at the moment of
       every order: a thin event plus a call back couples the two services'
@@ -283,23 +357,42 @@ failure_modes:
             has: ["lookup of C-\\d+ failed: .*(?i:time ?out|timed out)", "not billed yet, asking again"]
           - log: shipping
             has: ["ships to \\w+ \\(from my copy"]
+        holds:
+          - { node: shipping, missing: { max: 0 } }
       reset:
         within: 20
         logs:
           - log: invoicing
             has: ["billed to .* \\(asked the customer service"]
+          - log: customers
+            has: ["opened its customer database: 8 customers"]
 
   - id: shipping-loses-copy
     title: Shipping restarts and has lost its copy
     breaks: >
       Shipping is restarted. Its copy of the customers was in memory, so it
       starts with none.
-    watch: >
-      The card shows shipping. Orders keep arriving, but for most customers
-      shipping now has no copy: "no copy of C-05 yet, parcel held". Each
-      customer comes back only when it next changes, which is rare. Reset
-      asks the customer service to publish every record again: the held
-      parcels ship at once, "copy arrived, ships to".
+    watch:
+      normally: >
+        Shipping ships every order from its own copy of the 8 customers,
+        built from customer events, and asks nobody.
+      broke: >
+        Shipping restarted, and its copy was in memory, so the copy is gone.
+        In the shipping output, "starting with no copy of any customer", then
+        "no copy of C-05 yet, parcel held" for each order it cannot place.
+        Under the diagram its copy drops to 0 customers and lists the parcels
+        it holds.
+      impact: >
+        Those parcels do not ship. The queue cannot help: shipping
+        acknowledged the customer events that built its copy, so the broker
+        deleted them. A customer comes back only when its record next
+        changes: here about every two minutes per customer, in production
+        perhaps months. The held parcels are only in shipping's memory too,
+        so another restart now would lose them without a word.
+      recover: >
+        Press Reset. The customer service publishes every customer record
+        again, shipping's copy refills to "Matches Customer Service: 8 of 8",
+        and the held parcels ship at once ("copy arrived, ships to").
     why: >
       With event-carried state transfer the copy is the consumer's to keep.
       The events it consumed are gone from its queue once acknowledged, so a
@@ -330,6 +423,8 @@ failure_modes:
         logs:
           - log: shipping
             has: ["starting with no copy of any customer", "no copy of C-\\d+ yet, parcel held"]
+        holds:
+          - { node: shipping, max: 2, missing: { min: 6 } }
       reset:
         within: 15
         logs:
@@ -337,6 +432,8 @@ failure_modes:
             has: ["published all 8 customer records \\(asked to send everything again\\)"]
           - log: shipping
             has: ["copy arrived, ships to"]
+        holds:
+          - { node: shipping, min: 8, matched: { min: 8 } }
 
 inspect:
   - label: Queues
@@ -350,7 +447,8 @@ inspect:
     kind: semp
     api: monitor
     path: /msgVpns/{vpn}/clients?count=20&where=clientName==ecst-*
-    # Invoicing's dataTxMsgCount rises with every lookup; shipping's does not.
+    # dataRxMsgCount is what the broker received from the client: invoicing's
+    # rises with every lookup, shipping's stays at 0.
     columns: [clientName, clientUsername, dataRxMsgCount, dataTxMsgCount]
     ui_hint: Manager → Clients
     empty: No app of this scenario is connected. Press Play.

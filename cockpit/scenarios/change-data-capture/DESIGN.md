@@ -16,6 +16,14 @@ from `q.cdc.search`.
 JSON line each with a log sequence number, under the dashboard's state
 folder. A real connector reads a real database's log (PostgreSQL WAL, MySQL
 binlog); the shape is the same: read in order, publish, save the position.
+A new database is seeded with opening stock for six SKUs, committed as
+insert changes #1 to #6, so the search index can be compared against it.
+
+**What each app holds.** The inventory database (disk): stock per SKU and
+the change that last set it. The connector (disk): its saved position
+against the latest change. The search index (memory): the same columns,
+compared with the database ("Matches Inventory App: 6 of 6"). A restarted
+search index starts empty, and SKUs unchanged since stay missing.
 
 **Broker objects.** `q.cdc.search`; `cp-cdc`, `acl-cdc`, usernames
 `svc-cdc-connector`, `svc-cdc-search`. The inventory app has no username.
@@ -34,3 +42,11 @@ forget-database.
    from the saved position, no gap.
 2. *The connector loses its saved position.* Restarted from the first
    change; the search index logs each repeat and ignores it.
+
+**Wording, 2026-11-16 review.** Change data capture is defined as turning
+committed changes into events without changing the application; log-based
+capture, shown here, is its usual form, next to query-based (polling) and
+trigger-based capture. The Solace panel lists the CDC Micro-Integrations
+confirmed on solace.com: Oracle, MySQL, Microsoft SQL Server, IBM Db2
+(no parenthesis on which are built on Debezium: several are, and naming one
+implied the others were not).

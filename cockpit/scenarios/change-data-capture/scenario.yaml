@@ -18,9 +18,9 @@ objectives:
 
 pattern:
   what: >
-    Turn the committed changes in a database into events by reading the
-    database's own change log, without changing the application that writes
-    to it.
+    Turn the committed changes in a database into events, without changing
+    the application that writes to it. The usual form, log-based, reads the
+    database's own change log.
   when: >
     A system of record cannot or should not be modified, but other systems
     need to react to its changes.
@@ -31,7 +31,8 @@ pattern:
   solace: >
     A connector publishes each change as a guaranteed event on a topic per
     table or key, and each consumer reads its own queue. Solace
-    Micro-Integrations include one for Oracle CDC, built on Debezium.
+    Micro-Integrations include change data capture for Oracle, MySQL,
+    Microsoft SQL Server and IBM Db2.
   related: [event-carried-state-transfer, data-synchronization, strangler]
   guide: https://solace.com/event-driven-architecture-patterns/#cdc
 
@@ -48,25 +49,42 @@ cleanup:
 
 diagram:
   caption: >
-    The inventory app writes to its database and nothing else. The
-    connector reads the database's change log in order and publishes each
-    change to cdc/inventory/stock/changed/v1/<sku>. q.cdc.search takes them
-    for the search index.
+    A warehouse. The inventory app writes each sale and restock to its
+    database and nothing else: it has no line, because it never talks to
+    the broker. The connector reads the database's change log in order and
+    publishes each change as a guaranteed event on
+    cdc/inventory/stock/changed/v1/<sku>. q.cdc.search keeps them for the
+    search index.
+  holdsCaption: >
+    The search index is built from events the inventory app never
+    published. Compare the Inventory App's database with the Search Index:
+    the same stock for every SKU, set by the same change, a moment apart.
+    The connector's card says how far through the database's change log it
+    has published. That is change data capture. Without it, the inventory
+    app's code would have to change to publish anything.
   duration: 2.4
   liveWhen: connector
   nodes:
     - id: inventory
       label: Inventory App
-      sublabel: writes to its database only
+      sublabel: writes its database
       kind: app
       col: 0
       action: inventory
+      holds:
+        kept: disk
+        count: SKUs
+        role: The system of record. Writes every change to its database, and publishes nothing.
     - id: connector
       label: CDC Connector
       sublabel: reads the change log
       kind: app
       col: 0
       action: connector
+      holds:
+        kept: disk
+        counters: true
+        role: Reads the change log in order, and saves how far it got once the broker accepts each change.
       requires:
         - label: svc-cdc-connector
           semp: /msgVpns/{vpn}/clientUsernames/svc-cdc-connector
@@ -94,6 +112,11 @@ diagram:
       kind: app
       col: 2
       action: search
+      holds:
+        kept: memory
+        count: SKUs
+        copyOf: inventory
+        role: Built only from the change events. Ignores a change it has already applied.
       flowOn:
         queue: q.cdc.search
         client: cdc-search
@@ -101,8 +124,15 @@ diagram:
         - label: svc-cdc-search
           semp: /msgVpns/{vpn}/clientUsernames/svc-cdc-search
   flows:
-    - { from: connector, to: broker, label: stock changed, delay: 0 }
-    - { from: broker, to: searchapp, via: search, delay: 0.8 }
+    - { id: publish, from: connector, to: broker, via: search, label: stock changed, labelAt: 0.5, delay: 0 }
+    - { id: deliver, from: broker, to: searchapp, via: search, delay: 0.8 }
+  paths:
+    - label: A stock change in the database becomes an event
+      steps:
+        - flow: publish
+          text: The inventory app commits a change to its database. The connector reads it from the change log and publishes it; q.cdc.search keeps it.
+        - flow: deliver
+          text: The search index applies the change, unless it has applied it already, and acknowledges it.
 
 actions:
   - id: apply
@@ -218,12 +248,30 @@ failure_modes:
     title: The connector crashes
     breaks: >
       The CDC connector is killed. The inventory app keeps writing.
-    watch: >
-      The card shows the connector. Open the inventory app's log: it carries
-      on, change after change, and knows nothing. The search index gets no
-      new changes. Reset starts the connector: "saved position found:
-      resuming after change #N", then every change written while it was
-      down, in order, and the search index catches up with no gap.
+    watch:
+      normally: >
+        The connector publishes each change a moment after the inventory app
+        commits it. Under the diagram, the Search Index matches the
+        Inventory App's database, 6 of 6 SKUs.
+      broke: >
+        The connector's output ends with "exited with code -9". The inventory
+        app carries on, "change #N written to the database", and knows
+        nothing. Under the diagram the connector's card says it is not
+        running, and its saved position stays on disk.
+      impact: >
+        No new events. The database keeps changing, so the Search Index
+        falls out of step with it: the match line shows SKUs that are
+        different. Nothing is lost yet: the changes wait in the database's
+        change log. The hidden risk: a real database keeps that log only so
+        long, and a connector down past that has to start again from a
+        snapshot.
+      recover: >
+        Press Reset. The connector says "saved position found: resuming
+        after change #N", publishes every change written while it was down,
+        in order, and the Search Index matches the database again. No gap:
+        the position is saved after each change the broker accepts. A change
+        in flight at the crash may be published again; the search index
+        ignores it.
     why: >
       The database keeps its change log whether or not anyone reads it. The
       connector saves how far it has got after the broker accepts each
@@ -261,19 +309,36 @@ failure_modes:
             has: ["saved position found: resuming after change #\\d+", "change #\\d+ published"]
           - log: search
             has: ["SKU-\\d+ shows \\d+ in stock"]
+        holds:
+          - { node: searchapp, min: 6, matched: { min: 5 } }
 
   - id: connector-lost-position
     title: The connector loses its saved position
     breaks: >
       The connector restarts without its saved position and reads the
       change log from the first change.
-    watch: >
-      The card shows the search index. Every change since the start is
-      published again, and the search index says so: "change #12 for SKU-03
-      again: already applied, ignored". Its stock figures do not move
-      backwards, because it compares each change's number with the last one
-      it applied. Reset starts the normal connector, which resumes from the
-      position the other one saved.
+    watch:
+      normally: >
+        Each change is published once, and the Search Index matches the
+        Inventory App's database.
+      broke: >
+        The connector says "no saved position: reading the change log from
+        the first change" and publishes every change again, all within about
+        a second. Scroll up in the search index output to that burst of
+        "change #12 for SKU-03 again: already applied, ignored"; after it,
+        new changes apply as normal. Its card under the diagram keeps the
+        count of repeats it ignored.
+      impact: >
+        The stock figures do not move backwards: the index compares each
+        change's number with the last one it applied for that SKU, so it
+        still matches the database. The hidden risk is in consumers that do
+        not check: one that adds to a counter or sends an email for each
+        event does it twice.
+      recover: >
+        Press Reset. The normal connector starts, says "saved position
+        found: resuming after change #N" (the position the other one saved),
+        and carries on from there. Nothing was lost; every repeat was
+        ignored.
     why: >
       A connector saves its position after publishing, so after a crash at
       the wrong moment, or a lost position, it publishes some changes again.
@@ -282,7 +347,9 @@ failure_modes:
       repeat from a new change.
     real_world: >
       A connector redeployed with its offsets reset, or restored from an
-      old backup, sends hours of changes again. Consumers that apply a
+      old backup, sends hours of changes again. (A real connector that has
+      lost its offsets usually starts with a fresh snapshot of the tables,
+      because the database's log no longer reaches back to the start.) Consumers that apply a
       change blindly (add 1 to a counter, send an email) do it twice.
     docs:
       - label: "Go API: consuming guaranteed messages"
@@ -305,6 +372,8 @@ failure_modes:
             has: ["no saved position: reading the change log from the first change"]
           - log: search
             has: ["change #\\d+ for SKU-\\d+ again: already applied, ignored"]
+        holds:
+          - { node: searchapp, min: 6, missing: { max: 0 } }
       reset:
         within: 15
         logs:

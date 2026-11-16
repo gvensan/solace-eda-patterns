@@ -4,33 +4,37 @@ order: 140
 eyebrow: Event Generation Patterns
 title: Event Sourcing
 summary: >
-  A bank's ledger keeps no balances table. Every deposit and withdrawal is
-  an event, and a balance is what the events add up to. The broker keeps a
-  copy of each event in its replay log. When the ledger starts, it asks for
-  every logged event again and rebuilds the balances from them. The replay
-  log is small on purpose, to show what it is not: a permanent store.
+  A bank's ledger stores no balances: each one is derived from the events,
+  and this demo keeps them in memory. A teller sends commands; the ledger
+  validates each one and records an accepted one as an event, its only
+  write. Crash the ledger and it rebuilds the same balances from the
+  events. Lose the events, and the balances are lost with them: the events
+  are the only record.
 
 objectives:
-  - See the balances rebuilt from events after the ledger crashes, exactly as they were
-  - See the broker replay logged events into an exclusive queue on request
-  - See a full replay log drop its oldest events, and the history go with them
-  - Learn why event sourcing needs a store of record, and what the replay log is for
+  - See a command validated and recorded as an event, the only thing the ledger ever writes
+  - See that no balance is stored anywhere, because each one is derived from the events
+  - See the balances rebuilt from the events after the ledger crashes, exactly as they were
+  - "See why the event history must be durable: lose it, and every balance is lost"
 
 pattern:
   what: >
-    Store every change as an event and derive the current state from the
-    events, so the history is the record and the state can always be
-    rebuilt.
+    Record every change as an immutable event, appended and never edited,
+    and derive the current state from the events. Commands are validated
+    against that state; only accepted changes become events.
   when: >
     The history matters (audit, finance), or state must be rebuilt or read
     in new ways from past events.
   cost: >
-    It needs a durable event store, snapshots for long histories, and care
-    whenever the format of an event changes.
+    It needs a durable, complete event history, snapshots for long
+    histories, persisted projections for reads, and care whenever the
+    format of an event changes.
   solace: >
-    A replay log keeps published messages up to a fixed size and replays
-    them into an exclusive queue on request. It is a buffer for recovery,
-    not a permanent event store.
+    Here the broker's replay log stands in for an event store: it keeps the
+    events, and at start replays them for the ledger to add up. The demo
+    assumes that history is complete and durable, as an event store's is;
+    a replay log is bounded and meant for recovery, so production needs a
+    real event store.
   related: [cqrs, event-streaming, event-carried-state-transfer]
   guide: https://solace.com/event-driven-architecture-patterns/#event-sourcing
 
@@ -38,68 +42,103 @@ run:
   - apply
   - build
   - ledger
+  - teller
 
 cleanup:
   - destroy
 
 diagram:
   caption: >
-    The ledger publishes each transaction to esrc/bank/account/<account>/...
-    The broker logs it in rl-esrc and delivers it to q.esrc.ledger, and the
-    ledger applies it. When the ledger starts, it asks the broker to replay
-    the whole log into its queue and rebuilds the balances first.
+    No balance is stored anywhere: each one is that account's events added
+    up. The teller submits commands; the ledger validates each against the
+    balances, records an accepted one as an event (its only write) and
+    applies it. On start it replays the whole history and adds it up again
+    before taking a command. Assumes one ledger at a time and a complete,
+    durable event history; the replay log stands in for an event store.
+  holdsCaption: >
+    Balances are derived from events; this demo keeps them in memory, and
+    stores them nowhere else. Crash the ledger and the table is gone. On
+    start it adds up the events again, gets the same figures, and its note
+    says how many events it took.
   duration: 2.4
   liveWhen: ledger
   nodes:
-    - id: statements
-      label: Statements Job
-      sublabel: large monthly statements
+    - id: teller
+      label: Teller
+      sublabel: sends commands only
       kind: app
       col: 0
-      action: statements
+      action: teller
       requires:
-        - label: svc-esrc-ledger
-          semp: /msgVpns/{vpn}/clientUsernames/svc-esrc-ledger
+        - label: svc-esrc-teller
+          semp: /msgVpns/{vpn}/clientUsernames/svc-esrc-teller
     - id: broker
       label: Solace Broker
-      sublabel: logs, then replays
+      sublabel: retains events, demo size
       kind: broker
       col: 1
       action: apply
       contains:
+        - id: commandsq
+          label: q.esrc.commands
+          depth: { queue: q.esrc.commands, unit: waiting }
         - id: log
-          label: rl-esrc (replay log, 1 MB)
-        - id: ledgerq
-          label: q.esrc.ledger
-          depth: { queue: q.esrc.ledger, unit: waiting }
+          label: "rl-esrc: event history, 1 MB demo size"
+        - id: rebuildq
+          label: "q.esrc.rebuild: used at start only"
       provides:
+        - label: q.esrc.commands
+          group: commandsq
+          semp: /msgVpns/{vpn}/queues/q.esrc.commands
         - label: rl-esrc
           group: log
           semp: /msgVpns/{vpn}/replayLogs/rl-esrc
-        - label: q.esrc.ledger
-          group: ledgerq
-          semp: /msgVpns/{vpn}/queues/q.esrc.ledger
+        - label: q.esrc.rebuild
+          group: rebuildq
+          semp: /msgVpns/{vpn}/queues/q.esrc.rebuild
         - label: cp-esrc
           semp: /msgVpns/{vpn}/clientProfiles/cp-esrc
         - label: acl-esrc
           semp: /msgVpns/{vpn}/aclProfiles/acl-esrc
     - id: ledger
       label: Ledger
-      sublabel: balances from events only
+      sublabel: balances derived from events
       kind: app
       shape: processor
       col: 2
       action: ledger
+      holds:
+        kept: memory
+        count: accounts
+        role: Balances are derived from events; this demo keeps them in memory. Rebuilt from the history at every start, before any command is taken.
       flowOn:
-        queue: q.esrc.ledger
+        queue: q.esrc.commands
         client: esrc-ledger
       requires:
         - label: svc-esrc-ledger
           semp: /msgVpns/{vpn}/clientUsernames/svc-esrc-ledger
   flows:
-    - { from: ledger, to: broker, label: transactions, delay: 0 }
-    - { from: broker, to: ledger, via: ledgerq, delay: 0.8 }
-    - { from: statements, to: broker, label: statements, animate: false, delay: 0 }
+    - { id: command, from: teller, to: broker, via: commandsq, label: commands, delay: 0 }
+    - { id: take, from: broker, to: ledger, via: commandsq, delay: 0.5 }
+    - { id: record, from: ledger, to: broker, via: log, label: events, delay: 1.0 }
+    - { id: replay, from: broker, to: broker, via: log, into: rebuildq, label: replayed at start, animate: false }
+    - { id: read-back, from: broker, to: ledger, via: rebuildq, label: read at start, labelAt: 0.5, animate: false }
+  paths:
+    - label: A command becomes an event, and the event changes the balance
+      steps:
+        - flow: command
+          text: "The teller submits a command, a request that can be refused: take 40.00 out of A-2. It waits in q.esrc.commands."
+        - flow: take
+          text: The ledger validates it against the current balance, which is what A-2's events so far add up to. Too large, and it is refused; nothing is recorded and nothing changes.
+        - flow: record
+          text: Accepted, it is recorded as an event, "A-2 withdrawn 40.00", in the history (rl-esrc). That is the only write; no balance is stored anywhere. Once the broker confirms it has the event, the ledger applies it, so A-2 is now its events added up, this one included. Then it takes the next command.
+    - label: The ledger restarts and rebuilds before any command
+      steps:
+        - flow: replay
+          text: On restart, the ledger rebuilds its balances by replaying the complete retained event history before processing new commands. The broker replays the history into q.esrc.rebuild, oldest first. This line carries messages only while the ledger starts.
+        - flow: read-back
+          at: 0.75
+          text: The ledger adds every event up, from #1 to the last, and only then takes a command. Same events, same balances. If required history is missing, it cannot safely rebuild.
 
 actions:
   - id: apply
@@ -109,9 +148,10 @@ actions:
     tf_dir: tf
     variant: primary
     description: >
-      Creates the replay log rl-esrc (1 MB, logging esrc/> only),
-      q.esrc.ledger, and the client profile, ACL profile and username for
-      this scenario.
+      Creates the replay log rl-esrc (1 MB, keeping only the events on
+      esrc/bank/account/> and the ledger's end-of-replay markers),
+      q.esrc.commands, q.esrc.rebuild, and the
+      client profile, ACL profile and usernames for this scenario.
 
   - id: build
     label: Build the apps
@@ -131,19 +171,21 @@ actions:
     long_running: true
     variant: primary
     description: >
-      Asks the broker to replay every logged event into q.esrc.ledger,
-      rebuilds the balances from them, then makes a deposit or withdrawal
-      every second and publishes it as an event.
+      Asks the broker to replay the event history into q.esrc.rebuild and
+      adds it up into balances. Then it takes the teller's commands from
+      q.esrc.commands one at a time, records each accepted one as an event,
+      and applies it.
 
-  - id: statements
-    label: Publish the monthly statements
+  - id: teller
+    label: Start the teller
     kind: process
-    cmd: [bash, ../../apps/run.sh, esrc, statements, --client-name, esrc-statements]
+    cmd: [bash, ../../apps/run.sh, esrc, teller, --client-name, esrc-teller]
     cwd: .
-    variant: secondary
+    long_running: true
+    variant: primary
     description: >
-      Publishes 45 statements of 30 KB each on esrc/bank/statement/v1/,
-      which the replay log keeps too: 1.35 MB into a 1 MB log.
+      Submits a command every second: pay an amount into an account, or
+      take one out.
 
   - id: kill-ledger
     label: Crash the ledger
@@ -156,14 +198,15 @@ actions:
       Kills the ledger outright (SIGKILL), and returns once it has gone.
 
   - id: trim-log
-    label: Empty the replay log
+    label: Empty the event history
     kind: process
     cmd: [bash, ./trim.sh]
     cwd: .
     variant: secondary
     description: >
-      Removes every event from the replay log. The ledger's next start
-      finds no history and begins with every balance at 0.00.
+      Removes every event from rl-esrc, the event history. The ledger's
+      next start finds nothing to rebuild from, and begins with every
+      balance at 0.00.
 
   - id: reconcile
     label: Reconcile with broker
@@ -182,31 +225,46 @@ actions:
     tf_dir: tf
     variant: danger
     description: >
-      Deletes the replay log, the queue and the access control for this
+      Deletes the replay log, the queues and the access control for this
       scenario.
 
 failure_modes:
   - id: ledger-crash
     title: The ledger crashes
     breaks: >
-      The ledger is killed. Its balances were only in memory.
-    watch: >
-      The card shows the ledger. Reset starts it with no balances at all.
-      It asks the broker to replay every logged event, and rebuilds:
-      "rebuilt from 57 events: A-1 120.00, A-2 35.00, ...", the same
-      balances it had before the crash, then "every event's recorded balance
-      matched the events before it". Then it carries on with the next
-      transaction.
+      The ledger is killed. Its balances were only in its memory.
+    watch:
+      normally: >
+        The ledger takes each command, records it as an event and applies
+        it: "command 103512-7 accepted: recorded event #57, A-2 deposited
+        40.00, balance 140.00". Under the diagram its four balances change
+        about once a second, and q.esrc.commands shows 0 or 1 waiting.
+      broke: >
+        The ledger's output ends with "exited with code -9". Under the
+        diagram its card says it is not running and shows no balances: they
+        were only in its memory, and no balances table exists anywhere else.
+        The teller carries on, and its commands pile up in q.esrc.commands:
+        the waiting count climbs by one a second.
+      impact: >
+        No command is decided while the ledger is down, but none is lost:
+        each waits in q.esrc.commands. Nothing recorded is lost either:
+        every event is still in the event history, rl-esrc, and the
+        balances are only what those events add up to.
+      recover: >
+        Reset starts the ledger with no balances. It asks for the history,
+        adds it up, and logs "rebuilt from 57 events: A-1 120.00, A-2 35.00,
+        ...". Under the diagram the same balances come back. Only then does
+        it take commands: q.esrc.commands drains to 0. If the crash came
+        after recording an event but before acknowledging its command, that
+        command comes again, and is "not recorded twice".
     why: >
       In event sourcing the events are the record and the state is derived
-      from them, so state that is lost can be derived again. The broker's
-      replay log holds a copy of every event published on esrc/>. A
-      receiver built with a replay strategy asks the broker to deliver the
-      logged events into its queue again, in order, before anything new.
+      from them, so state that is lost can be derived again. Nothing has to
+      be backed up but the events.
     real_world: >
-      A service restarted after a crash or a deploy, or a new read model
-      built from the full history. Real event stores also keep snapshots,
-      so a rebuild does not have to start from the first event ever.
+      A service restarted after a crash or a deploy, or a new view built
+      from the full history. Real event stores also keep snapshots, so a
+      rebuild does not have to start from the first event ever.
     docs:
       - label: "Go API: consuming guaranteed messages"
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
@@ -227,35 +285,51 @@ failure_modes:
           - log: ledger
             has: ["exited with code -9"]
       reset:
-        within: 15
+        within: 20
         logs:
           - log: ledger
-            has: ["asked the broker to replay every logged event", "rebuilt from \\d+ events: A-", "every event's recorded balance matched"]
+            has: ["asked the broker to replay the event history", "rebuilt from \\d+ events", "taking commands from q.esrc.commands"]
+        holds:
+          - { node: ledger, min: 4 }
 
-  - id: log-rolls-over
-    title: The replay log rolls over
+  - id: history-lost
+    title: The event history is lost
     breaks: >
-      While the ledger is stopped, the statements job publishes 1.35 MB of
-      statements into the 1 MB replay log. Then the ledger starts again.
-    watch: >
-      The card shows the ledger. It asks for every logged event, as before,
-      and gets none of the transactions: "rebuilt from 0 events: no
-      transactions in the log, every account starts at 0.00". The statements
-      filled the log,
-      and the broker dropped the oldest messages to make room, every
-      transaction among them, without telling anyone. Reset cannot bring
-      them back: it empties the log and the bank starts over.
+      This breaks the demo's one assumption on purpose: that the event
+      history is complete and durable. While the ledger is stopped, every
+      event is removed from rl-esrc. Then the ledger starts again.
+    watch:
+      normally: >
+        The ledger's note says "Rebuilt at start from N events": every
+        balance is what the history adds up to.
+      broke: >
+        The trim says "OK: the replay log is empty". The ledger starts, asks
+        for the history, gets nothing, and logs "rebuilt from 0 events: the
+        history is empty, every account starts at 0.00". Then it takes the
+        waiting commands as if the bank had just opened. Nothing warns
+        anyone.
+      impact: >
+        Every balance in the bank is gone: the events were the only record,
+        and no balances table is hiding anywhere. Worse, the ledger cannot
+        tell an empty history from a lost one, so it carries on from 0.00
+        and refuses withdrawals that should have gone through.
+      recover: >
+        Nothing brings the events back. Reset stops and starts the ledger:
+        it rebuilds from the events recorded since the loss, the same
+        figures it had. In production you would restore the event store
+        from a replica or a backup.
     why: >
-      A replay log has a fixed size. When it is full, the broker discards
-      its oldest messages to log new ones. Publishing never fails because of
-      it, and a replay simply starts from the oldest message still there.
-      Anything that needs the full history needs a store that keeps it:
-      the replay log is a buffer for recovery, not the record.
+      In event sourcing the events are the one thing that must never be
+      lost. A rebuild is only as good as the history it reads. A real event
+      store knows how many events each stream has, so a missing history is
+      an error there; a replay log on one broker is bounded and can be
+      emptied with one command, which is why this demo assumes a durable,
+      complete history instead of providing one.
     real_world: >
-      A replay log sized for a day of traffic, and a consumer that needs to
-      rebuild after a week. Event-sourced systems keep their events in an
-      event store or database, and use broker replay to recover a consumer
-      that missed recent events.
+      An event store lost to a failed disk with no replica, a retention
+      setting that deletes old events, or a replay log mistaken for the
+      store of record. Event-sourced systems keep their events in a durable,
+      replicated event store, and back it up like any database.
     docs:
       - label: "Go API: consuming guaranteed messages"
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Subscribe.htm
@@ -267,27 +341,28 @@ failure_modes:
     logs: ledger
     trigger:
       - stop: ledger
-      - run: statements
+      - run: trim-log
       - start: ledger
     reset:
       - stop: ledger
-      - run: trim-log
       - start: ledger
     expect:
       break:
-        within: 15
-        logs:
-          - log: statements
-            has: ["published 45 monthly statements of 30 KB each"]
-          - log: ledger
-            has: ["rebuilt from 0 events: no transactions in the log"]
-      reset:
-        within: 15
+        within: 25
         logs:
           - log: trim-log
             has: ["OK: the replay log is empty"]
           - log: ledger
-            has: ["rebuilt from 0 events"]
+            has: ["rebuilt from 0 events: the history is empty", "taking commands from q.esrc.commands"]
+        holds:
+          - { node: ledger, min: 1 }
+      reset:
+        within: 25
+        logs:
+          - log: ledger
+            has: ["rebuilt from \\d+ events", "taking commands from q.esrc.commands"]
+        holds:
+          - { node: ledger, min: 1 }
 
 inspect:
   - label: Replay log
@@ -304,10 +379,10 @@ inspect:
     columns: [replayLogName, topicFilterSubscription]
     ui_hint: Manager → Replay → rl-esrc → Topic Filter Subscriptions
     empty: No replay log yet. Press Play.
-  - label: Queue
+  - label: Queues
     kind: semp
     api: monitor
     path: /msgVpns/{vpn}/queues?count=20&where=queueName==q.esrc.*
-    columns: [queueName, msgSpoolUsage, spooledMsgCount]
+    columns: [queueName, accessType, msgSpoolUsage]
     ui_hint: Manager → Queues
-    empty: No queue yet. Press Play.
+    empty: No queues yet. Press Play.

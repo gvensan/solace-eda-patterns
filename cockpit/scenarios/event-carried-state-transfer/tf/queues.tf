@@ -1,9 +1,11 @@
 # ---------------------------------------------------------------------------
 # Event-carried state transfer: queues
 #
-# Shipping's queue takes both orders and customer records, in the order they
-# were published, so its copy is up to date when an order arrives. Invoicing's
-# queue takes orders only.
+# Shipping's queue takes both orders and customer records, in the order the
+# broker received them. They come from two services, so there is no shared
+# publish order; but the customer service waits for the broker to confirm
+# each record, so an order placed after a change is behind it on the queue.
+# Invoicing's queue takes orders only.
 # ---------------------------------------------------------------------------
 
 resource "solacebroker_msg_vpn_queue" "shipping" {
