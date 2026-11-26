@@ -15,7 +15,7 @@ always somewhat behind.
 order service numbers each order and publishes "order placed"
 (`cqrs/shop/order/placed/v1/<customer>`). `q.cqrs.view` feeds the order
 history service, which keeps a count and total per customer and answers the
-account page by request-reply (`cqrs/shop/query/order-history/v1/<customer>`)
+account page by request-reply (`cqrs/shop/query/order-summary/v1/<customer>`)
 with the view's age.
 
 **Broker objects.** `q.cqrs.commands`, `q.cqrs.view`; `cp-cqrs`, `acl-cqrs`,

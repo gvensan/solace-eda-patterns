@@ -1,12 +1,16 @@
 // Package streaming implements the event streaming scenario.
 //
 // A bike-share. Every ride start and ride end is an event, and the counter
-// keeps the number of bikes in use: plus one on a start, minus one on an
-// end. That number is only right if the counter has seen the stream in
-// order from where its count started. A queue keeps the stream in order
-// and holds the counter's position in it; a snapshot keeps the count
-// across a crash. The city's board takes the same events direct, with
-// neither, and joining late it has no history.
+// keeps which bikes are in use: the bike is added on a start and removed on
+// an end. That set is only right if the counter has seen the stream in
+// order from where its state started. A queue keeps the stream in order
+// and holds the counter's position in it; a snapshot keeps the set across
+// a crash. The city's board lists the rides in progress from the same
+// events, taken direct, with neither, and joining late it has no history.
+//
+// Each event also carries the bikes' own total, as a check to compare
+// against. A total cannot say which bikes are out or since when, so it
+// shows that the board's list is short without being able to fill it.
 package streaming
 
 import (
@@ -159,6 +163,30 @@ func Counter(args []string) {
 		}
 	}
 
+	published := 0
+	held := solace.NewHolding("Bikes in use, built from the stream", "bike")
+	// Called with the tally not changing under it.
+	report := func() {
+		ids := make([]string, 0, len(t.out))
+		for b := range t.out {
+			ids = append(ids, b)
+		}
+		sort.Strings(ids)
+		rows := make([][]string, len(ids))
+		for i, b := range ids {
+			rows[i] = []string{b}
+		}
+		note := "No ride events applied yet."
+		if t.seq > 0 {
+			note = fmt.Sprintf("%d bikes in use, at event #%d.", len(ids), t.seq)
+			if published > 0 {
+				note += fmt.Sprintf(" The bikes say %d.", published)
+			}
+		}
+		held.Set(rows, note)
+	}
+	report()
+
 	svc := solace.ConnectAs(*role, *user, *clientName)
 	defer svc.Disconnect()
 	rcv := solace.BindQueue(*role, *user, svc, *queue, solace.QueueOpts{ClientAck: true})
@@ -171,7 +199,7 @@ func Counter(args []string) {
 	fmt.Println()
 
 	var mu sync.Mutex
-	published, first := 0, true
+	first := true
 	run := snapRun
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		payload := solace.PayloadOf(msg)
@@ -202,6 +230,7 @@ func Counter(args []string) {
 		note := t.apply(payload)
 		run = solace.FieldString(payload, "run")
 		published, _ = solace.FieldInt(payload, "inUse")
+		report()
 		if note != "" {
 			fmt.Printf("[%s] #%d%s\n", *role, t.seq, note)
 		}
@@ -251,9 +280,11 @@ func Counter(args []string) {
 	}
 }
 
-// Board shows the count on the city's screen. It takes the events direct:
-// no queue, no position, no history, so started mid-stream it is wrong
-// from the first end it sees for a bike it never saw start.
+// Board lists the rides in progress on the city's screen: which bikes are
+// out and for how long. It takes the events direct: no queue, no position,
+// no history, so started mid-stream its list misses every bike that was
+// already out, and the bikes' total in each event says how many but not
+// which.
 func Board(args []string) {
 	fs := flag.NewFlagSet("es board", flag.ExitOnError)
 	user := fs.String("user", "svc-es-board", "client username to connect as")
@@ -266,18 +297,48 @@ func Board(args []string) {
 	rcv := solace.StartDirectReceiver(*role, svc)
 	defer solace.Terminate(rcv)
 	solace.Subscribe(*role, *user, rcv, "es/bikes/ride/>")
-	solace.Logf(*role, "counting from now, direct: no history.")
+	solace.Logf(*role, "listing rides from now, direct: no history.")
 	fmt.Println()
 
 	t := &tally{out: map[string]bool{}, role: *role, why: "joined late, no history"}
 	var mu sync.Mutex
 	published := 0
+	since := map[string]time.Time{}
+	held := solace.NewHolding("Rides in progress, as the board lists them", "bike", "riding since")
+	// Called with mu held.
+	report := func() {
+		ids := make([]string, 0, len(since))
+		for b := range since {
+			ids = append(ids, b)
+		}
+		sort.Strings(ids)
+		rows := make([][]string, len(ids))
+		for i, b := range ids {
+			rows[i] = []string{b, since[b].Format("15:04:05")}
+		}
+		note := "No ride events received yet."
+		if t.seq > 0 {
+			note = fmt.Sprintf("%d rides listed, at event #%d. The bikes say %d are out: ", len(ids), t.seq, published)
+			if missing := published - len(ids); missing > 0 {
+				note += fmt.Sprintf("%d the board cannot name.", missing)
+			} else {
+				note += "all of them listed."
+			}
+		}
+		held.Set(rows, note)
+	}
 	if err := rcv.ReceiveAsync(func(msg message.InboundMessage) {
 		payload := solace.PayloadOf(msg)
 		mu.Lock()
 		defer mu.Unlock()
 		note := t.apply(payload)
+		if bike := solace.FieldString(payload, "bike"); t.out[bike] {
+			since[bike] = time.Now()
+		} else {
+			delete(since, bike)
+		}
 		published, _ = solace.FieldInt(payload, "inUse")
+		report()
 		if note != "" {
 			fmt.Printf("[%s] #%d%s\n", *role, t.seq, note)
 		}
@@ -294,13 +355,29 @@ func Board(args []string) {
 		select {
 		case <-stop:
 			mu.Lock()
-			solace.Logf(*role, "stopped: %d in use on the board, %d ends without a start.", len(t.out), t.odd)
+			solace.Logf(*role, "stopped: %d rides listed on the board, %d ends without a start.", len(t.out), t.odd)
 			mu.Unlock()
 			return
 		case <-tick.C:
 			mu.Lock()
 			if t.seq > 0 {
-				t.report(published)
+				longest := ""
+				for bike, at := range since {
+					if longest == "" || at.Before(since[longest]) || (at.Equal(since[longest]) && bike < longest) {
+						longest = bike
+					}
+				}
+				line := fmt.Sprintf("%d rides listed", len(since))
+				if longest != "" {
+					line += fmt.Sprintf(", longest %s for %.0f s", longest, time.Since(since[longest]).Seconds())
+				}
+				// The total says how many rides the list is missing, never
+				// which bikes or since when.
+				gap := "all of them listed"
+				if missing := published - len(since); missing > 0 {
+					gap = fmt.Sprintf("%d the board cannot name", missing)
+				}
+				fmt.Printf("[%s] %s (at #%d; the bikes say %d are out: %s)\n", *role, line, t.seq, published, gap)
 			}
 			mu.Unlock()
 		}

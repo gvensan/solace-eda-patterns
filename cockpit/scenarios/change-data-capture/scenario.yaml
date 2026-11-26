@@ -54,7 +54,9 @@ diagram:
     the broker. The connector reads the database's change log in order and
     publishes each change as a guaranteed event on
     cdc/inventory/stock/changed/v1/<sku>. q.cdc.search keeps them for the
-    search index.
+    search index. Two assumptions: a file stands in for the database's
+    change log, and the search index is for browsing only. The warehouse's
+    database stays the authority for any stock decision.
   holdsCaption: >
     The search index is built from events the inventory app never
     published. Compare the Inventory App's database with the Search Index:

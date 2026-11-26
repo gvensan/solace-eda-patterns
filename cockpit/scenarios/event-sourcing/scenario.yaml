@@ -4,8 +4,9 @@ order: 140
 eyebrow: Event Generation Patterns
 title: Event Sourcing
 summary: >
-  A bank's ledger stores no balances: each one is derived from the events,
-  and this demo keeps them in memory. A teller sends commands; the ledger
+  A bank's ledger keeps no separate balance record: it derives each balance
+  by applying that account's deposits and withdrawals, and this demo keeps
+  the result in memory. A teller sends commands; the ledger
   validates each one and records an accepted one as an event, its only
   write. Crash the ledger and it rebuilds the same balances from the
   events. Lose the events, and the balances are lost with them: the events
@@ -13,7 +14,7 @@ summary: >
 
 objectives:
   - See a command validated and recorded as an event, the only thing the ledger ever writes
-  - See that no balance is stored anywhere, because each one is derived from the events
+  - See that there is no separate balance record, because each balance is derived from the events
   - See the balances rebuilt from the events after the ledger crashes, exactly as they were
   - "See why the event history must be durable: lose it, and every balance is lost"
 
@@ -49,8 +50,9 @@ cleanup:
 
 diagram:
   caption: >
-    No balance is stored anywhere: each one is that account's events added
-    up. The teller submits commands; the ledger validates each against the
+    There is no separate balance record: each balance is that account's
+    events added up. (Each event carries the balance it left, as a check
+    on the sum, never as its source.) The teller submits commands; the ledger validates each against the
     balances, records an accepted one as an event (its only write) and
     applies it. On start it replays the whole history and adds it up again
     before taking a command. Assumes one ledger at a time and a complete,
@@ -131,7 +133,7 @@ diagram:
         - flow: take
           text: The ledger validates it against the current balance, which is what A-2's events so far add up to. Too large, and it is refused; nothing is recorded and nothing changes.
         - flow: record
-          text: Accepted, it is recorded as an event, "A-2 withdrawn 40.00", in the history (rl-esrc). That is the only write; no balance is stored anywhere. Once the broker confirms it has the event, the ledger applies it, so A-2 is now its events added up, this one included. Then it takes the next command.
+          text: Accepted, it is recorded as an event, "A-2 withdrawn 40.00", in the history (rl-esrc). That is the only write; there is no separate balance record. Once the broker confirms it has the event, the ledger applies it, so A-2 is now its events added up, this one included. Then it takes the next command.
     - label: The ledger restarts and rebuilds before any command
       steps:
         - flow: replay

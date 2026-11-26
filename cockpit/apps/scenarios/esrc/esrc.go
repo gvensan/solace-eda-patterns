@@ -1,6 +1,6 @@
 // Package esrc implements the event sourcing scenario.
 //
-// A bank's ledger stores no balances: each balance is that account's events
+// A bank's ledger keeps no separate balance record: each balance is that account's events
 // added up, held in memory. A teller sends commands ("withdraw 40 from A-2")
 // into a queue. The ledger takes one at a time and validates it against the
 // balances. An accepted one is recorded as an event: published to the broker,
@@ -158,7 +158,7 @@ func Ledger(args []string) {
 		case rebuiltFrom == 0:
 			note = fmt.Sprintf("The history was empty, so every account started at 0.00. %d events recorded since.", applied)
 		default:
-			note = fmt.Sprintf("Rebuilt at start from %d events, %d recorded since. No balance is stored anywhere else.", rebuiltFrom, applied-rebuiltFrom)
+			note = fmt.Sprintf("Rebuilt at start from %d events, %d recorded since. There is no separate balance record.", rebuiltFrom, applied-rebuiltFrom)
 		}
 		held.Set(rows, note)
 	}

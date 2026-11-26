@@ -70,3 +70,15 @@ from #1; a counter that sees a new run counts from zero, since every bike
 is at rest in the new stream (Pause then Play used to leave the counter
 far from the bikes' figure). Tested with the test-only
 `--crash-after-snapshot`.
+
+## Revision, 2026-11-25: what the board is for
+
+Every ride event carries the bikes' own total (`inUse`), as a check. A
+board that only showed a count could take that total from its next event,
+so a low count on a late board was a problem the demo made for itself. The
+board now answers a question the total cannot: which bikes are out, and for
+how long. Joining late it misses the rides already in progress, and its
+line says so from the total: "3 rides listed, longest B-07 for 4 s (at
+#812; the bikes say 21 are out: 18 the board cannot name)". The counter is
+described the same way: its state is the set of bikes out, and the total
+is only compared against it.

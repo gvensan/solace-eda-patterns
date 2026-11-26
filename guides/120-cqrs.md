@@ -1,8 +1,10 @@
 # CQRS
 
-A shop takes orders and shows customers their order history. Taking an
-order needs checks and a unique number; showing history needs fast lookups
-by customer. One database tuned for both does neither well.
+A shop takes orders and shows each customer an order summary on their
+account page: "How many orders have I placed, and how much have I spent?"
+Taking an order needs checks and a unique number; answering that question
+needs a ready-made line per customer. One model shaped for both does
+neither well.
 
 CQRS, Command Query Responsibility Segregation, splits them: **one model
 handles commands (writes), and a separate model answers queries (reads).**
@@ -15,7 +17,7 @@ CQRS adds a second model to build and run, so it pays only where reads and
 writes really differ, as they do here.
 
 Press **Play**. It creates two queues and the usernames, starts the **Order
-History** service (the read side), the **Order Service** (the write side),
+Summary** service (the read side), the **Order Service** (the write side),
 the **Account Page**, and **Checkout**, a command a second.
 
 If a mark on the page is unclear, point at it, or see
@@ -49,7 +51,7 @@ Start with the four kinds of message. Each app prints the ones it sends.
 | --- | --- | --- |
 | Command: place an order | `cqrs/shop/command/place-order/v1/C-03` | `{"command":"103512-12","customer":"C-03","amount":45}` |
 | Event: an order was placed | `cqrs/shop/order/placed/v1/C-03` | `{"order":12,"customer":"C-03","amount":45,"placedAt":1793962084297}` |
-| Query: what has C-03 ordered? | `cqrs/shop/query/order-history/v1/C-03` | `{"customer":"C-03"}` |
+| Query: what has C-03 ordered? | `cqrs/shop/query/order-summary/v1/C-03` | `{"customer":"C-03"}` |
 | Answer | (the asker's reply topic) | `{"customer":"C-03","orders":4,"spent":180,"asOf":12,"lagMs":3}` |
 
 The command asks for something to happen and may still be refused; the
@@ -59,20 +61,21 @@ payment) and may refuse it, as the ledger does in
 [Event Sourcing](140-event-sourcing.md).
 The answer says which order the view is built up to (`asOf`) and how long
 after it was placed that order reached the view (`lagMs`): a read side is
-always a little behind, so it says by how much. While orders keep coming,
-that is how far behind the view is; between orders it can be up to one
-order's gap out of date.
+always a little behind, so it says what its answer is built from. `lagMs`
+describes the last order applied, and stands still when the view stops
+changing. To see how far behind the view is now, compare the two latest
+order numbers under the diagram.
 
 Open the **Checkout** log: "command 103512-12: place an order for C-03
 (45.00), accepted by the broker". The **Order Service** log: "command
-103512-12: order #12 placed for C-03, event published". The **Order History** log: "order #12
+103512-12: order #12 placed for C-03, event published". The **Order Summary** log: "order #12
 applied: C-03 now has 4 orders, 0.0 s after it was placed". The **Account
-Page** log: "C-03: 4 orders, 180.00 spent (view as of order #12, 0.0 s
-behind; answered in 2 ms)".
+Page** log: "C-03: 4 orders, 180.00 spent (view as of order #12, applied
+0.0 s after it was placed; answered in 2 ms)".
 
 **What each app holds**, under the diagram, shows the same orders in two
 shapes. The Order Service's database (on disk) keeps every order as it was
-placed; the table shows the latest 8. The Order History (in memory) keeps
+placed; the table shows the latest 8. The Order Summary (in memory) keeps
 one line per customer: how many orders and how much spent, the shape the
 account page asks for. Compare the notes under the two tables: "29
 orders in all ... Latest: order #29" and "Built from 29 orders, up to
@@ -86,7 +89,7 @@ order #29". Normally they are the same, or one behind.
   queue: they are direct messages.
 - **Connected clients**: `dataTxMsgCount` is what the broker sent to each
   app. The order service's grows by one a second, the commands. The order
-  history's grows faster: it gets every event and every question. The
+  summary's grows faster: it gets every event and every question. The
   account page's questions never reach the order service.
 
 ## Break it
@@ -98,14 +101,16 @@ how long it has been broken, and **Reset** in reach. **Card** in that bar
 takes you back to the card's log and what to look for. **Why this breaks**
 explains the cause and where you would meet it in production.
 
-1. **The read side falls behind.** The order history service takes 2
+1. **The read side falls behind.** The order summary service takes 2
    seconds per event, half the rate orders arrive. The account page is
-   still answered at once, but "9.0 s behind" and growing. Under the
-   diagram, the Order History falls behind the Order Service's latest
+   still answered at once, but from a view "applied 9.0 s after it was
+   placed", and growing. Under the
+   diagram, the Order Summary falls behind the Order Service's latest
    order, and q.cqrs.view fills up. Checkout and the order service do not
    notice. **Reset** puts it back to normal speed and it catches up.
 2. **The write side goes down.** The order service is killed. Checkout's
-   commands are still accepted by the broker and wait on q.cqrs.commands.
+   commands are still accepted by the broker and wait on q.cqrs.commands:
+   each is an order submitted, not yet an order placed.
    Under the diagram its card says it is not running and its orders stay
    on disk. The account page is still answered, from a view that has
    stopped changing. **Reset** starts the order service, which opens its
@@ -119,15 +124,15 @@ explains the cause and where you would meet it in production.
   its command, the broker sends the command again; the order service finds
   the order, logs "already placed as order #16 before the restart: not
   placed twice", and publishes its event again, in case the crash stopped
-  it going out. The order history ignores an order it has already applied:
+  it going out. The order summary ignores an order it has already applied:
   "order #25 again: already applied, ignored".
 
 ## Try this
 
-- Use **Slow the order history service down** from Step through it, watch
-  the lag grow for half a minute, then **Put the order history service back
+- Use **Slow the order summary service down** from Step through it, watch
+  the lag grow for half a minute, then **Put the order summary service back
   to normal speed**. Count how long the catch-up takes.
-- Stop the **Order History** node. The account page's questions now get
+- Stop the **Order Summary** node. The account page's questions now get
   "no answer", while checkout and the order service carry on: the read side
   can fail without stopping writes, too. Start it again. Its view was in
   memory, so it starts from nothing, and the events it had already applied

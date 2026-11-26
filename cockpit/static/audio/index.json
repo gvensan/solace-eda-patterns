@@ -200,8 +200,8 @@
  },
  "cqrs": {
   "src": "/static/audio/cqrs.mp3",
-  "duration": 127.3,
-  "key": "89e624ccfdbdcdba165965ae",
+  "duration": 129.3,
+  "key": "0450f64452cdaac53654991e",
   "sentences": [
    {
     "start": 0.0,
@@ -225,88 +225,88 @@
    },
    {
     "start": 27.42,
-    "end": 33.03,
+    "end": 33.01,
     "text": "The split pays off when writes and reads want different things, and an online shop is a good example."
    },
    {
-    "start": 33.73,
-    "end": 37.35,
+    "start": 33.61,
+    "end": 37.36,
     "text": "Checkout writes one order at a time, and every write must be checked."
    },
    {
-    "start": 38.05,
-    "end": 44.86,
-    "text": "The account page asks again and again, and wants a ready-made answer: how many orders, and which was the latest."
+    "start": 37.8,
+    "end": 45.16,
+    "text": "The account page asks again and again, and wants a ready-made answer: how many orders have I placed, and how much have I spent?"
    },
    {
-    "start": 45.3,
-    "end": 51.27,
-    "text": "Put both on one database, and every question adds up a customer's orders on the same tables checkout writes to."
+    "start": 45.77,
+    "end": 51.49,
+    "text": "Serve both from one model, and every question adds up a customer's orders on the same tables checkout writes to."
    },
    {
-    "start": 51.97,
-    "end": 54.88,
+    "start": 52.0,
+    "end": 55.25,
     "text": "As the shop grows, the questions slow down the orders."
    },
    {
-    "start": 55.39,
-    "end": 59.76,
-    "text": "And if that one database is down, nobody can place an order or look one up."
+    "start": 55.69,
+    "end": 60.42,
+    "text": "And if that one store is down, nobody can place an order or look one up."
    },
    {
-    "start": 60.27,
-    "end": 64.84,
+    "start": 61.23,
+    "end": 65.7,
     "text": "In this scenario, checkout sends commands to the order service, the write side."
    },
    {
-    "start": 65.45,
-    "end": 69.77,
+    "start": 66.51,
+    "end": 71.33,
     "text": "Here it accepts every command; a real one would check stock and payment first."
    },
    {
-    "start": 70.37,
-    "end": 74.72,
+    "start": 71.94,
+    "end": 76.38,
     "text": "It saves each order, and publishes an event saying an order was placed."
    },
    {
-    "start": 75.16,
-    "end": 84.21,
-    "text": "The order history service, the read side, builds its own view from those events: one line per customer, in exactly the shape the account page asks for."
+    "start": 76.66,
+    "end": 85.58,
+    "text": "The order summary service, the read side, builds its own view from those events: one line per customer, in exactly the shape the account page asks for."
    },
    {
-    "start": 84.65,
-    "end": 86.88,
+    "start": 86.02,
+    "end": 88.7,
     "text": "The two sides share nothing but the events."
    },
    {
-    "start": 87.39,
-    "end": 94.38,
+    "start": 89.3,
+    "end": 95.92,
     "text": "The price is that the read side is always a little behind the writes, and the product has to decide what users see in between."
    },
    {
-    "start": 95.19,
-    "end": 102.42,
+    "start": 96.62,
+    "end": 102.97,
     "text": "Two models are also more to build and run than one, so CQRS pays only where reads and writes really differ."
    },
    {
-    "start": 103.12,
-    "end": 105.06,
+    "start": 103.48,
+    "end": 105.78,
     "text": "The Break it cards show both sides."
    },
    {
-    "start": 105.5,
-    "end": 111.99,
+    "start": 106.1,
+    "end": 112.19,
     "text": "Slow the read side down, and watch the account page get answers that describe the past, while checkout carries on."
    },
    {
-    "start": 112.69,
-    "end": 118.78,
-    "text": "Then take the write side down, and see questions still answered, while commands wait on their queue until it is back."
+    "start": 112.79,
+    "end": 121.35,
+    "text": "Then take the write side down, and see questions still answered, while orders that were submitted wait on their queue, not yet placed, until it is back."
    },
    {
-    "start": 119.48,
-    "end": 127.01,
-    "text": "Press Play, and compare the Order Service and Order History tables: the same orders, kept twice, in two shapes."
+    "start": 121.95,
+    "end": 129.01,
+    "text": "Press Play, and compare the Order Service and Order Summary tables: the same orders, kept twice, in two shapes."
    }
   ]
  },
@@ -501,8 +501,8 @@
  },
  "event-sourcing": {
   "src": "/static/audio/event-sourcing.mp3",
-  "duration": 89.9,
-  "key": "7efece3c737a1faa5a2911a1",
+  "duration": 89.0,
+  "key": "9e046fcfc1ec477d597e8aff",
   "sentences": [
    {
     "start": 0.0,
@@ -521,160 +521,170 @@
    },
    {
     "start": 14.22,
-    "end": 19.28,
+    "end": 19.35,
     "text": "Banking is the classic fit, because a ledger must say not just what a balance is, but how it got there."
    },
    {
-    "start": 19.61,
-    "end": 27.75,
+    "start": 20.05,
+    "end": 28.61,
     "text": "A simpler design stores the balance and updates it in place, with the history kept to one side, where it can drift from the balance it is meant to explain."
    },
    {
-    "start": 28.35,
-    "end": 30.52,
-    "text": "This ledger stores no balances."
+    "start": 29.21,
+    "end": 32.26,
+    "text": "This ledger keeps no separate record of balances."
    },
    {
-    "start": 30.96,
-    "end": 35.0,
+    "start": 32.77,
+    "end": 36.68,
     "text": "A teller sends commands, such as a deposit or a withdrawal."
    },
    {
-    "start": 35.7,
-    "end": 41.63,
+    "start": 37.28,
+    "end": 43.2,
     "text": "The ledger checks each one against the current balances, and if it is accepted, records it as an event."
    },
    {
-    "start": 42.24,
-    "end": 44.79,
+    "start": 44.01,
+    "end": 46.54,
     "text": "That event is the only thing the ledger ever writes."
    },
    {
-    "start": 45.0,
-    "end": 48.54,
+    "start": 46.75,
+    "end": 49.77,
     "text": "Every balance is simply that account's events, added up."
    },
    {
-    "start": 48.98,
-    "end": 54.03,
+    "start": 50.1,
+    "end": 55.59,
     "text": "So the history cannot drift from the balance, because the balance is worked out from the history."
    },
    {
-    "start": 54.47,
-    "end": 58.73,
+    "start": 56.03,
+    "end": 60.22,
     "text": "And if the ledger loses its balances, it can add the events up again."
    },
    {
-    "start": 59.43,
-    "end": 63.19,
+    "start": 60.66,
+    "end": 63.6,
     "text": "The price is that the event history must be complete and durable."
    },
    {
-    "start": 64.0,
-    "end": 68.38,
+    "start": 63.98,
+    "end": 68.17,
     "text": "In this demo, the broker's replay log stands in for a real event store."
    },
    {
-    "start": 68.89,
-    "end": 71.03,
+    "start": 68.78,
+    "end": 70.66,
     "text": "The Break it cards show why."
    },
    {
-    "start": 71.73,
-    "end": 77.36,
+    "start": 71.04,
+    "end": 76.45,
     "text": "Crash the ledger, and watch it rebuild exactly the same balances from the events."
    },
    {
-    "start": 77.68,
-    "end": 84.31,
+    "start": 76.83,
+    "end": 83.39,
     "text": "Then lose the event history itself, and see every balance lost with it, because the events were the only record."
    },
    {
-    "start": 84.69,
-    "end": 89.63,
+    "start": 84.0,
+    "end": 88.7,
     "text": "Press Play, and watch the Ledger's balances change as the teller's commands arrive."
    }
   ]
  },
  "event-streaming": {
   "src": "/static/audio/event-streaming.mp3",
-  "duration": 88.3,
-  "key": "3aeb69d9ab735f31d600d6e1",
+  "duration": 96.3,
+  "key": "4130858fb06151679e7e5fd9",
   "sentences": [
    {
     "start": 0.0,
-    "end": 3.59,
+    "end": 3.99,
     "text": "Event streaming treats events as an unbounded, ordered sequence."
    },
    {
-    "start": 4.28,
-    "end": 10.24,
+    "start": 4.27,
+    "end": 9.83,
     "text": "Consumers read the stream in order, each keeping its own position in it, and build state as they go."
    },
    {
-    "start": 10.48,
-    "end": 13.38,
+    "start": 10.34,
+    "end": 13.08,
     "text": "A bike-share shows why order and position matter."
    },
    {
-    "start": 13.82,
-    "end": 16.79,
+    "start": 13.78,
+    "end": 16.94,
     "text": "Every ride start and every ride end is an event."
    },
    {
-    "start": 17.23,
-    "end": 22.93,
-    "text": "To show how many bikes are in use, a counter adds one for each start and takes one away for each end."
+    "start": 17.18,
+    "end": 22.66,
+    "text": "To know which bikes are in use, a counter adds the bike on each start and removes it on each end."
    },
    {
-    "start": 23.37,
-    "end": 28.97,
-    "text": "That number is only right if the counter has seen every event, in order, from the point its count began."
+    "start": 23.36,
+    "end": 29.06,
+    "text": "That list is only right if the counter has seen every event, in order, from the point its state began."
    },
    {
-    "start": 29.57,
-    "end": 34.61,
-    "text": "Miss one, or apply one twice, and the count drifts, with nothing to say so."
+    "start": 30.01,
+    "end": 33.63,
+    "text": "Miss one, or apply one twice, and the list drifts."
    },
    {
-    "start": 35.21,
-    "end": 44.72,
+    "start": 34.15,
+    "end": 44.33,
     "text": "Here, a queue holds the ride events in the order they were published, and removes each one only when the counter acknowledges it: that acknowledgement is the counter's position."
    },
    {
-    "start": 45.23,
-    "end": 54.24,
-    "text": "Before each acknowledgement, the counter saves a snapshot of its count, together with that position, so after a crash its state and its position still match."
+    "start": 44.71,
+    "end": 54.27,
+    "text": "Before each acknowledgement, the counter saves a snapshot of its list, together with that position, so after a crash its state and its position still match."
    },
    {
-    "start": 54.94,
-    "end": 60.15,
+    "start": 55.08,
+    "end": 60.5,
     "text": "Unlike a log-based streaming platform, a queue does not keep events once they are acknowledged."
    },
    {
-    "start": 60.85,
-    "end": 64.52,
+    "start": 60.62,
+    "end": 64.44,
     "text": "To read history again, Solace can keep the stream in a replay log."
    },
    {
-    "start": 65.21,
-    "end": 67.64,
+    "start": 64.76,
+    "end": 67.16,
     "text": "The Break it cards show both sides."
    },
    {
-    "start": 67.85,
-    "end": 73.34,
-    "text": "Crash the counter, and watch it resume from its snapshot and its position, with the right count."
+    "start": 67.34,
+    "end": 72.93,
+    "text": "Crash the counter, and watch it resume from its snapshot and its position, with the right bikes."
    },
    {
-    "start": 73.85,
-    "end": 83.02,
-    "text": "Then start the city's board late, taking the events direct, with no position and no history, and see its count go wrong from the first ride it never saw start."
+    "start": 73.32,
+    "end": 75.06,
+    "text": "Then start the city's board late."
    },
    {
-    "start": 83.83,
-    "end": 88.0,
-    "text": "Press Play, and compare the counter's count with the number the bikes report."
+    "start": 75.5,
+    "end": 81.97,
+    "text": "It lists which bikes are out and for how long, taking the events direct, with no position and no history."
+   },
+   {
+    "start": 82.48,
+    "end": 91.15,
+    "text": "Each event carries the fleet's total, so the board knows how many rides it is missing, but not which bikes: that was only in the events it never saw."
+   },
+   {
+    "start": 91.59,
+    "end": 96.04,
+    "text": "Press Play, and compare the counter's list with the number the bikes report."
    }
   ]
  },

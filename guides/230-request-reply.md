@@ -7,7 +7,9 @@ That is request-reply: **an app publishes a request and waits for a reply
 addressed back to it, with a timeout.** With the Solace Go API, as here,
 it is two direct messages. The request goes to whoever is subscribed to the request topic
 at that moment; the reply comes back on a topic the asker's API made for
-it. No reply within the timeout is an answer too, and the asker is told.
+it. With no reply, the price is still unknown when the till's deadline for
+that item expires, and the till is told. The deadline is per item: the till
+goes on asking about other items while earlier requests are outstanding.
 
 In the Go API, request-reply works with direct messages only. Nothing is
 stored on the way, and the cards show what that means.
@@ -60,7 +62,8 @@ explains the cause and where you would meet it in production.
 2. **The pricing service is slow.** It restarts taking 3 seconds per
    answer, longer than the till waits. Every request times out at the till.
    The pricing service answers one request at a time while the till asks
-   one a second, so a queue of requests builds up in front of it: it still
+   one a second, so a backlog of requests builds up inside it (in the
+   receiver, not on a broker queue): it still
    logs "replied" for each, but later and later, each long after the till
    gave up, and the till's API discards those replies. **Reset** restarts
    the pricing service at normal speed; the requests waiting in the slow

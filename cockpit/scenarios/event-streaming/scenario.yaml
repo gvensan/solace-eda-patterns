@@ -5,16 +5,19 @@ eyebrow: Communication Patterns
 title: Event Streaming
 summary: >
   A bike-share. Every ride start and ride end is an event, and the counter
-  keeps the number of bikes in use: plus one on a start, minus one on an
-  end. That number is only right if the counter has seen the stream in
-  order from where its count started. A queue keeps the stream in order and
-  holds the counter's position in it; a snapshot keeps the count across a
-  crash. The city's board takes the same events direct, with neither.
+  keeps which bikes are in use: the bike is added on a start and removed on
+  an end. That is only right if the counter has seen the stream in order
+  from where its state started. A queue keeps the stream in order and holds
+  the counter's position in it; a snapshot keeps the state across a crash.
+  The city's board lists the rides in progress (which bikes are out, and
+  for how long) from the same events, taken direct, with neither. Each
+  event also carries the bikes' own total, as a check: it says how many are
+  out, never which.
 
 objectives:
   - See a stream of events consumed in order, with the consumer's state built from it
   - See a consumer crash and carry on from its position with its state intact
-  - See a consumer that joins the stream late get its state wrong, and why
+  - See a consumer that joins the stream late miss the state it needs, and why a total in the event cannot replace it
   - Learn what a queue holds for a stream consumer, and what a snapshot adds
 
 pattern:
@@ -50,8 +53,18 @@ diagram:
     The bikes publish each ride start and end, guaranteed and numbered.
     q.es.rides keeps them in order and holds the counter's position: the
     counter applies each event to its count, writes a snapshot, and
-    acknowledges. The board takes the same events direct, from the moment
-    it starts.
+    acknowledges. Play does not start the city board: the card "The city
+    board joins the stream late" does, and from then on it takes the same
+    events direct. The counter can stop and resume, from its queue and its
+    snapshot. A consumer that is new to the stream has neither: it needs
+    the history replayed, or a snapshot to start from.
+  holdsCaption: >
+    Two apps build state from the same ride events. The Counter has read
+    the stream from where its state started, so its list of bikes in use
+    is complete. The City Board lists only the rides it saw start. Once
+    the board is running, compare the two tables: every bike on the
+    Counter's list that is missing from the board's is a ride the board
+    cannot name, and the total in each event says how many, never which.
   duration: 2.4
   liveWhen: bikes
   nodes:
@@ -88,6 +101,10 @@ diagram:
       kind: app
       col: 2
       action: counter
+      holds:
+        kept: memory
+        count: bikes
+        role: Has read the stream in order from where its state started. A snapshot on disk, written before each acknowledgement, brings this list back after a crash.
       flowOn:
         queue: q.es.rides
         client: es-counter
@@ -100,6 +117,10 @@ diagram:
       kind: app
       col: 2
       action: board
+      holds:
+        kept: memory
+        count: rides
+        role: Lists each ride from its start event. Started mid-stream, it has no start for the bikes already out.
       requires:
         - label: svc-es-board
           semp: /msgVpns/{vpn}/clientUsernames/svc-es-board
@@ -163,8 +184,8 @@ actions:
     variant: secondary
     failure_only: true
     description: >
-      Counts the same way from the events it receives direct, from the
-      moment it starts.
+      Lists the rides in progress, which bikes are out and for how long,
+      from the events it receives direct, from the moment it starts.
 
   - id: bikes
     label: Start the bikes
@@ -274,19 +295,28 @@ failure_modes:
     breaks: >
       The board starts now, taking the ride events direct.
     watch: >
-      The card shows the board. It receives every event from the moment it
-      started and none before, so for a bike that was already out it sees
-      the end and never saw the start: "end without a start for B-12:
-      joined late, no history". Its "in use" sits below what the bikes
-      report until every bike it never saw start has ended once, which
-      takes about half a minute; the starts it missed are gone for good,
-      and it comes right only because every ride ends. The counter, next
-      to it, stays right. Reset stops the board.
+      The card shows the board. The city asks which bikes are out and for
+      how long, so the board lists each ride from its start event. It
+      receives every event from the moment it started and none before, so
+      the bikes that were already out are not on its list: "3 rides
+      listed, longest B-07 for 4 s (at #812; the bikes say 21 are out: 18
+      the board cannot name)". Under the diagram, the board's table shows
+      the few rides it can name next to the Counter's full list. The total
+      in each event tells it how many it is missing, never which bikes or
+      since when. When one of those
+      rides ends it sees the end and never saw the start: "end without a
+      start for B-12: joined late, no history". After about half a minute
+      every missed ride has ended and the line says "all of them listed",
+      but the starts it missed are gone for good: it comes right only
+      because every ride ends, and a bike out all day would never appear.
+      The counter, next to it, stays right. Reset stops the board.
     why: >
       A direct subscriber has no position in the stream: it gets what is
       published while it is subscribed, and nothing before. State built
       from a stream is only right if it was built from the start, or from
-      a snapshot taken at a known position. The board has neither.
+      a snapshot taken at a known position. The board has neither. A
+      total carried in the latest event can correct a count, but not a
+      list: which bikes, and since when, is only in the events it missed.
     real_world: >
       A new dashboard instance, a cache warming up, a replacement service
       started mid-day. Either give it a snapshot and the position it was
@@ -309,14 +339,17 @@ failure_modes:
         within: 30
         logs:
           - log: board
-            has: ["end without a start for B-\\d+: joined late, no history"]
+            has: ["\\d+ rides listed.*the bikes say \\d+ are out: \\d+ the board cannot name", "end without a start for B-\\d+: joined late, no history"]
           - log: counter
             lacks: ["end without a start"]
+        holds:
+          - { node: board, min: 1 }
+          - { node: counter, min: 1 }
       reset:
         within: 10
         logs:
           - log: board
-            has: ["stopped: \\d+ in use on the board, \\d+ ends without a start"]
+            has: ["stopped: \\d+ rides listed on the board, \\d+ ends without a start"]
 
 inspect:
   - label: The stream's queue

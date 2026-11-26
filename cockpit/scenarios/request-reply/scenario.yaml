@@ -7,8 +7,10 @@ summary: >
   A supermarket till needs the price of an item before it can ring it up,
   so it asks and waits for the answer. With the Solace Go API, as here,
   that is two direct messages: the request goes to whoever is subscribed to the request topic
-  right now, and the reply comes back on a topic made for the asker. No
-  reply within the timeout is an answer too, and the till is told.
+  right now, and the reply comes back on a topic made for the asker. With
+  no reply, the price is still unknown when the till's deadline for that
+  item expires, and the till is told. The deadline is per item: the till
+  goes on asking about other items while earlier requests are outstanding.
 
 objectives:
   - See a request answered, and who answered it, in a few milliseconds
@@ -239,7 +241,8 @@ failure_modes:
     watch: >
       The card shows the till. Every request times out after 2 seconds. The
       pricing service answers one request at a time, 3 seconds each, while
-      the till asks one a second, so requests pile up in front of it. Its
+      the till asks one a second, so a backlog of requests builds up inside
+      the pricing service (in the receiver, not on a broker queue). Its
       log still says "replied" for each, later and later, long after the
       till gave up, and the till's API discards those replies without a
       word. Reset restarts the pricing service at normal speed.

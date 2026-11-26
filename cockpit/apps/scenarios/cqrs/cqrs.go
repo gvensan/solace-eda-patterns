@@ -4,9 +4,9 @@
 // A shop splits writing from reading. Checkout sends commands ("place this
 // order") to a queue. The order service, the write side, takes each command,
 // gives the order its number and publishes an "order placed" event. The order
-// history service, the read side, builds its own view from those events and
-// answers questions from it ("how many orders has C-03 placed?"), asked by
-// the account page. The two sides share no store: the events on the broker
+// summary service, the read side, builds its own view from those events and
+// answers questions from it ("how many orders has C-03 placed, and how much
+// spent?"), asked by the account page. The two sides share no store: the events on the broker
 // are the only link, so each can stop, slow down or scale on its own, and
 // the view is always a little behind the writes.
 package cqrs
@@ -36,7 +36,7 @@ import (
 const (
 	commandTopic = "cqrs/shop/command/place-order/v1/"
 	eventTopic   = "cqrs/shop/order/placed/v1/"
-	queryTopic   = "cqrs/shop/query/order-history/v1/"
+	queryTopic   = "cqrs/shop/query/order-summary/v1/"
 	customers    = 6
 )
 
@@ -245,7 +245,7 @@ func Write(args []string) {
 	solace.WaitForStop()
 }
 
-type history struct {
+type summary struct {
 	orders, spent int
 }
 
@@ -256,8 +256,8 @@ type history struct {
 func View(args []string) {
 	fs := flag.NewFlagSet("cqrs view", flag.ExitOnError)
 	user := fs.String("user", "svc-cqrs-view", "client username to connect as")
-	role := fs.String("role", "history", "label for log lines")
-	clientName := fs.String("client-name", "cqrs-history", "client name the broker reports this app by")
+	role := fs.String("role", "summary", "label for log lines")
+	clientName := fs.String("client-name", "cqrs-summary", "client name the broker reports this app by")
 	queue := fs.String("queue", "q.cqrs.view", "queue with order events")
 	slow := fs.Duration("slow", 2*time.Second, "time to apply one event when slowed down")
 	fs.Parse(args)
@@ -266,11 +266,11 @@ func View(args []string) {
 	defer svc.Disconnect()
 
 	var mu sync.Mutex
-	view := map[string]*history{}
+	view := map[string]*summary{}
 	lastOrder, lag := 0, time.Duration(0)
 	var slowed bool
 
-	held := solace.NewHolding("Order history: one line per customer", "customer", "orders", "spent")
+	held := solace.NewHolding("Order summary: one line per customer", "customer", "orders", "spent")
 	// Called with mu held.
 	report := func() {
 		ids := make([]string, 0, len(view))
@@ -309,7 +309,7 @@ func View(args []string) {
 		mu.Lock()
 		h := view[cust]
 		if h == nil {
-			h = &history{}
+			h = &summary{}
 		}
 		reply := fmt.Sprintf(`{"customer":"%s","orders":%d,"spent":%d,"asOf":%d,"lagMs":%d}`, cust, h.orders, h.spent, lastOrder, lag.Milliseconds())
 		mu.Unlock()
@@ -327,7 +327,7 @@ func View(args []string) {
 
 	rcv := solace.BindQueue(*role, *user, svc, *queue, solace.QueueOpts{ClientAck: true})
 	defer solace.Terminate(rcv)
-	solace.Logf(*role, "answering order history questions on %s<customer>", queryTopic)
+	solace.Logf(*role, "answering order summary questions on %s<customer>", queryTopic)
 	fmt.Println()
 
 	sig := make(chan os.Signal, 2)
@@ -371,7 +371,7 @@ func View(args []string) {
 		}
 		h := view[cust]
 		if h == nil {
-			h = &history{}
+			h = &summary{}
 			view[cust] = h
 		}
 		h.orders++
@@ -396,8 +396,11 @@ func View(args []string) {
 	solace.WaitForStop()
 }
 
-// Account asks the order history service about a customer every --every,
-// and prints the answer with how far behind the writes the view was.
+// Account asks the order summary service about a customer every --every,
+// and prints the answer with the order the view was built up to and how
+// long that order took to reach it. That delay describes the last order
+// applied: it stands still when the view stops changing, so it is not how
+// far behind the view is now.
 func Account(args []string) {
 	fs := flag.NewFlagSet("cqrs account", flag.ExitOnError)
 	user := fs.String("user", "svc-cqrs-account", "client username to connect as")
@@ -418,7 +421,7 @@ func Account(args []string) {
 		os.Exit(1)
 	}
 	defer solace.Terminate(ask)
-	solace.Logf(*role, "asking the order history service about a customer every %s", *every)
+	solace.Logf(*role, "asking the order summary service about a customer every %s", *every)
 	fmt.Println()
 
 	stop := make(chan struct{})
@@ -449,7 +452,12 @@ func Account(args []string) {
 		if orders == 1 {
 			noun = "order"
 		}
-		solace.Logf(*role, "%s: %d %s, %d.00 spent (view as of order #%d, %.1f s behind; answered in %d ms)",
+		if asOf == 0 {
+			solace.Logf(*role, "%s: %d %s, %d.00 spent (view built from no orders yet; answered in %d ms)",
+				cust, orders, noun, spent, time.Since(began).Milliseconds())
+			continue
+		}
+		solace.Logf(*role, "%s: %d %s, %d.00 spent (view as of order #%d, applied %.1f s after it was placed; answered in %d ms)",
 			cust, orders, noun, spent, asOf, float64(lagMs)/1000, time.Since(began).Milliseconds())
 	}
 }

@@ -6,7 +6,9 @@ title: Event-Carried State Transfer
 summary: >
   A shop. The customer service publishes the whole customer record every
   time a customer changes. Shipping keeps its own copy from those events and
-  never has to ask anyone where to send a parcel. Invoicing keeps no copy:
+  never has to ask anyone where to send a parcel. (This shop ships to the
+  customer's latest known address. Where the address is fixed at checkout,
+  it belongs on the order.) Invoicing keeps no copy:
   for every order it asks the customer service. The cards show what each
   choice costs.
 

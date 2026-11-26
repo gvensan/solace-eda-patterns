@@ -5,11 +5,14 @@ eyebrow: Communication Patterns
 title: Publish-Subscribe
 summary: >
   An online shop publishes an event each time an order is placed. Shipping,
-  analytics and email each subscribe to the topics they need, and each gets
-  its own copy of every event. The shop does not know who is listening, and
+  analytics and email each subscribe to the topics they need, and each
+  matching subscriber gets its own copy of an event. The shop does not know who is listening, and
   a new team can start listening without the shop changing anything. These
   are direct messages: delivered to whoever is subscribed at that moment,
-  and kept for no one.
+  and kept for no one. That is a deliberate choice for this exercise, to
+  show the pattern on its own. A live analytics screen can tolerate a gap.
+  A real shipping service cannot, and would read from a queue subscribed to
+  the same topics.
 
 objectives:
   - See one event reach every subscriber, each with its own copy
@@ -50,7 +53,9 @@ diagram:
     The shop publishes each order once, direct, to a topic that names the
     region and the order. The broker copies it to every subscriber whose
     subscription matches: shipping and email take every order, analytics
-    only the EU ones. Nothing is stored on the way.
+    only the EU ones. Nothing is stored on the way: direct delivery is
+    chosen here on purpose, and a subscriber that must not miss an order
+    would use a queue subscribed to the same topics.
   duration: 2.4
   liveWhen: shop
   nodes:

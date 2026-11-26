@@ -2,7 +2,7 @@
 # CQRS: who may connect
 #
 # Checkout sends commands, the order service (write) handles them and
-# publishes events, the order history service (view) builds its view from the
+# publishes events, the order summary service (view) builds its view from the
 # events and answers queries from the account page.
 # ---------------------------------------------------------------------------
 

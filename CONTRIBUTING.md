@@ -333,7 +333,7 @@ with it. Without it, a fork would read as several writes by the app.
         - flow: query
           text: "The account page asks about a customer: a direct message, kept on no queue."
         - flow: query-in
-          text: The broker delivers the question to the order history.
+          text: The broker delivers the question to the order summary.
 ```
 
 Write step text in block style, as above: in an inline `{ ... }` mapping,

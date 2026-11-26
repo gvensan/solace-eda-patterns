@@ -4,9 +4,9 @@ order: 220
 eyebrow: Communication Patterns
 title: Point-to-Point
 summary: >
-  The shop's order service needs a shipping label printed for every order.
-  It sends each print job to one named queue, and one label printer reads
-  it. The sender knows exactly where its message goes, only that receiver
+  One receiver takes each job. The shop's order service needs a shipping
+  label printed for every order. It sends each print job to one named
+  queue, and one label printer reads it. The sender knows exactly where its message goes, only that receiver
   gets it, and if the printer is away the queue keeps the jobs until it is
   back.
 

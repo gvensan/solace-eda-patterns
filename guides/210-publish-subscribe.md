@@ -10,7 +10,11 @@ changing anything.
 
 These are **direct** messages: delivered to whoever is subscribed at that
 moment, and kept for no one. That is the fast, cheap kind of messaging, and
-the first card shows its cost.
+the first card shows its cost. Direct delivery is a deliberate choice for
+this exercise, to show the pattern on its own. A live analytics screen can
+tolerate a gap. A real shipping service cannot: it would read from a queue
+subscribed to the same topics, which
+[Guaranteed Delivery](330-guaranteed-delivery.md) covers.
 
 Press **Play**. It creates the usernames, starts **Shipping**, **Analytics**
 and **Email**, then the **Shop**, which places two orders a second.

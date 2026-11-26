@@ -66,8 +66,8 @@ Follow one command:
    recorded, nothing changes. (Event-sourced systems may also record a
    rejection; it just must not change a balance.)
 3. Accepted, it is recorded as an event, "A-2 withdrawn 40.00", in the
-   history (rl-esrc). **That is the only write: no balance is stored
-   anywhere.** Once the broker confirms it has the event, the ledger applies
+   history (rl-esrc). **That is the only write: there is no separate
+   balance record.** Once the broker confirms it has the event, the ledger applies
    it: A-2 is now its events added up, this one included. Then it takes the
    next command.
 4. On restart, the Ledger rebuilds its balances by replaying the complete
@@ -86,7 +86,8 @@ ever its sum.
 Open the **Ledger** log: "command 103512-7 accepted: recorded event #12,
 A-2 deposited 40.00, balance 140.00". **What each app holds**, under the
 diagram, shows the four balances in its memory and the event that last
-changed each one. No balance is stored anywhere else.
+changed each one. There is no separate balance record anywhere else: the
+`balance` in each event is a check on the sum, never its source.
 
 ### Assumptions
 
