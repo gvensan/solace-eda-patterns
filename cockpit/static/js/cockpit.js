@@ -1045,10 +1045,20 @@
      patterns, so the list reads as a shorter version of itself. Numbers
      keep their place in the full list. Collapsed, the box is hidden, so it
      filters nothing until the sidebar opens again. */
+  /* Temporary: only the first two categories are released. A later
+     category shows its heading in the sidebar with "coming soon" and none
+     of its patterns, and no released page links to one. A held pattern still
+     opens from its own address (#<id>), for whoever is working on it. To
+     release more, raise this to the next category's first order (400, 500,
+     ...), or to Infinity for all of them. */
+  const RELEASED_BELOW = 300;
+  const held = (scenario) => scenario.order >= RELEASED_BELOW;
+
   function navMatches(scenario) {
     const q = state.navQuery;
     if (!q || state.sidebarCollapsed) return true;
-    return scenario.title.toLowerCase().includes(q) || (scenario.eyebrow || "").toLowerCase().includes(q);
+    // A held pattern is not listed, so its name finds nothing; its category does.
+    return (!held(scenario) && scenario.title.toLowerCase().includes(q)) || (scenario.eyebrow || "").toLowerCase().includes(q);
   }
 
   function renderNav() {
@@ -1058,12 +1068,17 @@
       ...state.scenarios.flatMap((scenario, index) => {
         if (!shown.includes(scenario)) return [];
         const heading = scenario.eyebrow && scenario.eyebrow !== group
-          ? h("div", { class: "nav-group", role: "heading", "aria-level": "2", text: scenario.eyebrow })
+          ? h("div", { class: "nav-group", role: "heading", "aria-level": "2" },
+              h("span", { text: scenario.eyebrow }),
+              held(scenario) && h("span", { class: "nav-group__soon", text: "coming soon",
+                indicator: ["nav-coming-soon", `The ${scenario.eyebrow} are not released yet. They will appear here when they are`] }))
           : null;
         group = scenario.eyebrow;
-        return [heading, navItem(scenario, index)].filter(Boolean);
+        return [heading, !held(scenario) && navItem(scenario, index)].filter(Boolean);
       }),
-      shown.length ? null : h("div", { class: "nav-empty", text: "No pattern matches" })
+      // Spread, so a list with matches adds nothing: replaceChildren writes
+      // a bare null out as the word "null".
+      ...(shown.length ? [] : [h("div", { class: "nav-empty", text: "No pattern matches" })])
     );
   }
 
@@ -1250,7 +1265,10 @@
       related.length && h("div", { class: "pattern__row" },
         h("p", { class: "pattern__title", text: "Next to it" }),
         h("div", { class: "pattern__related" },
-          related.map((r) => h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))),
+          related.map((r) => held(r)
+            ? h("span", { class: "pattern__link pattern__link--soon", text: `${r.title} (coming soon)`,
+                indicator: ["related-coming-soon", `${r.title} is not released yet, so there is nothing to open`] })
+            : h("a", { class: "pattern__link", href: `#${r.id}`, text: r.title })))),
       p.guide && h("a", { class: "pattern__guide", href: p.guide, target: "_blank", rel: "noopener",
         text: "Read about it in Solace's Event-Driven Architecture Patterns" }));
   }

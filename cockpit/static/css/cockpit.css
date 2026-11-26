@@ -2369,6 +2369,14 @@ td.is-false { color: var(--text-muted); }
   color: var(--text-muted);
 }
 .nav-group:first-child { margin-top: 0; }
+.nav-group__soon {
+  display: block;
+  margin-top: 2px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-style: italic;
+  opacity: 0.75;
+}
 
 /* ---------------------------------------------------------------- narration */
 
@@ -2601,3 +2609,6 @@ td.is-false { color: var(--text-muted); }
 @media (min-width: 1101px) {
   body.canvas-expanded .app.narration-open .failbar:not([hidden]) { right: var(--narration-w); }
 }
+
+/* A related pattern that is not released yet: named, not a link. */
+.pattern__link--soon { opacity: 0.6; cursor: default; text-decoration: none; }
