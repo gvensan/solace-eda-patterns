@@ -1,0 +1,231 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Change data capture turns the committed changes in a database into a stream of events, without changing the application that writes to it. Its usual form reads the database's own log of changes.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The warehouse",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a warehouse. Its Inventory App is old, it works, and nobody wants to touch it. It writes every sale and every restock to its own database and knows nothing about events. Yet the shop's search page needs current stock figures.",
+        "So a connector reads the database's log of changes and publishes an event for each one. Notice that the Inventory App has no line to the broker in the diagram. It never talks to it.",
+        "Two things are stand-ins here. A file plays the part of the database's change log. And the Search Index is for browsing only: the warehouse's database stays the authority for any stock decision."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "searchapp",
+          "connector",
+          "inventory"
+        ]
+      },
+      "say": [
+        "Press Play. It creates a queue on the broker, starts the Search Index, then the connector, and last the Inventory App, which sells or restocks something every second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "An app that knows nothing about events",
+      "highlight": [
+        ".dg-node[data-node=\"inventory\"]"
+      ],
+      "do": "Click logs on the Inventory App node.",
+      "expect": {
+        "note": "The Inventory App log is not open yet.",
+        "logsOpen": "inventory"
+      },
+      "say": [
+        "Click logs on the Inventory App node. Each line is a sale or a restock, and the number of the change it wrote to its database.",
+        "That is all it does. It has not been modified, and it does not connect to the broker."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The connector",
+      "highlight": [
+        ".dg-node[data-node=\"connector\"]"
+      ],
+      "do": "Click logs on the CDC Connector node.",
+      "expect": {
+        "note": "The CDC Connector log is not open yet.",
+        "logsOpen": "connector"
+      },
+      "say": [
+        "Now click logs on the CDC Connector node. For each change in the database's log it publishes one event, with the same change number.",
+        "Once the broker has accepted an event, the connector saves how far it has got. Keep that saved position in mind for the next steps."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The database and the index",
+      "highlight": [
+        "[data-hold=\"inventory\"]",
+        "[data-hold=\"connector\"]",
+        "[data-hold=\"searchapp\"]"
+      ],
+      "do": "Scroll to What each app holds, under the diagram.",
+      "say": [
+        "Scroll down to What each app holds. The Inventory App's table is its database. The Search Index's table is built only from the events, and the line above it says how much of the database it matches. The connector's card says how far through the change log it has published.",
+        "Notice what an event tells the index: this item went from twelve to eleven. It does not say why. It could be a sale or a correction. Events from change data capture mirror tables, not business intent."
+      ],
+      "expect": {
+        "note": "The Search Index holds nothing yet. Give it a moment.",
+        "holdsMin": {
+          "node": "searchapp",
+          "min": 1
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Crash the connector",
+      "highlight": [
+        "#fmt-connector-crash"
+      ],
+      "do": "Open the card The connector crashes, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "connector-crash",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The connector crashes, and press Break it.",
+        "The connector is killed outright. The Inventory App keeps writing to its database."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The database does not wait",
+      "highlight": [
+        "[data-hold=\"searchapp\"]",
+        ".dg-node[data-node=\"connector\"]"
+      ],
+      "do": "Watch the Search Index's match line under the diagram.",
+      "say": [
+        "No new events are published. The Inventory App carries on and knows nothing. The database keeps changing, so the Search Index falls out of step with it: its match line now shows items that are different.",
+        "Nothing is lost yet. The changes wait in the database's own change log. The hidden risk is time: a real database keeps that log only so long, and a connector that is down past that has to start again from a snapshot."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "connector-crash",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Carry on from the saved position",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The connector is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "connector-crash",
+          "state": "broken"
+        },
+        "running": [
+          "connector"
+        ]
+      },
+      "say": [
+        "Press Reset. The connector finds its saved position and resumes after that change. It publishes every change written while it was down, in order, and the Search Index matches the database again.",
+        "The source application was not involved at any point. That is why change data capture suits systems nobody wants to modify."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Lose the saved position",
+      "highlight": [
+        "#fmt-connector-lost-position"
+      ],
+      "do": "Open the card The connector loses its saved position, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "connector-lost-position",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now a different failure. Open the card called The connector loses its saved position, and press Break it.",
+        "The connector restarts without its saved position, so it reads the change log from the first change and publishes everything again."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The same changes, twice",
+      "highlight": [
+        "[data-hold=\"searchapp\"]"
+      ],
+      "do": "Read the Search Index log beside the diagram. Scroll up to the burst of repeats.",
+      "say": [
+        "The log beside the diagram is the Search Index's. Scroll up in it. In about a second it received every old change again, and for each one it says: already applied, ignored.",
+        "The stock figures did not move backwards. Each change carries the database's own sequence number, and the index applies a change only if it is newer than the last one it applied for that item. Change data capture is at least once. A consumer that does not check, one that adds to a counter or sends an email for each event, would do it twice."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "connector-lost-position",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Back to normal",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "connector-lost-position",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The normal connector starts, finds the saved position, and carries on from there. Nothing was lost, and every repeat was ignored."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is change data capture. Use it when a system of record cannot or should not be modified, but other systems need to react to its changes.",
+        "The cost is in the events. They mirror tables, not business intent: they say a row changed, not why. Delivery is at least once. And a database keeps its log only so long.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

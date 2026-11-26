@@ -1,0 +1,259 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Event-carried state transfer is a pattern in which an event carries the state that changed, not just a notice that something changed. The services that receive it can keep their own copy of that data, and never have to call back the system that owns it.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The shop",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a shop. The Customer Service owns every customer's record: their name, and the city they live in. Shipping needs the city to send each parcel. Invoicing needs the name and the city to send each bill.",
+        "The two services get that data in different ways, so you can compare them. Shipping keeps its own copy, built from customer events. Invoicing keeps nothing, and asks the Customer Service about every order.",
+        "In the diagram, the Order Service is on the left, the broker is in the middle, and Invoicing, the Customer Service and Shipping are on the right."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "running": [
+          "shipping",
+          "invoicing",
+          "customers",
+          "orders"
+        ],
+        "note": "Not everything is running yet. Play takes a few seconds."
+      },
+      "say": [
+        "Press Play. It creates two queues on the broker, starts Shipping and Invoicing, then the Customer Service, and last the Order Service, which places an order a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Two kinds of event",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "do": "Watch the dots travel through the broker.",
+      "expect": {
+        "running": [
+          "shipping",
+          "invoicing",
+          "customers",
+          "orders"
+        ],
+        "note": "The apps are not all running. Press Play first."
+      },
+      "say": [
+        "Two kinds of event are flowing. The Customer Service publishes a customer's whole record every time that customer changes. The Order Service publishes each order, and an order carries only the customer's id.",
+        "Look at the two queues inside the broker. Orders go into both. Customer records go into Shipping's queue only, because only that queue subscribes to them. Invoicing never sees a customer record."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Shipping, from its own copy",
+      "highlight": [
+        ".dg-node[data-node=\"shipping\"]"
+      ],
+      "do": "Click logs on the Shipping node.",
+      "expect": {
+        "logsOpen": "shipping",
+        "note": "The Shipping log is not open yet."
+      },
+      "say": [
+        "Click logs on the Shipping node. For each customer record it prints that its copy was updated. For each order it prints where the parcel ships to, with the words: from my copy.",
+        "Shipping never asks anyone. Everything it needs arrived earlier, inside the customer events."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Invoicing, by asking",
+      "highlight": [
+        ".dg-node[data-node=\"invoicing\"]"
+      ],
+      "do": "Click logs on the Invoicing node.",
+      "expect": {
+        "logsOpen": "invoicing",
+        "note": "The Invoicing log is not open yet."
+      },
+      "say": [
+        "Now click logs on the Invoicing node. Every line says: asked the customer service, and how many milliseconds the answer took.",
+        "Each order costs Invoicing a request and a reply. That works, as long as the Customer Service is there to answer."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "What each app holds",
+      "highlight": [
+        "#holds"
+      ],
+      "do": "Scroll to What each app holds, under the diagram.",
+      "expect": {
+        "holdsMin": {
+          "node": "shipping",
+          "min": 1
+        },
+        "note": "Shipping's copy is still empty. Give it a moment."
+      },
+      "say": [
+        "Scroll down to What each app holds. The Customer Service's table is the customer database, kept on disk. Shipping's table is its copy, kept in memory, and the line above it says how much of the database it matches.",
+        "Invoicing has no table of customers at all. It counts the lookups it makes instead. Watch a customer move city: the row turns green in the database, then in Shipping's copy."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Take the owner away",
+      "highlight": [
+        "#fmt-customers-down"
+      ],
+      "do": "Open the card The customer service goes down, and press Break it.",
+      "expect": {
+        "card": {
+          "id": "customers-down",
+          "state": "broken"
+        },
+        "note": "The card is not in effect yet. Open it and press Break it."
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The customer service goes down, and press Break it.",
+        "The Customer Service is killed outright. Orders keep coming. Press Continue when its node on the diagram turns red."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Who stops, and who carries on",
+      "highlight": [
+        ".dg-node[data-node=\"invoicing\"]",
+        ".dg-node[data-node=\"shipping\"]",
+        "[data-hold=\"invoicing\"]"
+      ],
+      "do": "Read the Invoicing log beside the diagram, then compare the two nodes.",
+      "expect": {
+        "card": {
+          "id": "customers-down",
+          "state": "broken"
+        },
+        "note": "The card is not in effect, so there is nothing to see yet."
+      },
+      "say": [
+        "The log beside the diagram is Invoicing's. Nobody answers its lookups now. Each one fails after two seconds with a timeout, and Invoicing says: not billed yet, asking again. No invoices go out, and unbilled orders pile up on its queue.",
+        "Shipping has not noticed. It still ships every order from its own copy. That is the benefit of carrying the state in the event: Shipping needed the Customer Service only when a customer changed, not for every order."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Bring the owner back",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "cardNot": {
+          "id": "customers-down",
+          "state": "broken"
+        },
+        "running": [
+          "customers"
+        ],
+        "note": "The customer service is not back yet. Press Reset in the bar at the top."
+      },
+      "say": [
+        "Press Reset. The Customer Service starts again from its database. Invoicing's next lookup is answered, and it bills the orders that waited.",
+        "None were lost. Invoicing acknowledges an order only once it is billed, so the unbilled ones stayed on its queue."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Now lose the copy",
+      "highlight": [
+        "#fmt-shipping-loses-copy"
+      ],
+      "do": "Open the card Shipping restarts and has lost its copy, and press Break it.",
+      "expect": {
+        "card": {
+          "id": "shipping-loses-copy",
+          "state": "broken"
+        },
+        "note": "The card is not in effect yet. Open it and press Break it."
+      },
+      "say": [
+        "The copy has a price too. Open the second card, Shipping restarts and has lost its copy, and press Break it.",
+        "Shipping is restarted. Its copy was only in memory, so it starts with none."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A copy the queue cannot give back",
+      "highlight": [
+        "[data-hold=\"shipping\"]"
+      ],
+      "do": "Look at Shipping's table under the diagram.",
+      "expect": {
+        "card": {
+          "id": "shipping-loses-copy",
+          "state": "broken"
+        },
+        "note": "The card is not in effect, so there is nothing to see yet."
+      },
+      "say": [
+        "Look at Shipping's table. Its copy is nearly empty, and it lists parcels it is holding, because it has an order for a customer it knows nothing about.",
+        "The queue cannot help. Shipping acknowledged the customer events that built its copy, so the broker deleted them long ago. A customer comes back only when that customer next changes. Here that is a couple of minutes. In a real shop it could be months."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Ask for everything again",
+      "highlight": [
+        ".failbar",
+        "[data-hold=\"shipping\"]"
+      ],
+      "do": "Press Reset, then watch Shipping's table refill.",
+      "expect": {
+        "cardNot": {
+          "id": "shipping-loses-copy",
+          "state": "broken"
+        },
+        "holdsMin": {
+          "node": "shipping",
+          "min": 8
+        },
+        "note": "Shipping's copy is not complete yet. Press Reset and give it a few seconds."
+      },
+      "say": [
+        "Press Reset. The Customer Service publishes every customer record again. Shipping's copy refills until it matches the database, and the held parcels ship at once.",
+        "A consumer that keeps a copy needs a way to get it back: a copy stored on disk, a bulk load at start, or, as here, asking the owner to send everything again."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is event-carried state transfer. Use it when many services need the same reference data, such as customers, products or prices, and calling the owner for every event would tie their uptime to the owner's.",
+        "The cost is the copy. Every consumer stores one, it is a moment behind the owner, and a new or restarted consumer needs a way to get the current state.",
+        "One rule belongs to this shop: it ships to the customer's latest known address. Where the address is fixed at checkout, it belongs on the order instead.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

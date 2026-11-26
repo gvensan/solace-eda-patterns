@@ -1891,6 +1891,7 @@
       if (host) Diagram.paint(host, scenario.diagram, state.diagramState, gatedNodes(scenario));
       paintSettings(scenario);
       paintHolds(scenario);
+      narration?.tourPaint?.();
       // Keep an open Detail tab honest as things start and stop, but update it
       // in place rather than rebuilding: a full re-render on every poll would
       // replace the Start/Stop button out from under a click in progress.
@@ -2121,6 +2122,7 @@
      scenario without an entry has no button. Nothing plays until the
      attendee presses play, and every page visit starts closed. */
   let narration = null;
+  let toursListed = null;
   const appEl = document.querySelector(".app");
   const topbarActions = document.querySelector(".topbar__actions");
 
@@ -2131,10 +2133,12 @@
 
   function unmountNarration() {
     if (!narration) return;
+    narration.leave();
     narration.audio.pause();
     narration.audio.removeAttribute("src");
     narration.side.remove();
     narration.launcher.remove();
+    document.querySelectorAll(".tour-target").forEach((n) => n.classList.remove("tour-target"));
     appEl.classList.remove("narration-open");
     narration = null;
   }
@@ -2159,7 +2163,7 @@
     const launcher = h("button", { class: "btn btn--secondary btn--sm narration-launch", type: "button",
       "aria-controls": "narration", "aria-expanded": "false" });
     const close = h("button", { class: "narration__close", type: "button", text: "×",
-      "aria-label": "Close the audio overview",
+      "aria-label": "Close the guide column",
       indicator: ["narration-close", "Close this column. The audio keeps playing; Listen in the top bar opens it again"] });
     const play = h("button", { class: "narration__btn narration__btn--main", type: "button" });
     const rewind = h("button", { class: "narration__btn", type: "button", text: "-10s",
@@ -2168,7 +2172,7 @@
     const stop = h("button", { class: "narration__btn", type: "button", "aria-label": "Stop",
       indicator: ["narration-stop", "Stop, and go back to the start"] }, icon("stop"));
     const bar = h("input", { class: "narration__bar", type: "range", min: "0", max: "1000", value: "0",
-      "aria-label": "Position in the audio overview" });
+      "aria-label": "Position in the quick overview" });
     const time = h("span", { class: "narration__time" });
     const lines = entry.sentences.map((s) => {
       const line = h("button", { class: "narration__line", type: "button", text: s.text,
@@ -2180,19 +2184,25 @@
       });
       return line;
     });
-    const side = h("aside", { class: "narration", id: "narration", "aria-label": "Audio overview of this scenario" },
-      h("header", { class: "narration__head" },
-        h("div", {},
-          h("p", { class: "eyebrow", text: "Audio overview" }),
-          h("h2", { class: "narration__title", text: "The use case" }),
-          h("p", { class: "narration__sub", text: `${scenario.title}, ${fmtTime(entry.duration)}` })),
-        close),
+    // Two panes share the column: the guided tour, where the scenario has
+    // one, and the audio overview. The tabs appear only when there are two.
+    const eyebrow = h("p", { class: "eyebrow", text: "Quick overview" });
+    const title = h("h2", { class: "narration__title", text: "The use case" });
+    const sub = h("p", { class: "narration__sub", text: `${scenario.title}, ${fmtTime(entry.duration)}` });
+    const tabs = h("div", { class: "narration__tabs", role: "tablist", hidden: true });
+    const overviewPane = h("div", { class: "narration__pane", "data-pane": "overview", role: "tabpanel", "aria-label": "Quick overview" },
       h("div", { class: "narration__controls" },
         h("div", { class: "narration__row" }, rewind, play, stop),
         h("div", { class: "narration__row" }, bar, time)),
       h("p", { class: "narration__label", text: "Transcript" }),
       h("div", { class: "narration__transcript" }, lines),
       h("p", { class: "narration__credit", text: "Voice generated with ElevenLabs." }));
+    const tourPane = h("div", { class: "narration__pane tour", "data-pane": "tour", role: "tabpanel", "aria-label": "Guided tour", hidden: true });
+    const side = h("aside", { class: "narration", id: "narration", "aria-label": "Guided tour and quick overview of this scenario" },
+      h("header", { class: "narration__head" }, h("div", {}, eyebrow, title, sub), close),
+      tabs, tourPane, overviewPane);
+    let tour = null;
+    let pane = "overview";
 
     let current = -1;
     function paint() {
@@ -2221,22 +2231,209 @@
         current = now;
       }
 
+      const idle = tour ? "Guided tour" : "Listen: the use case";
       launcher.replaceChildren(icon(playing ? "pause" : "play"),
-        h("span", { text: playing ? `Listening ${fmtTime(audio.currentTime)}` : "Listen: the use case" }));
+        h("span", { text: playing ? `Listening ${fmtTime(audio.currentTime)}` : idle }));
       launcher.classList.toggle("is-playing", playing);
-      launcher.setAttribute("aria-label", playing ? `Audio overview, playing ${fmtTime(audio.currentTime)}` : "Listen: the use case");
+      launcher.setAttribute("aria-label", playing ? `Quick overview, playing ${fmtTime(audio.currentTime)}` : idle);
       indicator(launcher, "narration-open", playing
-          ? "The audio overview is playing. Click to show its controls and transcript"
-          : "Open the audio overview: a spoken story of this scenario's use case, with its transcript");
+          ? "The quick overview is playing. Click to show its controls and transcript"
+          : tour
+          ? "Open the guided tour: step by step through this scenario, waiting while you act. The quick overview, which is spoken, is on its second tab"
+          : "Open the quick overview: a short spoken story of this scenario's use case, with its transcript");
     }
+
+    /* ---- the guided tour ----
+       A scenario with /static/tours/<id>.json gets a second pane, shown
+       first. Each step has text to read (and, once voiced, to hear), may
+       point at part of the page, and ends on Continue: the tour never moves
+       on by itself. A step can say what it expects to find on the page; when
+       that is not there yet a note says so, and Continue still works. */
+    // The tour needs the width: opening it shrinks the sidebar to its
+    // numbers, and closing it puts the sidebar back. A sidebar the attendee
+    // had already shrunk, or changes while the tour is open, is left alone.
+    let shrankSidebar = false;
+    function tourRoom(on) {
+      if (!tour) return;
+      if (on && !state.sidebarCollapsed) { shrankSidebar = true; setSidebar(true, false); }
+      else if (!on && shrankSidebar) {
+        shrankSidebar = false;
+        if (state.sidebarCollapsed) setSidebar(false, false);
+      }
+    }
+    const tourKey = `eda.tour.${scenario.id}`;
+    let stepAt = 0;
+    const kindLabel = { listen: "Read", do: "Your turn", look: "Look" };
+
+    function showPane(name) {
+      pane = name;
+      tourPane.hidden = name !== "tour";
+      overviewPane.hidden = name !== "overview";
+      for (const t of tabs.children) t.setAttribute("aria-selected", String(t.dataset.pane === name));
+      eyebrow.textContent = name === "tour" ? "Guided tour" : "Quick overview";
+      title.textContent = name === "tour" ? "Step by step" : "The use case";
+      sub.textContent = name === "tour"
+        ? `${scenario.title}, about ${tour.minutes} minutes`
+        : `${scenario.title}, ${fmtTime(entry.duration)}`;
+      if (name === "tour") paintTour(false); else clearTourTargets();
+    }
+
+    function clearTourTargets() {
+      document.querySelectorAll(".tour-target").forEach((n) => n.classList.remove("tour-target"));
+    }
+
+    // What the step expects, checked against what the page knows now.
+    function stepMet(expect) {
+      if (!expect) return true;
+      const nodes = state.diagramState?.nodes || {};
+      if (expect.running && !expect.running.every((id) => nodes[id]?.running)) return false;
+      if (expect.stopped && expect.stopped.some((id) => nodes[id]?.running)) return false;
+      if (expect.holdsMin) {
+        const n = nodes[expect.holdsMin.node];
+        if (!n?.running || (n.holds?.rows?.length || 0) < expect.holdsMin.min) return false;
+      }
+      const cardState = (id) => document.getElementById(`fmt-${id}`)?.dataset.state;
+      if (expect.card && cardState(expect.card.id) !== expect.card.state) return false;
+      // "No longer broken" covers both a card just reset and one since
+      // closed with Done.
+      if (expect.cardNot && cardState(expect.cardNot.id) === expect.cardNot.state) return false;
+      if (expect.logsOpen && !(state.panel?.nodeId === expect.logsOpen && state.panel?.tab === "logs")) return false;
+      return true;
+    }
+
+    // The page is redrawn under the tour (a poll, a Reset), so the targets
+    // are marked again each time. Only a new step scrolls to one, and to
+    // the first that is on the page: a target such as the failure bar is
+    // hidden until its card is in effect.
+    function markTargets(step, scroll) {
+      clearTourTargets();
+      const targets = (step.highlight || []).flatMap((sel) => [...document.querySelectorAll(sel)]);
+      targets.forEach((n) => n.classList.add("tour-target"));
+      const shown = targets.find((n) => n.getClientRects().length);
+      if (scroll && shown) shown.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    function checkText(step, met) {
+      return met ? "Done. Press Continue." : step.expect.note;
+    }
+
+    /* Every few seconds, with the page's own poll: only the line that says
+       whether the step is done changes. The step is not drawn again, so the
+       text keeps its scroll position and a click on Continue is never lost
+       to a button replaced under the pointer. */
+    function refreshTour() {
+      if (!tour || pane !== "tour" || !open()) { clearTourTargets(); return; }
+      const step = tour.steps[stepAt];
+      markTargets(step, false);
+      const line = tourPane.querySelector(".tour__check");
+      if (!line || !step.expect) return;
+      const met = stepMet(step.expect);
+      line.className = `tour__check ${met ? "is-met" : "is-waiting"}`;
+      line.textContent = checkText(step, met);
+      indicator(line, "tour-check", met
+        ? "The page shows what this step asked for"
+        : "The page does not show what this step asked for yet. You can still press Continue, but the next step will describe something that is not there");
+    }
+
+    function paintTour(scroll) {
+      if (!tour || pane !== "tour" || !open()) { clearTourTargets(); return; }
+      const step = tour.steps[stepAt];
+      const last = stepAt === tour.steps.length - 1;
+      markTargets(step, scroll);
+
+      const met = stepMet(step.expect);
+      const count = h("span", { class: "tour__count", text: `Step ${stepAt + 1} of ${tour.steps.length}`,
+        indicator: ["tour-step", `Where you are in the tour: step ${stepAt + 1} of ${tour.steps.length}. It is remembered if you close the tour or leave the page`] });
+      const kind = h("span", { class: `tour__kind tour__kind--${step.kind}`, text: kindLabel[step.kind],
+        indicator: ["tour-kind", step.kind === "do"
+          ? "This step asks you to do something on the page, then press Continue"
+          : step.kind === "look"
+          ? "This step asks you to look at the highlighted part of the page, then press Continue"
+          : "This step only explains. Read it, then press Continue"] });
+      const back = h("button", { class: "btn btn--ghost btn--sm", type: "button", text: "Back", disabled: stepAt === 0,
+        onClick: () => goStep(stepAt - 1) });
+      const next = h("button", { class: "btn btn--primary btn--sm tour__next", type: "button", text: last ? "Finish" : "Continue",
+        onClick: () => (last ? finishTour() : goStep(stepAt + 1)) });
+      tourPane.replaceChildren(
+        h("div", { class: "tour__meta" }, count, kind),
+        h("div", { class: "tour__progress", "aria-hidden": "true" },
+          h("span", { style: `width:${((stepAt + 1) / tour.steps.length) * 100}%` })),
+        h("div", { class: "tour__body" },
+          h("h3", { class: "tour__title", text: step.title }),
+          ...step.say.map((t) => h("p", { class: "tour__say", text: t })),
+          step.do && h("p", { class: "tour__do" },
+            h("span", { class: "tour__do-label", text: step.kind === "do" ? "Do this" : "Look at" }),
+            h("span", { text: step.do })),
+          step.expect && h("p", { class: `tour__check ${met ? "is-met" : "is-waiting"}`, text: checkText(step, met), "aria-live": "polite",
+            indicator: ["tour-check", met
+              ? "The page shows what this step asked for"
+              : "The page does not show what this step asked for yet. You can still press Continue, but the next step will describe something that is not there"] })),
+        h("div", { class: "tour__nav" }, back, next),
+        h("p", { class: "narration__credit", text: "Captions only for now. Voice comes later." }));
+    }
+
+    function goStep(i) {
+      stepAt = Math.max(0, Math.min(tour.steps.length - 1, i));
+      try { localStorage.setItem(tourKey, String(stepAt)); } catch (_) { /* private window */ }
+      paintTour(true);
+      tourPane.querySelector(".tour__body")?.scrollTo(0, 0);
+      tourPane.querySelector(".tour__next")?.focus({ preventScroll: true });
+    }
+
+    function finishTour() {
+      try { localStorage.removeItem(tourKey); } catch (_) { /* private window */ }
+      stepAt = 0;
+      clearTourTargets();
+      setOpen(false);
+      toast("Tour finished. Open it again from the top bar to start over.");
+    }
+
+    // index.json lists the scenarios that have a tour, so one without is
+    // never asked for and logs no failed request.
+    toursListed ||= fetch("/static/tours/index.json", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : [])).catch(() => []);
+    toursListed
+      .then((ids) => (ids.includes(scenario.id)
+        ? fetch(`/static/tours/${scenario.id}.json`, { cache: "no-store" }).then((res) => (res.ok ? res.json() : null))
+        : null))
+      .then((found) => {
+        if (!found || narration?.id !== scenario.id) return;
+        tour = found;
+        try { stepAt = Math.min(tour.steps.length - 1, Number(localStorage.getItem(tourKey)) || 0); } catch (_) { /* private window */ }
+        tabs.replaceChildren(
+          // Each tab says whether it has a voice, so nobody reaches for
+          // headphones, or goes without, for the wrong one.
+          h("button", { class: "narration__tab", type: "button", role: "tab", "data-pane": "tour",
+            indicator: ["tour-tab", "Step by step through this scenario: it tells you what to do, waits while you do it, and explains what you see"],
+            onClick: () => showPane("tour") },
+            h("span", { text: "Guided tour" }),
+            h("span", { class: "narration__tab-hint", text: tour.voiced ? "audio" : "text only",
+              indicator: ["tab-audio-hint", tour.voiced
+                ? "The guided tour is spoken, with each step's text shown as well"
+                : "The guided tour has no voice yet: each step is text to read"] })),
+          h("button", { class: "narration__tab", type: "button", role: "tab", "data-pane": "overview",
+            indicator: ["overview-tab", "A short spoken story of this scenario's use case, with its transcript. Nothing to do but listen"],
+            onClick: () => showPane("overview") },
+            h("span", { text: "Quick overview" }),
+            h("span", { class: "narration__tab-hint is-audio", text: `audio ${fmtTime(entry.duration)}`,
+              indicator: ["tab-audio-hint", `The quick overview is spoken, ${fmtTime(entry.duration)} long, with a transcript to read along`] })));
+        tabs.hidden = false;
+        narration.tourPaint = refreshTour;
+        showPane("tour");
+        paint();
+      })
+      .catch(() => { /* no tour for this scenario */ });
 
     const open = () => appEl.classList.contains("narration-open");
     function setOpen(on) {
       appEl.classList.toggle("narration-open", on);
       launcher.setAttribute("aria-expanded", String(on));
       if (on) current = -2;
+      tourRoom(on);
       paint();
-      if (on) play.focus({ preventScroll: true });
+      if (tour && pane === "tour") paintTour(on);
+      else if (!on) clearTourTargets();
+      if (on && pane === "overview") play.focus({ preventScroll: true });
     }
 
     launcher.addEventListener("click", () => setOpen(!open()));
@@ -2252,11 +2449,16 @@
       audio.addEventListener(ev, paint);
     }
     audio.addEventListener("ended", () => { audio.currentTime = 0; });
-    audio.addEventListener("error", () => toast("The audio overview could not be loaded.", true));
+    audio.addEventListener("error", () => toast("The quick overview's audio could not be loaded.", true));
 
     topbarActions.prepend(launcher);
     appEl.append(side);
-    narration = { id: scenario.id, audio, side, launcher, close: () => { if (open()) { setOpen(false); launcher.focus(); } } };
+    narration = { id: scenario.id, audio, side, launcher,
+      close: () => { if (open()) { setOpen(false); launcher.focus(); } },
+      // Leaving the scenario with the tour open: give the sidebar back.
+      leave: () => tourRoom(false),
+      // The attendee moved the sidebar themselves: it is theirs now.
+      sidebarTouched: () => { shrankSidebar = false; } };
     setOpen(false);
   }
 
@@ -2310,7 +2512,9 @@
 
   /* The sidebar can shrink to a rail of pattern numbers, for more room on a
      small screen. The choice is remembered in this browser only. */
-  function setSidebar(collapsed) {
+  /* remember: false is for a change the page makes by itself (the guided
+     tour making room), which must not become the attendee's own setting. */
+  function setSidebar(collapsed, remember = true) {
     state.sidebarCollapsed = collapsed;
     document.querySelector(".app")?.classList.toggle("is-collapsed", collapsed);
     el.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
@@ -2318,7 +2522,9 @@
     indicator(el.sidebarToggle, "sidebar-toggle", collapsed
       ? "Show the full sidebar, with every pattern's name"
       : "Shrink the sidebar to pattern numbers, for more room");
-    try { localStorage.setItem("eda.sidebarCollapsed", collapsed ? "1" : "0"); } catch (_) { /* private window */ }
+    if (remember) {
+      try { localStorage.setItem("eda.sidebarCollapsed", collapsed ? "1" : "0"); } catch (_) { /* private window */ }
+    }
     if (state.scenarios.length) {
       renderNav();
       el.nav.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
@@ -2340,7 +2546,7 @@
     let collapsed = false;
     try { collapsed = localStorage.getItem("eda.sidebarCollapsed") === "1"; } catch (_) { /* private window */ }
     setSidebar(collapsed);
-    el.sidebarToggle.addEventListener("click", () => setSidebar(!state.sidebarCollapsed));
+    el.sidebarToggle.addEventListener("click", () => { narration?.sidebarTouched(); setSidebar(!state.sidebarCollapsed); });
 
     indicator(el.navSearch, "nav-search",
       "Type part of a pattern's name or category to shorten the list. Enter opens the first match; Escape clears");

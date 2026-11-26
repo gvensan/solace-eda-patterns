@@ -1,0 +1,226 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Event sourcing stores every change to a system's state as an event: appended in order, and never edited or deleted. The current state is not the record. It is derived from the events, and can always be rebuilt by replaying them.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The bank",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a bank. A Teller sends commands, such as a deposit or a withdrawal. The Ledger checks each one against the current balances, and if it is accepted, records it as an event. That event is the only thing the Ledger ever writes.",
+        "The Ledger keeps no separate record of balances. Each balance is simply that account's deposits and withdrawals, added up.",
+        "One thing is a stand-in here. The broker's replay log plays the part of an event store, and the demo assumes its history is complete and durable."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "ledger",
+          "teller"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queues and the event history on the broker and starts the Ledger. The Ledger first replays the history and adds it up. Then the Teller starts sending a command every second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A command becomes an event",
+      "highlight": [
+        ".dg-node[data-node=\"ledger\"]"
+      ],
+      "do": "Click logs on the Ledger node.",
+      "expect": {
+        "note": "The Ledger log is not open yet.",
+        "logsOpen": "ledger"
+      },
+      "say": [
+        "Click logs on the Ledger node. For each accepted command it prints the event it recorded: its number, the account, the amount, and the balance that leaves.",
+        "A withdrawal that would overdraw the account is refused, and nothing is recorded. A command asks for something. An event says it happened."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Balances worked out from events",
+      "highlight": [
+        "[data-hold=\"ledger\"]"
+      ],
+      "do": "Scroll to What each app holds, under the diagram.",
+      "say": [
+        "Scroll down to What each app holds. The Ledger's table shows the balances, and the event that last changed each one. The note under it says how many events it rebuilt them from when it started.",
+        "These figures are in the Ledger's memory and nowhere else. Each event does carry the balance it left, but only as a check on the sum. It is never the source."
+      ],
+      "expect": {
+        "note": "The Ledger holds nothing yet. Give it a moment.",
+        "holdsMin": {
+          "node": "ledger",
+          "min": 1
+        }
+      }
+    },
+    {
+      "kind": "look",
+      "title": "Where the events are kept",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the three boxes inside the broker.",
+      "say": [
+        "Look inside the broker in the diagram. One queue holds the Teller's commands until the Ledger takes them. The event history keeps every event the Ledger has recorded. The third box is used only when the Ledger starts, to replay that history into."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Crash the Ledger",
+      "highlight": [
+        "#fmt-ledger-crash"
+      ],
+      "do": "Open the card The ledger crashes, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "ledger-crash",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The ledger crashes, and press Break it.",
+        "The Ledger is killed outright. Its balances were only in its memory."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "State gone, record intact",
+      "highlight": [
+        "[data-hold=\"ledger\"]",
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the Ledger's card under the diagram, then at the commands queue.",
+      "say": [
+        "The Ledger's card says it is not running, and shows no balances. They are gone. The Teller carries on, and its commands pile up in the commands queue.",
+        "Nothing recorded is lost. Every event is still in the event history, and the balances were only ever what those events add up to."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "ledger-crash",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Rebuild from the events",
+      "highlight": [
+        ".failbar",
+        "[data-hold=\"ledger\"]"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The Ledger has not rebuilt its balances yet. Press Reset and give it a few seconds.",
+        "cardNot": {
+          "id": "ledger-crash",
+          "state": "broken"
+        },
+        "holdsMin": {
+          "node": "ledger",
+          "min": 4
+        }
+      },
+      "say": [
+        "Press Reset. The Ledger starts with no balances. It asks for the history, adds it up, and logs how many events it rebuilt from. Under the diagram, the same balances come back. Only then does it take the waiting commands.",
+        "In event sourcing, state that is lost can be derived again. Nothing has to be backed up but the events."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Lose the history itself",
+      "highlight": [
+        "#fmt-history-lost"
+      ],
+      "do": "Open the card The event history is lost, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "history-lost",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break the one assumption this demo makes. Open the card called The event history is lost, and press Break it.",
+        "The Ledger is stopped, every event is removed from the event history, and the Ledger starts again."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Nothing to rebuild from",
+      "highlight": [
+        "[data-hold=\"ledger\"]"
+      ],
+      "do": "Read the Ledger log beside the diagram.",
+      "say": [
+        "The Ledger asked for the history and got nothing. Its log says it rebuilt from zero events, and that every account starts at nothing. Then it takes commands as if the bank had just opened. Nothing warns anyone.",
+        "Every balance in the bank is gone, because the events were the only record. Worse, the Ledger cannot tell an empty history from a lost one, so it refuses withdrawals that should have gone through."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "history-lost",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "What Reset cannot do",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "history-lost",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. Nothing brings the events back. The Ledger restarts and rebuilds from the events recorded since the loss, the same figures it had.",
+        "In production you would restore the event store from a replica or a backup. A real event store also knows how many events each stream should have, so a missing history is an error there, not a quiet fresh start."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is event sourcing. Use it when the history matters, as in audit and finance, or when state must be rebuilt or read in new ways from past events.",
+        "The cost is the history itself. It must be durable and complete. Long histories need snapshots, reads need their own stored views, and changing the format of an event takes care.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,235 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Command Query Responsibility Segregation, or CQRS, separates the part of a system that changes data from the part that answers questions about it. Commands go to a write model, which checks and records them. Queries go to a separate read model, shaped for the questions it answers.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The shop",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a shop. Checkout sends commands, each one saying: place this order. The Order Service is the write side. It takes each command, gives the order a number, saves it, and publishes an event saying an order was placed.",
+        "The Order Summary is the read side. It builds its own view from those events: one line per customer, with how many orders and how much spent. The Account Page asks one question, how many orders have I placed and how much have I spent, and it asks the Order Summary, never the Order Service."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "summary",
+          "orders",
+          "account",
+          "checkout"
+        ]
+      },
+      "say": [
+        "Press Play. It creates two queues on the broker, starts the Order Summary, the Order Service and the Account Page, and last Checkout, which sends a command a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A command becomes an order",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "do": "Follow one dot from Checkout to the Order Summary.",
+      "say": [
+        "Follow a command. Checkout sends it, and the broker keeps it on the commands queue. The Order Service takes it, numbers the order, saves it in its own database, and publishes order placed.",
+        "A second queue keeps that event for the Order Summary, which applies it to its view a moment later. The two sides share nothing but that event."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "summary",
+          "orders",
+          "account",
+          "checkout"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "The question and its answer",
+      "highlight": [
+        ".dg-node[data-node=\"account\"]"
+      ],
+      "do": "Click logs on the Account Page node.",
+      "expect": {
+        "note": "The Account Page log is not open yet.",
+        "logsOpen": "account"
+      },
+      "say": [
+        "Click logs on the Account Page node. Each line is one answer: a customer, how many orders, how much spent. In brackets it says which order the view is built up to, and how long that order took to reach the view.",
+        "The answer came from the Order Summary's own view. Nothing was asked of the Order Service."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The same orders, kept twice",
+      "highlight": [
+        "[data-hold=\"orders\"]",
+        "[data-hold=\"summary\"]"
+      ],
+      "do": "Scroll to What each app holds, under the diagram.",
+      "say": [
+        "Scroll down to What each app holds. The Order Service's table is its database: every order as it was placed, kept on disk. The Order Summary's table has one line per customer, kept in memory, in exactly the shape the Account Page asks for.",
+        "Read the notes under the two tables. One gives the latest order placed. The other gives the order the view is built up to. Normally they are the same, or one apart."
+      ],
+      "expect": {
+        "note": "The Order Summary holds nothing yet. Give it a moment.",
+        "holdsMin": {
+          "node": "summary",
+          "min": 1
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Slow the read side",
+      "highlight": [
+        "#fmt-read-side-behind"
+      ],
+      "do": "Open the card The read side falls behind, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "read-side-behind",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The read side falls behind, and press Break it.",
+        "The Order Summary now takes two seconds to apply each event, while Checkout places an order every second."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Answers that describe the past",
+      "highlight": [
+        "[data-hold=\"orders\"]",
+        "[data-hold=\"summary\"]"
+      ],
+      "do": "Read the Account Page log beside the diagram, then compare the two notes under the tables.",
+      "say": [
+        "The log beside the diagram is the Account Page's. It is still answered at once, but from an older view. The figure in brackets grows: the last order applied took longer and longer to arrive.",
+        "That figure is about the last order applied. To see how far behind the view is now, compare the two notes under the tables: the latest order placed, and the order the view is built up to. The gap between them is growing, and the view's queue is filling. Checkout and the Order Service have not noticed. The write side never waits for the read side."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "read-side-behind",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Let it catch up",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "read-side-behind",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The Order Summary goes back to normal speed and applies the waiting events within a second or two. Nothing was lost. The events waited on its queue."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Take the write side down",
+      "highlight": [
+        "#fmt-write-side-down"
+      ],
+      "do": "Open the card The write side goes down, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "write-side-down",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the other side. Open the card called The write side goes down, and press Break it.",
+        "The Order Service is killed outright. Checkout keeps sending commands, and the Account Page keeps asking."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Submitted is not placed",
+      "highlight": [
+        ".dg-node[data-node=\"orders\"]",
+        ".dg-node[data-node=\"account\"]"
+      ],
+      "do": "Read the Checkout log beside the diagram, and watch the commands queue.",
+      "say": [
+        "The log beside the diagram is Checkout's. Every command is still accepted by the broker. But each one is an order submitted, not an order placed. It has no order number yet. The commands queue is filling.",
+        "The Account Page is still answered, from a view that has stopped changing. Reads continue from the last event the view applied, while new submissions wait. What to tell the customer in between is a product decision that CQRS makes you take."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "write-side-down",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Bring the write side back",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The order service is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "write-side-down",
+          "state": "broken"
+        },
+        "running": [
+          "orders"
+        ]
+      },
+      "say": [
+        "Press Reset. The Order Service opens its database, carries on from the last order number, and places every waiting command in turn. The view catches up. Nothing was lost: a command is acknowledged only after its order is saved and its event published."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is CQRS. Use it when reads and writes have different shapes or loads: many lookups, few checked writes, or several views of the same data.",
+        "The cost is that the read side is always somewhat behind the writes, and the product has to decide what users see in between. Two models are also more to build and run than one, so it pays only where reads and writes really differ.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

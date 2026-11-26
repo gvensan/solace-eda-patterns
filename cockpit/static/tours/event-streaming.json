@@ -1,0 +1,229 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Event streaming treats events as an unbounded, ordered sequence. Consumers read the stream in order, each keeping its own position in it, and build state as they go.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The bike-share",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a bike-share. Every ride start and every ride end is an event. The Counter keeps track of which bikes are in use: it adds a bike when a ride starts and removes it when the ride ends.",
+        "That list is only right if the Counter has seen every event, in order, from the point its list began. In the diagram, the Bikes are on the left, the broker is in the middle, and the Counter is on the right. The City Board is not running yet. You will start it later."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "counter",
+          "bikes"
+        ]
+      },
+      "say": [
+        "Press Play. It creates a queue on the broker, starts the Counter, and then the Bikes, which publish four ride events a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A queue as a position",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the queue box inside the broker.",
+      "say": [
+        "The queue in the broker keeps the ride events in order, and removes each one only when the Counter acknowledges it. So the queue is also the Counter's position in the stream.",
+        "The number on the queue is how far the stream is ahead of the Counter. While the Counter keeps up, it stays near zero."
+      ],
+      "expect": {
+        "note": "The apps are not both running. Press Play first.",
+        "running": [
+          "counter",
+          "bikes"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "The Counter's log",
+      "highlight": [
+        ".dg-node[data-node=\"counter\"]"
+      ],
+      "do": "Click logs on the Counter node.",
+      "expect": {
+        "note": "The Counter log is not open yet.",
+        "logsOpen": "counter"
+      },
+      "say": [
+        "Click logs on the Counter node. Once a second it prints how many bikes it has in use, and next to that, how many the Bikes themselves say are out.",
+        "The Bikes put their own total in every event, as a check, and the two numbers match. Notice what a total cannot tell you: which bikes. That is only in the events."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "What the Counter holds",
+      "highlight": [
+        "[data-hold=\"counter\"]"
+      ],
+      "do": "Scroll to What each app holds, under the diagram.",
+      "say": [
+        "Scroll down to What each app holds. This is the Counter's list, bike by bike, built from the stream. Before it acknowledges each event, the Counter saves this list to a snapshot on disk, together with the event it had reached. Keep that in mind for the next step."
+      ],
+      "expect": {
+        "note": "The Counter holds nothing yet. Give it a moment.",
+        "holdsMin": {
+          "node": "counter",
+          "min": 1
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Crash the Counter",
+      "highlight": [
+        "#fmt-counter-crashes"
+      ],
+      "do": "Open the card The counter crashes, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "counter-crashes",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The counter crashes, and press Break it.",
+        "The Counter is killed outright, in the middle of the stream."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The stream goes on",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the number on the queue inside the broker.",
+      "say": [
+        "The Bikes have not noticed. They are still publishing. Watch the number on the queue climb: the broker is holding every event the Counter has not acknowledged.",
+        "Nothing is lost, and the Counter's place in the stream is kept for it. The list in its memory is gone, though. That is what the snapshot is for."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "counter-crashes",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Position and state",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The Counter is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "counter-crashes",
+          "state": "broken"
+        },
+        "running": [
+          "counter"
+        ]
+      },
+      "say": [
+        "Press Reset. The Counter starts again. In the log beside the diagram, look for two lines. It restores its list from the snapshot. Then it resumes at the event where it stopped.",
+        "Its count matches the Bikes again straight away. The position came from the queue. The state came from the snapshot. A stream consumer needs both."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A late joiner",
+      "highlight": [
+        "#fmt-board-late"
+      ],
+      "do": "Open the card The city board joins the stream late, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "board-late",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "The city wants a board that lists which bikes are out, and for how long. Open the card called The city board joins the stream late, and press Break it.",
+        "The City Board starts now, in the middle of the stream. It takes the events direct, with no queue and no snapshot."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "What the board cannot know",
+      "highlight": [
+        "[data-hold=\"counter\"]",
+        "[data-hold=\"board\"]"
+      ],
+      "do": "Compare the Counter's table and the City Board's table under the diagram.",
+      "say": [
+        "Compare the two tables under the diagram. The Counter lists every bike in use. The City Board lists only the rides it saw start. The bikes that were already out are missing, and the note under its table says how many it cannot name.",
+        "It knows that number from the total in each event. But a total cannot tell it which bikes, or since when. That was only in the events it never saw. After half a minute or so the two lists agree, but only because every ride ends. A bike out all day would never appear."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "board-late",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Stop the board",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "board-late",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The City Board stops. A consumer that is new to a stream has no position and no state: it needs the history replayed, or a snapshot to start from."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is event streaming. Use it when events form a sequence that must be processed in order: positions, telemetry, running totals, activity.",
+        "The cost is that every consumer has to keep its position and its state in step, and one that joins late has no history unless something replays it. On Solace, a queue gives a consumer its position. A snapshot, or a replay of the stream, gives it its state.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

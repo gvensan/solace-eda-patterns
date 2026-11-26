@@ -1,0 +1,10 @@
+[
+  "event-carried-state-transfer",
+  "cqrs",
+  "change-data-capture",
+  "event-sourcing",
+  "publish-subscribe",
+  "point-to-point",
+  "request-reply",
+  "event-streaming"
+]

@@ -1,0 +1,226 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Point-to-point messaging sends each message to one named destination, usually a queue, and each message is taken by exactly one receiver. The sender knows where its message goes, and the queue holds it until the receiver is ready.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The print job",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is the shop's label printing. The Order Service needs a shipping label printed for every order, by the Label Printer. That is work for one known service, not news for whoever is interested.",
+        "So the Order Service sends each print job to the printer's queue, by name. The Label Printer is that queue's one reader. No other app sees the jobs."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "printer",
+          "orders"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queue on the broker, starts the Label Printer, and then the Order Service, which sends a job every half second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A sender that names its destination",
+      "highlight": [
+        ".dg-node[data-node=\"orders\"]"
+      ],
+      "do": "Click logs on the Order Service node.",
+      "expect": {
+        "note": "The Order Service log is not open yet.",
+        "logsOpen": "orders"
+      },
+      "say": [
+        "Click logs on the Order Service node. Each line is one label job sent. The job is addressed to the queue by its name, and the Order Service waits for the broker to accept it.",
+        "It does not wait for the printer. Once the broker has the job, it is kept."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The one receiver",
+      "highlight": [
+        ".dg-node[data-node=\"printer\"]"
+      ],
+      "do": "Click logs on the Label Printer node.",
+      "expect": {
+        "note": "The Label Printer log is not open yet.",
+        "logsOpen": "printer"
+      },
+      "say": [
+        "Now click logs on the Label Printer node. It prints one label at a time, and checks that the job numbers follow on."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The queue in between",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the queue box inside the broker.",
+      "say": [
+        "Look at the queue inside the broker. The number beside it is how many jobs are waiting. While the printer keeps up, it stays near zero.",
+        "The broker keeps each job until the printer has taken it and acknowledged it. If the printer crashed before acknowledging a job, the broker would send that job again, so the printer must tolerate the occasional repeat."
+      ],
+      "expect": {
+        "note": "The apps are not both running. Press Play first.",
+        "running": [
+          "printer",
+          "orders"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Take the printer offline",
+      "highlight": [
+        "#fmt-receiver-offline"
+      ],
+      "do": "Open the card The printer goes offline, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "receiver-offline",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The printer goes offline, and press Break it.",
+        "The Label Printer stops. The Order Service keeps sending."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The queue holds the jobs, up to a point",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the waiting count on the queue, and the Order Service log beside the diagram, for about half a minute.",
+      "say": [
+        "At first nothing goes wrong. The Order Service keeps sending, and the jobs wait on the queue. Watch the waiting count climb.",
+        "Keep watching for about twenty seconds. The queue has a size limit. When it is reached, the log beside the diagram shows jobs refused, with the words: Spool Over Quota. The broker tells the sender, and does not keep those jobs."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "receiver-offline",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "What comes back, and what does not",
+      "highlight": [
+        ".failbar",
+        ".dg-node[data-node=\"printer\"]"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The printer is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "receiver-offline",
+          "state": "broken"
+        },
+        "running": [
+          "printer"
+        ]
+      },
+      "say": [
+        "Press Reset, then open the Label Printer's log from its node. It prints every job that waited, in order. Then it reports a gap: a run of job numbers that never arrived.",
+        "The jobs in the gap are the ones the broker refused. They were never stored, so they can never be printed. A queue protects a receiver that is away, but only up to its limit."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Name the wrong queue",
+      "highlight": [
+        "#fmt-wrong-queue"
+      ],
+      "do": "Open the card The sender names the wrong queue, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "wrong-queue",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the other side of naming a destination. Open the card called The sender names the wrong queue, and press Break it.",
+        "The Order Service restarts with the queue's name misspelt, and sends every job there."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A name nobody answers to",
+      "highlight": [
+        ".dg-node[data-node=\"orders\"]"
+      ],
+      "do": "Read the Order Service log beside the diagram.",
+      "say": [
+        "Every job is refused at once, with the words: No Subscription Match. There is no queue by that name, so nothing would take the job. The printer prints what was already waiting, and then nothing more.",
+        "Such a message is normally dropped without a word. This broker is set to refuse it back to the sender, so you can see every job bounce."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "wrong-queue",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Put the name right",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "wrong-queue",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The Order Service restarts with the right name, and jobs flow again."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is point-to-point. Use it when a piece of work belongs to one known service: print a label, send an invoice.",
+        "The cost is coupling by name. The sender must know the destination, and another kind of consumer needs a destination of its own.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

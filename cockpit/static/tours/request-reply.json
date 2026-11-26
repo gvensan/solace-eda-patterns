@@ -1,0 +1,224 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Request-reply is a conversation of two messages. One app sends a request, and waits for a reply addressed back to it. Because the reply may never come, the wait always has a timeout.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The till",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a supermarket till. It cannot ring up an item until it knows the price. So it asks, and waits for the answer.",
+        "The Till publishes a request on a topic that names the item, and waits up to two seconds. The Pricing Service, subscribed to that topic, looks the price up and replies on a topic that the Till's messaging library made for the reply.",
+        "Both messages are direct. Nothing is stored on the way."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "pricing",
+          "till"
+        ]
+      },
+      "say": [
+        "Press Play. It starts the Pricing Service, and then the Till, which asks the price of an item once a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The asker",
+      "highlight": [
+        ".dg-node[data-node=\"till\"]"
+      ],
+      "do": "Click logs on the Till node.",
+      "expect": {
+        "note": "The Till log is not open yet.",
+        "logsOpen": "till"
+      },
+      "say": [
+        "Click logs on the Till node. Each line is one item: the price that came back, and how many milliseconds the answer took."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The replier",
+      "highlight": [
+        ".dg-node[data-node=\"pricing\"]"
+      ],
+      "do": "Click logs on the Pricing Service node.",
+      "expect": {
+        "note": "The Pricing Service log is not open yet.",
+        "logsOpen": "pricing"
+      },
+      "say": [
+        "Now click logs on the Pricing Service node. Each line is one request it received, and its reply."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "No queue in between",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the broker in the diagram.",
+      "say": [
+        "Look at the broker. There are no queues in it. The request goes to whoever is subscribed to the request topic at that moment, and the reply comes straight back. So both sides must be up at the same time."
+      ],
+      "expect": {
+        "note": "The apps are not both running. Press Play first.",
+        "running": [
+          "pricing",
+          "till"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Take the replier away",
+      "highlight": [
+        "#fmt-pricing-down"
+      ],
+      "do": "Open the card The pricing service goes down, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "pricing-down",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The pricing service goes down, and press Break it.",
+        "The Pricing Service is killed. The Till keeps asking."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A deadline for every item",
+      "highlight": [
+        ".dg-node[data-node=\"till\"]"
+      ],
+      "do": "Read the Till log beside the diagram.",
+      "say": [
+        "The log beside the diagram is the Till's. Each request now ends, after two seconds, with a timeout error. The price is still unknown when the Till's deadline for that item expires, and the Till is told.",
+        "The deadline is per item. The Till goes on asking about other items while earlier requests are outstanding. Nothing is queued for the Pricing Service: a direct request reaches only a subscriber that is there when it is sent."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "pricing-down",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Bring it back",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The pricing service is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "pricing-down",
+          "state": "broken"
+        },
+        "running": [
+          "pricing"
+        ]
+      },
+      "say": [
+        "Press Reset. The Pricing Service starts, and the next request is answered. The requests made while it was down stay unanswered. What to do about those, retry, fall back or fail, is the asker's decision."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Make the replier slow",
+      "highlight": [
+        "#fmt-pricing-slow"
+      ],
+      "do": "Open the card The pricing service is slow, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "pricing-slow",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Being up is not enough. Open the card called The pricing service is slow, and press Break it.",
+        "The Pricing Service restarts taking three seconds per answer, which is longer than the Till waits."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Replies nobody is waiting for",
+      "highlight": [
+        ".dg-node[data-node=\"pricing\"]",
+        ".dg-node[data-node=\"till\"]"
+      ],
+      "do": "Read the Till log beside the diagram, then open the Pricing Service log from its node.",
+      "say": [
+        "Every request times out at the Till. Now open the Pricing Service's log from its node. It still says replied for each request, later and later.",
+        "It answers one request at a time, while the Till asks one a second. So a backlog builds up inside the Pricing Service itself, not on a broker queue. Each reply arrives long after the Till gave up, and the Till's library discards it without a word. The replier never knows."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "pricing-slow",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Back to normal speed",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "pricing-slow",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The Pricing Service restarts at normal speed, and the requests waiting inside the slow one go with it."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is request-reply. Use it when the asker needs an answer now to carry on: a price, a balance, a check.",
+        "The cost, with direct messages, is that both sides must be up at the same moment. A slow replier slows every asker, and timeouts and retries are the asker's job. Where the work can wait, put the request on a queue and publish the result as an event.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

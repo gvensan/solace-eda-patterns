@@ -16,6 +16,10 @@ then starts the **Ledger**, which rebuilds its balances from the history
 (empty, the first time), and the **Teller**, which submits a command every
 second.
 
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 

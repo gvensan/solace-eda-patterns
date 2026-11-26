@@ -2612,3 +2612,90 @@ td.is-false { color: var(--text-muted); }
 
 /* A related pattern that is not released yet: named, not a link. */
 .pattern__link--soon { opacity: 0.6; cursor: default; text-decoration: none; }
+
+
+/* ---------------------------------------------------------------- guided tour */
+
+/* The guide column holds two panes, the guided tour and the audio overview,
+   chosen by tabs under its heading. A pane fills the rest of the column. */
+.narration__tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.narration__tabs[hidden] { display: none; }
+.narration__tab {
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-body-sm);
+  cursor: pointer;
+}
+.narration__tab { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+.narration__tab-hint { font-family: var(--font-mono); font-size: 0.65rem; letter-spacing: 0.04em; color: var(--text-muted); }
+.narration__tab-hint.is-audio { color: var(--accent); }
+.narration__tab:hover { color: var(--text-strong); }
+.narration__tab[aria-selected="true"] { color: var(--text-strong); border-bottom-color: var(--accent); }
+.narration__tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.narration__pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.narration__pane[hidden] { display: none; }
+
+.tour__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+.tour__kind {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tour__kind--do { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 55%, transparent); }
+.tour__kind--look { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.tour__progress { height: 2px; margin: 0 var(--space-5); background: var(--border-subtle); }
+.tour__progress span { display: block; height: 100%; background: var(--accent); }
+/* The step's text is the only part that scrolls. */
+.tour__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-4) var(--space-5); }
+.tour__title { margin: 0 0 var(--space-3); color: var(--text-strong); font-size: var(--fs-body); font-weight: var(--fw-semibold); }
+.tour__say { margin: 0 0 var(--space-3); color: var(--text-body); font-size: var(--fs-body-sm); line-height: 1.55; }
+.tour__do {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-4) 0 var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--orange) 10%, transparent);
+  color: var(--text-strong);
+  font-size: var(--fs-body-sm);
+}
+.tour__do-label { font-family: var(--font-mono); font-size: var(--fs-caption); text-transform: uppercase; letter-spacing: 0.06em; color: var(--orange); }
+.tour__check { margin: var(--space-2) 0 0; font-size: var(--fs-body-sm); }
+.tour__check.is-met { color: var(--green-bright); }
+.tour__check.is-waiting { color: var(--orange); }
+.tour__nav {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* The part of the page the current tour step is about. */
+.tour-target {
+  outline: 2px solid var(--orange);
+  outline-offset: 4px;
+  border-radius: var(--radius-md);
+}
+.dg-node.tour-target { outline: none; filter: drop-shadow(0 0 7px var(--orange)); }

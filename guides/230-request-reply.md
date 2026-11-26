@@ -17,6 +17,10 @@ stored on the way, and the cards show what that means.
 Press **Play**. It creates the usernames, starts the **Pricing Service**,
 then the **Till**, which asks a price every second.
 
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 

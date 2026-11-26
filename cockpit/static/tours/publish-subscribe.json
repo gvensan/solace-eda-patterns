@@ -1,0 +1,231 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Publish-subscribe separates the apps that send events from the apps that use them. A publisher sends each event once, to a topic, without knowing who will receive it. Every app with a matching subscription gets its own copy.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The shop",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is an online shop. Every order placed is news to several teams. Shipping must pack it, Analytics counts it, and Email thanks the customer.",
+        "The Shop publishes each order once, on a topic that names the region and the order. Shipping and Email subscribe to every order. Analytics takes European orders only.",
+        "One choice is deliberate here. These are direct messages: delivered to whoever is subscribed at that moment, and kept for no one. That shows the pattern on its own. A real shipping service must not miss an order, and would read from a queue subscribed to the same topics."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "shipping",
+          "analytics",
+          "email",
+          "shop"
+        ]
+      },
+      "say": [
+        "Press Play. It starts Shipping, Analytics and Email, and then the Shop, which places two orders a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A subscriber to every order",
+      "highlight": [
+        ".dg-node[data-node=\"shipping\"]"
+      ],
+      "do": "Click logs on the Shipping node.",
+      "expect": {
+        "note": "The Shipping log is not open yet.",
+        "logsOpen": "shipping"
+      },
+      "say": [
+        "Click logs on the Shipping node. It receives every order the Shop publishes, each with its event number."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A subscriber to a slice",
+      "highlight": [
+        ".dg-node[data-node=\"analytics\"]"
+      ],
+      "do": "Click logs on the Analytics node.",
+      "expect": {
+        "note": "The Analytics log is not open yet.",
+        "logsOpen": "analytics"
+      },
+      "say": [
+        "Now click logs on the Analytics node. It receives only the European orders. It chose that slice itself, with a wildcard in its subscription.",
+        "The Shop does not know, and did not change. That is the point of the pattern: a new team can start listening tomorrow without the publisher being touched."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "One event, several copies",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch one dot leave the Shop and split at the broker.",
+      "say": [
+        "Watch the diagram. The Shop publishes once. The broker matches the event against every subscription and delivers a copy to each match. Nothing is stored on the way."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "shipping",
+          "analytics",
+          "email",
+          "shop"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Take a subscriber away",
+      "highlight": [
+        "#fmt-shipping-away"
+      ],
+      "do": "Open the card Shipping goes away for a while, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "shipping-away",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called Shipping goes away for a while, and press Break it.",
+        "Shipping is killed. Analytics and Email carry on."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Nobody notices",
+      "highlight": [
+        ".dg-node[data-node=\"shipping\"]",
+        ".dg-node[data-node=\"email\"]"
+      ],
+      "do": "Read the Email log beside the diagram, and look at the Shipping node.",
+      "say": [
+        "The log beside the diagram is Email's. It goes on receiving every order as if nothing had happened. So does Analytics. The Shop does not know that Shipping has gone.",
+        "Wait ten seconds or so before you continue. Every order published now is delivered to the subscribers that are there, and then it is gone."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "shipping-away",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "What it missed",
+      "highlight": [
+        ".failbar",
+        ".dg-node[data-node=\"shipping\"]"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "Shipping is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "shipping-away",
+          "state": "broken"
+        },
+        "running": [
+          "shipping"
+        ]
+      },
+      "say": [
+        "Press Reset, then open the Shipping log from its node. Its first line says which events it missed while it was away, and how many.",
+        "Those orders were never shipped. Nothing on the broker kept them. That is what makes direct publish-subscribe cheap and fast, and why an event that must not be lost needs a queue."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Add a second copy",
+      "highlight": [
+        "#fmt-two-shipping"
+      ],
+      "do": "Open the card A second shipping is started to share the load, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "two-shipping",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Suppose Shipping is too slow, and someone starts a second copy to share the load. Open the card called A second shipping is started to share the load, and press Break it."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Twice the work, not half",
+      "highlight": [
+        ".dg-node[data-node=\"shipping\"]",
+        ".dg-node[data-node=\"shipping2\"]"
+      ],
+      "do": "Read the second Shipping's log beside the diagram, and compare it with the first Shipping's log.",
+      "say": [
+        "The log beside the diagram is the second Shipping's. It receives every order. Open the first Shipping's log from its node, and compare the event numbers: it receives every order too.",
+        "Every order is now shipped twice. Publish-subscribe copies an event to every subscriber, and two apps with the same subscription are two subscribers. To share one stream among several copies, something must hand each event to only one of them: a queue, or for direct messages a shared subscription."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "two-shipping",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Stop the second copy",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "two-shipping",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The second copy stops, and each order is shipped once again."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is publish-subscribe. Use it when several parts of a system react to the same events, and new ones should be added without changing the publisher.",
+        "The cost is that the publisher does not know who received an event. With direct messages, a subscriber that is away misses what was published meanwhile. Where nothing may be missed, put a queue on the same topics.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

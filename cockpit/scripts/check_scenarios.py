@@ -983,6 +983,79 @@ def check_narrations() -> list:
     return [f"narration: {m}" for m in bad]
 
 
+def check_tours() -> list:
+    """A guided tour (static/tours/<id>.json) only points at things its
+    scenario has: nodes, Break it cards and held tables. A rename in
+    scenario.yaml that the tour missed is caught here, not by an attendee
+    looking at a step that never turns to Done."""
+    import json
+    import re
+    tours = COCKPIT / "static" / "tours"
+    index_path = tours / "index.json"
+    if not tours.exists():
+        return []
+    bad = []
+    listed = json.loads(index_path.read_text()) if index_path.exists() else []
+    files = {f.stem for f in tours.glob("*.json")} - {"index"}
+    for sid in sorted(files - set(listed)):
+        bad.append(f"{sid}: tours/{sid}.json is not listed in tours/index.json, so the page never offers it")
+    for sid in sorted(set(listed) - files):
+        bad.append(f"{sid}: tours/index.json lists a tour with no tours/{sid}.json")
+    for sid in sorted(files):
+        spec_path = SCENARIOS / sid / "scenario.yaml"
+        if not spec_path.exists():
+            bad.append(f"{sid}: a tour for a scenario that does not exist")
+            continue
+        spec = yaml.safe_load(spec_path.read_text())
+        nodes = {n["id"]: n for n in spec.get("diagram", {}).get("nodes", [])}
+        cards = {m["id"]: m.get("title", "") for m in spec.get("failure_modes", [])}
+        tour = json.loads((tours / f"{sid}.json").read_text())
+        steps = tour.get("steps") or []
+        if not steps or not isinstance(tour.get("minutes"), int):
+            bad.append(f"{sid}: a tour needs steps and minutes")
+        for n, step in enumerate(steps, 1):
+            where = f"{sid} step {n}"
+            if step.get("kind") not in ("listen", "do", "look"):
+                bad.append(f"{where}: kind must be listen, do or look")
+            if not step.get("title") or not step.get("say"):
+                bad.append(f"{where}: needs a title and something to say")
+            if step.get("kind") != "listen" and not step.get("do"):
+                bad.append(f"{where}: a {step.get('kind')} step needs do: text, what the attendee is asked to do")
+            text = " ".join([step.get("title", ""), step.get("do", ""), *step.get("say", []),
+                             (step.get("expect") or {}).get("note", "")])
+            if "\u2014" in text or "\u2013" in text or "--" in text:
+                bad.append(f"{where}: has an em dash, en dash or double hyphen")
+            for sel in step.get("highlight", []):
+                for ref in re.findall(r'data-node="([^"]+)"', sel):
+                    if ref not in nodes:
+                        bad.append(f"{where}: highlights node {ref!r}, which the scenario does not have")
+                for ref in re.findall(r'data-hold="([^"]+)"', sel):
+                    if not nodes.get(ref, {}).get("holds"):
+                        bad.append(f"{where}: highlights what {ref!r} holds, but that node has no holds:")
+                for ref in re.findall(r"#fmt-([\w-]+)", sel):
+                    if ref not in cards:
+                        bad.append(f"{where}: highlights card {ref!r}, which the scenario does not have")
+            expect = step.get("expect")
+            if expect is None:
+                continue
+            if not expect.get("note"):
+                bad.append(f"{where}: expect needs a note, shown while the step is not done")
+            for ref in [*expect.get("running", []), *expect.get("stopped", []), *([expect["logsOpen"]] if expect.get("logsOpen") else [])]:
+                if ref not in nodes:
+                    bad.append(f"{where}: expects node {ref!r}, which the scenario does not have")
+            for key in ("card", "cardNot"):
+                ref = (expect.get(key) or {}).get("id")
+                if ref and ref not in cards:
+                    bad.append(f"{where}: expects card {ref!r}, which the scenario does not have")
+                # The step names the card by its title; a retitled card must be renamed here too.
+                if ref in cards and key == "card" and step.get("kind") == "do" and cards[ref].lower() not in step.get("do", "").lower():
+                    bad.append(f"{where}: asks for a card, but not by its title {cards[ref]!r}")
+            ref = (expect.get("holdsMin") or {}).get("node")
+            if ref and not nodes.get(ref, {}).get("holds"):
+                bad.append(f"{where}: expects rows held by {ref!r}, but that node has no holds:")
+    return [f"tour: {m}" for m in bad]
+
+
 def main() -> int:
     problems = []
     found = sorted(SCENARIOS.glob("*/scenario.yaml"))
@@ -991,6 +1064,7 @@ def main() -> int:
     problems.extend(check_indicators())
     problems.extend(check_palette())
     problems.extend(check_narrations())
+    problems.extend(check_tours())
 
     for p in problems:
         print(p)

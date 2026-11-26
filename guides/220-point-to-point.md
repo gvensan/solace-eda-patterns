@@ -13,6 +13,10 @@ Press **Play**. It creates the queue `q.p2p.labels`, starts the **Label
 Printer**, then the **Order Service**, which sends a 25 KB label job every
 half second.
 
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 
