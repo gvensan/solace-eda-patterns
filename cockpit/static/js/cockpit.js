@@ -1845,7 +1845,21 @@
           : h("tr", {}, h("td", { class: "hold__none", colspan: String(columns.length || 1),
               text: "Holds nothing yet" }))));
       card.__rows = rows;
-      body.replaceChildren(...[table, report.note && h("p", { class: "hold__note", text: report.note })].filter(Boolean));
+      // The table scrolls inside a fixed height, so a list that grows and
+      // shrinks does not move the page. Each read follows the first changed
+      // row, unless the pointer is on the table: then the reader is
+      // scrolling it, and it stays where they left it.
+      const was = body.querySelector(".hold__scroll");
+      const scroll = h("div", { class: "hold__scroll" }, table);
+      body.replaceChildren(...[scroll, report.note && h("p", { class: "hold__note", text: report.note })].filter(Boolean));
+      if (was) scroll.scrollTop = was.scrollTop;
+      const first = table.querySelector("tr.is-changed");
+      if (first && !(was && was.matches(":hover"))) {
+        const head = table.querySelector("thead")?.offsetHeight || 0;
+        const top = first.offsetTop - head;
+        const bottom = first.offsetTop + first.offsetHeight;
+        if (top < scroll.scrollTop || bottom > scroll.scrollTop + scroll.clientHeight) scroll.scrollTop = top;
+      }
     }
   }
 
