@@ -9,9 +9,9 @@ Machine: the devcontainer asks for 4 cores, 16 GB memory, 32 GB storage.
 
 ## 1. Start
 
-- [ ] Open the repository in a new Codespace (the README badge; it still
-      points at the placeholder `SolaceDev/eda-patterns-workshop` until the
-      final repository name is set).
+- [ ] Open the repository in a new Codespace (the README badge, which
+      points at `gvensan/solace-eda-patterns`; change it if the repository
+      moves).
 - [ ] Note the time you press **Create codespace**: ________
 - [ ] Note the time the dashboard tab opens on its own: ________
       (port 3000 is set to open the browser when it is forwarded)
