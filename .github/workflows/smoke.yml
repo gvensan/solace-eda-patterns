@@ -89,10 +89,20 @@ jobs:
               echo "Broker ready after about $((i * 5)) seconds."
               exit 0
             fi
+            # A broker that has exited will never answer: say so at once,
+            # with its log, instead of waiting out the clock.
+            if [ "$(docker inspect -f '{{.State.Running}}' solace 2>/dev/null)" != "true" ]; then
+              echo "The broker container is not running:"
+              docker ps -a --filter name=solace
+              docker logs --tail 100 solace 2>&1 || true
+              exit 1
+            fi
             sleep 5
           done
-          echo "Broker not ready after 7.5 minutes. Last answer:"; cat /tmp/probe.json
-          docker logs --tail 50 solace
+          echo "Broker not ready after 7.5 minutes. Last answer (none if SEMP never accepted a connection):"
+          cat /tmp/probe.json 2>/dev/null || true
+          docker ps -a --filter name=solace
+          docker logs --tail 100 solace 2>&1 || true
           exit 1
 
       - name: Start the dashboard
