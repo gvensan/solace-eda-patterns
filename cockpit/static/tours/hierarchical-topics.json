@@ -1,0 +1,231 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Hierarchical topics build each topic name from levels, general to specific. Consumers then subscribe to exactly the slice they want, using wildcards, and the broker does the routing.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The retail chain",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a retail chain. Every sale is published on a topic that says where it happened and what was sold, level by level: the region, the store, the department.",
+        "Three teams each want a different cut. Electronics wants one department from every store, so it puts a star in place of the region and the store. EU wants everything in its region, so it ends its subscription with a greater-than sign after the region. Audit takes everything.",
+        "These are direct messages, delivered to whoever is subscribed at that moment."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "electronics",
+          "eu",
+          "audit",
+          "stores"
+        ]
+      },
+      "say": [
+        "Press Play. It starts the three teams, and then the Stores, which publish four sales a second from twelve stores in three regions.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "One department, every store",
+      "highlight": [
+        ".dg-node[data-node=\"electronics\"]"
+      ],
+      "do": "Click logs on the Electronics node.",
+      "expect": {
+        "note": "The Electronics log is not open yet.",
+        "logsOpen": "electronics"
+      },
+      "say": [
+        "Click logs on the Electronics node. Every line is an electronics sale, from any region and any store. The star stands for exactly one level, so two stars cover the region and the store."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "One region, everything",
+      "highlight": [
+        ".dg-node[data-node=\"eu\"]"
+      ],
+      "do": "Click logs on the EU node.",
+      "expect": {
+        "note": "The EU log is not open yet.",
+        "logsOpen": "eu"
+      },
+      "say": [
+        "Now click logs on the EU node. Every line is a sale in the EU region, from any store and any department. The greater-than sign takes whatever follows the region, however many levels that is."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Nobody filters what it receives",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the dots split at the broker.",
+      "say": [
+        "Watch the diagram. The Stores publish each sale once. The broker compares the topic with every subscription and delivers a copy to each team it matches. No team receives a sale it did not ask for.",
+        "The levels are a contract between the publisher and every subscriber. The two cards show what happens when one side miscounts them."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "electronics",
+          "eu",
+          "audit",
+          "stores"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "A subscriber miscounts",
+      "highlight": [
+        "#fmt-level-short"
+      ],
+      "do": "Open the card A subscription miscounts the levels, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "level-short",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called A subscription miscounts the levels, and press Break it.",
+        "A new EU Sales team starts. Its subscription names the region and the store, and then goes straight to sale. It has no level for the department."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Wrong, and no error",
+      "highlight": [
+        ".dg-node[data-node=\"eusales\"]",
+        ".dg-node[data-node=\"eu\"]"
+      ],
+      "do": "Read the EU Sales log beside the diagram, and compare it with the EU node.",
+      "say": [
+        "The log beside the diagram is the new team's. It connected and subscribed without any error. Then it gets nothing. Every five seconds it says nothing has matched its subscription. The EU team next to it receives every EU sale.",
+        "A star matches exactly one level. After the store, the next level in a real topic is a department, not the word sale, so no topic matches. The broker accepts any well-formed subscription. Whether it matches anything is the subscriber's problem, and it fails silently."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "level-short",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Stop the new team",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "level-short",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The new team stops."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The publisher adds a level",
+      "highlight": [
+        "#fmt-extra-level"
+      ],
+      "do": "Open the card The stores add a level, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "extra-level",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the other side. Open the card called The stores add a level, and press Break it.",
+        "The Stores restart with a new till system, which puts a till level after the store in every topic."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Who breaks, and who survives",
+      "highlight": [
+        ".dg-node[data-node=\"electronics\"]",
+        ".dg-node[data-node=\"eu\"]",
+        ".dg-node[data-node=\"audit\"]"
+      ],
+      "do": "Read the Electronics log beside the diagram, then look at EU and Audit.",
+      "say": [
+        "The log beside the diagram is Electronics. It has stopped receiving anything. Its subscription counted the levels with stars, and the new topics have one more.",
+        "EU and Audit carry on. Their greater-than sign takes whatever follows, so the extra level does not matter to them. Neither style is simply right: only the precise one can pick a department out of the middle of the topic."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "extra-level",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Take the level out again",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The stores are not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "extra-level",
+          "state": "broken"
+        },
+        "running": [
+          "stores"
+        ]
+      },
+      "say": [
+        "Press Reset. The Stores restart without the extra level, and Electronics receives sales again. Changing a topic's levels is a change to the contract, and every subscriber has to be checked against it."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is hierarchical topics. Use them when many kinds of event, sources or regions share a broker, and each consumer wants a different cut.",
+        "The cost is that the levels are a contract. Changing them, or adding one, quietly breaks subscriptions that relied on the old shape.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

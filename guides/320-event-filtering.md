@@ -16,6 +16,10 @@ Press **Play**. It creates two queues and the usernames, starts **Berlin
 Temperatures** and the **Alarm Desk**, then the **Sensors**, 5 readings a
 second.
 
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 
@@ -62,7 +66,8 @@ explains the cause and where you would meet it in production.
    in under a minute, and then the broker refuses every reading: "Spool
    Over Quota". Not just for the alarm queue: Berlin Temperatures stops
    receiving too, and an alarm published now reaches nobody. **Reset** puts
-   the sensors back and deletes what the selector left behind.
+   the sensors back and deletes everything waiting on `q.ef.alarms`: the
+   readings the selector left behind, and any alarm not yet delivered.
 2. **The alarm desk's selector has a typo.** It is redeployed with
    "severity = = 4" and cannot bind: "Invalid Selector". **Reset** starts it
    with the right selector, and it takes the alarms that waited.

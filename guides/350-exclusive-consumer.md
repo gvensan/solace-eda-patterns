@@ -5,12 +5,19 @@ case: apply a refund before the payment it refunds and the balance is wrong,
 even if only for a moment. So you want exactly one ledger writer.
 
 You also want that writer to survive a crash. Running two copies fixes that,
-but now there are two writers. An exclusive queue gives you both: any number
-of consumers can bind to it, and the broker delivers to only one of them at
-a time. The rest wait on standby.
+but now there are two writers. An exclusive queue gives you both: several
+consumers can bind to it (up to the queue's bind limit), and the broker
+delivers to only one of them at a time. The rest wait on standby. That
+gives one active delivery flow, not a complete ledger: a real one also
+keeps its state where the standby can reach it, and recognises a posting
+it has already made.
 
 Press **Play**. It creates the queue, starts **Ledger A**, then **Ledger B**,
 then the **Payments Service**, which publishes a posting every half second.
+
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).

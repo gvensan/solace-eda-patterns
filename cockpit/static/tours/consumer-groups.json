@@ -1,0 +1,229 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "With consumer groups, each group of consumers gets every event, and the members of a group share that group's events between them.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The catalogue",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a product catalogue. Every price change goes to two teams. Search updates the search index. Alerts emails customers who are watching a product. Each team needs every price change, and within a team the members share the work.",
+        "Solace has no consumer group object. Each group here is its own queue, subscribed to the same topic, and shared by the group's members."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "search1",
+          "search2",
+          "alerts1",
+          "catalog"
+        ]
+      },
+      "say": [
+        "Press Play. It creates both queues, starts two search members and one alerts member, and then the Catalogue, which publishes four price changes a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A member of the search group",
+      "highlight": [
+        ".dg-node[data-node=\"search1\"]"
+      ],
+      "do": "Click logs on the Search 1 node.",
+      "expect": {
+        "note": "The Search 1 log is not open yet.",
+        "logsOpen": "search1"
+      },
+      "say": [
+        "Click logs on the Search 1 node. It handles price changes for some of the products. Search 2 handles the others. Between them they see every price change once."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The alerts group",
+      "highlight": [
+        ".dg-node[data-node=\"alerts1\"]"
+      ],
+      "do": "Click logs on the Alerts 1 node.",
+      "expect": {
+        "note": "The Alerts 1 log is not open yet.",
+        "logsOpen": "alerts1"
+      },
+      "say": [
+        "Now click logs on the Alerts 1 node. It is the only member of its group, so it handles every price change. They are the same price changes the search group received."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "One event, a copy for each group",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the two queues inside the broker.",
+      "say": [
+        "Look at the broker. The Catalogue publishes each price change once. Both queues subscribe to its topic, so the broker stores a copy on each. Each group has its own copy and its own backlog.",
+        "Each queue has two partitions. That is how a group of two splits the products between its members, and keeps one product's changes in order."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "search1",
+          "search2",
+          "alerts1",
+          "catalog"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Take a whole group away",
+      "highlight": [
+        "#fmt-group-offline"
+      ],
+      "do": "Open the card The alerts group goes offline, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "group-offline",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The alerts group goes offline, and press Break it.",
+        "Every member of the alerts group stops, so nobody reads the alerts queue."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The other group does not notice",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Read the search log beside the diagram, and compare the numbers on the two queues.",
+      "say": [
+        "The log beside the diagram is from the search group. It carries on as if nothing had happened.",
+        "Compare the two queues. The alerts queue is now counting price changes waiting. The search queue is not. Each queue keeps its messages until its own consumers take them, whatever happens to the other."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "group-offline",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Late, not lost",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The alerts member is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "group-offline",
+          "state": "broken"
+        },
+        "running": [
+          "alerts1"
+        ]
+      },
+      "say": [
+        "Press Reset. The alerts member starts again and works through everything it missed, in order for each product. Each line says how late that change is.",
+        "The alerts group missed nothing. It is only late. That holds as long as the backlog fits in the group's queue. The two groups still share the publisher and the broker's own limits."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "More members than partitions",
+      "highlight": [
+        "#fmt-member-beyond-partitions"
+      ],
+      "do": "Open the card The alerts group adds more members than it has partitions, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "member-beyond-partitions",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now try to scale a group too far. Open the card called The alerts group adds more members than it has partitions, and press Break it.",
+        "A second alerts member starts, and once it has a partition, a third starts too: three members on a queue with two partitions."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A member with nothing to do",
+      "highlight": [
+        ".dg-node[data-node=\"alerts3\"]",
+        ".dg-node[data-node=\"alerts2\"]"
+      ],
+      "do": "Read the Alerts 3 log beside the diagram, and look at its node.",
+      "say": [
+        "The third member connects and binds without any error, and then receives nothing. In the diagram it reads standby, in a dashed box.",
+        "Each partition belongs to one consumer at a time, so a group can use only as many members as its queue has partitions. Nothing fails. The extra member simply does not help, and would take over a partition if another member went away."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "member-beyond-partitions",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Back to one member",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "member-beyond-partitions",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. Alerts members 2 and 3 stop."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is consumer groups. Use them when several applications each need all the events, and each runs more than one instance.",
+        "The cost is a queue for each group to manage, and members beyond a queue's partitions sit idle.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

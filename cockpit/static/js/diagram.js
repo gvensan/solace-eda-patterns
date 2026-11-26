@@ -1295,8 +1295,10 @@ const Diagram = (() => {
 
      A node with a long-running action is live only while that process runs;
      anything else (the broker, a terraform node) is always live. An app
-     publishes when it is live and either is a source (nothing flows into it)
-     or one of the flows into it is carrying traffic. A flow from the broker
+     publishes when it is live and either is a source (nothing flows into it,
+     or its node says `initiates: true`: it asks by its own clock and is
+     answered, as in request-reply) or one of the flows into it is carrying
+     traffic. A flow from the broker
      to an app needs that app running and something feeding it: the nodes in
      the flow's `source:` if given, otherwise any source publishing to the
      broker. `source:` is how a consumer at the end of a processor chain says
@@ -1306,7 +1308,8 @@ const Diagram = (() => {
     const running = (id) => !gated.has(id) || Boolean(state.nodes?.[id]?.running);
     const brokerId = (diagram.nodes || []).find((n) => n.kind === "broker")?.id;
     const into = (id) => flows.filter((f) => f.to === id);
-    const isSource = (id) => !into(id).some((f) => f.from === brokerId);
+    const starts = new Set((diagram.nodes || []).filter((n) => n.initiates).map((n) => n.id));
+    const isSource = (id) => starts.has(id) || !into(id).some((f) => f.from === brokerId);
     const sources = [...new Set(flows
       .filter((f) => f.to === brokerId && isSource(f.from)).map((f) => f.from))];
 
@@ -1324,11 +1327,22 @@ const Diagram = (() => {
       // A flow that only carries the odd message (to a dead message queue,
       // say) is drawn but never animated, so it never looks busy.
       if (f.animate === false || isHop(f)) return false;
-      if (f.from !== brokerId) return publishing(f.from, seen);
+      if (f.from !== brokerId) {
+        // Tied to what the broker receives from this app: for one that
+        // keeps publishing while nothing is delivered to it (retrying a
+        // lookup nobody answers, say).
+        const sent = f.sent ? state.traffic?.[`sent:${f.sent}`] : null;
+        if (sent === true || sent === false) return running(f.from) && sent;
+        return publishing(f.from, seen);
+      }
       if (!running(f.to)) return false;
       // Tied to a queue: moves only while messages are arriving on it, as the
       // broker counts them (across a bridge, say, which no app here runs).
       if (f.traffic && state.traffic?.[f.traffic] === false) return false;
+      // Tied to a client: moves only while the broker is sending it
+      // messages, for a direct subscriber whose subscription may match
+      // nothing.
+      if (f.delivered && state.traffic?.[`client:${f.delivered}`] === false) return false;
       // Bound but not delivered to: a standby on an exclusive queue. A
       // stalled consumer is at its unacknowledged limit, so the broker is
       // not sending it anything either.

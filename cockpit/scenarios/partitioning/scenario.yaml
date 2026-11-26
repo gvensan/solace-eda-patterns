@@ -8,8 +8,10 @@ summary: >
   fulfilment must see one order's updates in that order. Many orders are in
   flight at once, so three consumers share the work. The order id travels
   as the partition key: every update for one order goes to the same
-  partition, and so to the same consumer, in order, while different orders
-  are handled in parallel.
+  partition, and a partition has one consumer at a time, so one order's
+  updates are handled in order while different orders are handled in
+  parallel. Which consumer owns a partition can change when consumers join
+  or leave, and several orders share each partition.
 
 objectives:
   - See every update for one order go through one partition to one consumer, in order
@@ -19,8 +21,9 @@ objectives:
 
 pattern:
   what: >
-    Messages with the same key always go to the same consumer, in order,
-    while different keys spread across consumers.
+    Messages with the same key always go to the same partition, and each
+    partition is read by one consumer at a time, in order, while different
+    keys spread across partitions and consumers.
   when: >
     Order matters for each entity (an order, an account, a device) but not
     across them, and one consumer is not enough.

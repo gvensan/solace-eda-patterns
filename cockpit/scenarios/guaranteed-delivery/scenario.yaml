@@ -20,7 +20,9 @@ objectives:
 pattern:
   what: >
     Once the broker accepts a message it keeps it until the consumer
-    confirms it has handled it, so nothing is lost on the way.
+    confirms it has handled it, so nothing the broker accepted is lost on
+    the way. A message the broker has not confirmed is still the
+    publisher's to keep and send again.
   when: >
     Losing an event costs money or trust: orders, payments, loyalty points.
   cost: >
@@ -92,7 +94,9 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-gd-points
   flows:
     - { from: tills, to: broker, label: purchases, delay: 0 }
-    - { from: broker, to: points, via: awards, delay: 0.8 }
+    # Moves only while purchases are arriving on the queue: with ingress off,
+    # nothing is drawn going to the points service.
+    - { from: broker, to: points, via: awards, traffic: q.gd.awards, delay: 0.8 }
 
 actions:
   - id: apply

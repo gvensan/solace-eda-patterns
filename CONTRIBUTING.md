@@ -514,7 +514,26 @@ moves only while messages are arriving on that queue, judged from the
 queue's spooled count on each poll (`TRAFFIC_SECONDS` in
 `cockpit/app/main.py`), for a line whose traffic no app on the diagram
 sends: across a bridge, or out of a REST delivery point. The queue must be
-in the scenario's `tf/imports.tsv`.
+in the scenario's `tf/imports.tsv`. Use it too where a card stops messages
+reaching a queue while both apps keep running (a misspelt topic, a full
+queue, ingress turned off), so no dots are drawn to a consumer that gets
+nothing.
+
+A flow out of the broker to a direct subscriber, which has no queue, can
+name the client it connects as with `delivered: <client name>`. It then
+moves only while the broker is sending that client messages (its
+`dataTxMsgCount`), so a subscription that matches nothing shows no dots.
+The name must be the `--client-name` of one of the scenario's actions.
+A flow into the broker can say `sent: <client name>` the same way: it moves
+only while the broker is receiving messages from that client
+(`dataRxMsgCount`), for an app that keeps publishing while nothing is
+delivered to it, such as one retrying a lookup nobody answers.
+
+An app that asks and is answered (request-reply) has a flow coming back to
+it, so it would not count as a source. Give its node `initiates: true`: it
+publishes whenever it runs. Give the flows around the loop a `source:` each
+(the request's delivery names the asker, the reply's delivery names the
+answerer), so each stops when the app before it stops.
 
 A flow that carries only the odd message (from a queue to its dead message
 queue's reader, say) can set `animate: false`. It is drawn, but never shows

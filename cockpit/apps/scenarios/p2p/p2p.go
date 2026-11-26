@@ -1,14 +1,15 @@
 // Package p2p implements the point-to-point scenario.
 //
 // The shop's order service needs a shipping label printed for every order.
-// It sends each print job to one named queue, q.p2p.labels, and the label
-// printer is the one app that reads it. Nothing else sees the jobs, and if
-// the printer is away the queue keeps them until it comes back.
+// It publishes each print job to one topic. One queue, q.p2p.labels,
+// subscribes to that topic, and the label printer is the one app that reads
+// the queue. Nothing else sees the jobs, and if the printer is away the queue
+// keeps them until it comes back.
 //
-// The sender addresses the queue itself, by the queue's network topic
-// #P2P/QUE/<queue>, rather than publishing to a topic that something may or
-// may not subscribe to. That is the point of the pattern: the sender knows
-// exactly where its message goes.
+// Topic to queue is the form Solace recommends: the sender knows the topic,
+// not the queue, so the queue can be renamed or another one added without
+// changing the sender. A sender can also address a queue itself, by the
+// queue's network topic #P2P/QUE/<queue>; --queue does that.
 package p2p
 
 import (
@@ -24,16 +25,17 @@ import (
 )
 
 // Send publishes one label job at a steady pace, each with the next job
-// number, to one queue by name.
+// number, to one topic (or, with --queue, to one queue by name).
 //
 // Each job waits for the broker's acknowledgement, so a job the broker
-// refuses (the queue is full, or there is no such queue) is reported against
+// refuses (the queue is full, or no queue takes the topic) is reported against
 // its own number, with the broker's error as it is.
 func Send(args []string) {
 	fs := flag.NewFlagSet("p2p send", flag.ExitOnError)
 	user := fs.String("user", "svc-p2p-orders", "client username to connect as")
 	role := fs.String("role", "orders", "label for log lines")
-	queue := fs.String("queue", "q.p2p.labels", "queue to send each job to")
+	topic := fs.String("topic", "p2p/label/requested", "topic to publish each job to")
+	queue := fs.String("queue", "", "send to this queue by name instead of publishing to the topic")
 	every := fs.Duration("every", 500*time.Millisecond, "pause between jobs")
 	size := fs.Int("size", 25000, "bytes per job (a label is a small PDF)")
 	clientName := fs.String("client-name", "p2p-orders", "client name the broker reports this app by")
@@ -45,9 +47,14 @@ func Send(args []string) {
 	pub := solace.StartPersistentPublisher(*role, *user, svc)
 	defer solace.Terminate(pub)
 
-	// A queue's network topic delivers to that queue and nothing else.
-	dest := resource.TopicOf("#P2P/QUE/" + *queue)
-	solace.Logf(*role, "sending a label job to queue %s every %s. Press Stop to end.", *queue, *every)
+	dest := resource.TopicOf(*topic)
+	if *queue != "" {
+		// A queue's network topic delivers to that queue and nothing else.
+		dest = resource.TopicOf("#P2P/QUE/" + *queue)
+		solace.Logf(*role, "sending a label job to queue %s, by name, every %s. Press Stop to end.", *queue, *every)
+	} else {
+		solace.Logf(*role, "publishing a label job to topic %s every %s. Press Stop to end.", *topic, *every)
+	}
 	fmt.Println()
 
 	stop := make(chan struct{})

@@ -1,0 +1,274 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Partitioning sends messages with the same key to the same partition, and each partition is read by one consumer at a time. So one key's messages are handled in order, while different keys are handled in parallel.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The orders",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is order fulfilment. Each order moves through created, paid, packed, shipped and delivered, and fulfilment must see one order's updates in that order. Many orders are in flight at once, so three consumers share the work.",
+        "The order id travels with each update as its partition key. The queue has six partitions, drawn as lanes. The key picks the lane, and each lane belongs to one consumer at a time."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "fulfil1",
+          "fulfil2",
+          "fulfil3",
+          "orders"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the partitioned queue, starts three fulfilment consumers, and then the Order Service.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "One order, one lane",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Pick one letter in the diagram and follow its dots.",
+      "say": [
+        "Look at the lanes in the broker. Each dot is one update that a consumer has handled, coloured and lettered by its order. Pick one letter and follow it. Its dots always travel down the same lane, to the same consumer.",
+        "Several orders share each lane. And the broker has shared the six lanes between the three consumers, two each."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "fulfil1",
+          "fulfil2",
+          "fulfil3",
+          "orders"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "One consumer's orders",
+      "highlight": [
+        ".dg-node[data-node=\"fulfil1\"]"
+      ],
+      "do": "Click logs on the Fulfilment 1 node.",
+      "expect": {
+        "note": "The Fulfilment 1 log is not open yet.",
+        "logsOpen": "fulfil1"
+      },
+      "say": [
+        "Click logs on the Fulfilment 1 node. It handles its own orders, and checks that each order's updates arrive one number at a time."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Crash a consumer",
+      "highlight": [
+        "#fmt-consumer-crashes"
+      ],
+      "do": "Open the card A consumer crashes, and its partitions move, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "consumer-crashes",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called A consumer crashes, and its partitions move, and press Break it.",
+        "One fulfilment consumer is killed while it handles its orders."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Lanes change owner",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the lanes in the diagram for about ten seconds.",
+      "say": [
+        "The crashed consumer's two lanes lose their owner. For five seconds nothing reads them. Then the broker gives one lane to each of the other consumers.",
+        "The log beside the diagram is one of those consumers. It usually picks an order up part way through its life. Every order still moves one number at a time. The owner of a partition changed, and the order within it did not."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "consumer-crashes",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Give the lanes back",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The consumers are not all back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "consumer-crashes",
+          "state": "broken"
+        },
+        "running": [
+          "fulfil1",
+          "fulfil2",
+          "fulfil3"
+        ]
+      },
+      "say": [
+        "Press Reset. The crashed consumer starts again, and after five seconds two lanes move back to it."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Add a fourth consumer",
+      "highlight": [
+        "#fmt-fourth-consumer"
+      ],
+      "do": "Open the card A fourth consumer joins, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "fourth-consumer",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now scale out. Open the card called A fourth consumer joins, and press Break it.",
+        "Fulfilment 4 starts and binds the same queue, while the other three are busy."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "As few moves as possible",
+      "highlight": [
+        ".dg-node[data-node=\"fulfil4\"]",
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the lanes, and the Fulfilment 4 node.",
+      "say": [
+        "Fulfilment 4 binds at once, but for five seconds it owns nothing. Then the broker takes one lane from one of the other consumers and gives it to Fulfilment 4.",
+        "Six lanes do not share out evenly over four consumers: two, two, one and one. The broker moves as few lanes as it can, and gives the old owner time to finish what it holds, so each order stays in sequence."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "fourth-consumer",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Back to three",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "fourth-consumer",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. Fulfilment 4 stops, and five seconds later its lane goes back."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Forget the key",
+      "highlight": [
+        "#fmt-no-key"
+      ],
+      "do": "Open the card The publisher forgets the partition key, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "no-key",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Last, the mistake that undoes the pattern. Open the card called The publisher forgets the partition key, and press Break it.",
+        "The Order Service restarts without setting the partition key on its updates."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "One order, several consumers",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Follow one letter in the diagram again, and read the log beside it.",
+      "say": [
+        "Follow one letter again. Its dots now go down different lanes, to different consumers. Without a key, the broker places each message itself.",
+        "The consumers print the word gap. One order's updates arrive at more than one of them, so each sees numbers missing, and they are handled in parallel, in no particular order."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "no-key",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Put the key back",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The order service is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "no-key",
+          "state": "broken"
+        },
+        "running": [
+          "orders"
+        ]
+      },
+      "say": [
+        "Press Reset. The Order Service restarts with the key, and the gaps stop."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is partitioning: same key, same partition, one owner at a time. Use it when order matters for each entity, such as an order, an account or a device, but not across them, and one consumer is not enough.",
+        "The cost is that a busy key loads one consumer, partitions move when consumers join or leave, and consumers beyond the partition count sit idle.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

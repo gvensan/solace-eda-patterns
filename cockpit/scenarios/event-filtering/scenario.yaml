@@ -114,8 +114,10 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-ef-alarms
   flows:
     - { from: sensors, to: broker, label: readings, delay: 0 }
-    - { from: broker, to: berlin, via: berlinq, delay: 0.8 }
-    - { from: broker, to: alarms, via: alarmsq, delay: 0.8 }
+    # Each moves only while readings are arriving on its queue: once the
+    # alarm queue is full every reading is refused, and both stop.
+    - { from: broker, to: berlin, via: berlinq, traffic: q.ef.berlin, delay: 0.8 }
+    - { from: broker, to: alarms, via: alarmsq, traffic: q.ef.alarms, delay: 0.8 }
 
 actions:
   - id: apply
@@ -240,7 +242,9 @@ failure_modes:
       refuses the readings: "Spool Over Quota". Every reading is refused,
       not just at the alarm queue: Berlin temperatures stops receiving too,
       and an alarm sent now reaches nobody. Reset puts the sensors back to
-      normal and deletes what the selector left behind.
+      normal and deletes everything waiting on q.ef.alarms: the readings
+      the selector left behind, and any alarm that had not been delivered
+      yet.
     why: >
       A selector filters at delivery, not at the queue's door. The queue
       takes every reading its subscription matches, and the selector only

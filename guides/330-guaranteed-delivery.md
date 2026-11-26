@@ -6,13 +6,20 @@ twice costs the business. Both show up in a customer's balance.
 
 Guaranteed delivery is two promises kept together: **the broker confirms a
 message to its publisher once it has stored it, and deletes it only when
-the consumer acknowledges it.** Together they mean nothing is lost. Delivery
+the consumer acknowledges it.** Together they mean nothing the broker
+accepted is lost. Until the broker confirms a message, keeping it is the
+publisher's job: here the tills keep unconfirmed purchases in memory and
+send them again, where a real till would keep them on disk. Delivery
 is then at least once, so it asks one more thing of the consumer: recognise
 a message it has already handled (an idempotent receiver), so that nothing
 is done twice.
 
 Press **Play**. It creates the queue `q.gd.awards`, starts the **Points
 Service**, then the **Tills**, which make a purchase every half second.
+
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).

@@ -5,14 +5,19 @@ arrive in a couple of seconds; the rest of the time they trickle in. Two
 booking workers reserve seats at a steady 20 a second each.
 
 The queue between them is the shock absorber: **it takes a burst at the
-speed the producer sends it, and the consumers drain it at theirs.** The
-producer is never slowed down or refused, and the consumers never see more
-than they can handle. The queue has limits, in space and in time, and the
-cards show both.
+speed the producer sends it, and the consumers drain it at theirs.** While
+the burst fits in the queue, the producer is not slowed down or refused,
+and the consumers never see more than they can handle. The queue has
+limits, in space and in time, and the cards show both: past them, requests
+are refused or go stale.
 
 Press **Play**. It creates `q.sa.purchases` and its dead message queue,
 starts **Booking 1** and **Booking 2**, then the **On-Sale Page**, which
 sends a trickle and a burst of 1,500 every minute.
+
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).

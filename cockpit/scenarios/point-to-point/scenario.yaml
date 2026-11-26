@@ -5,31 +5,35 @@ eyebrow: Communication Patterns
 title: Point-to-Point
 summary: >
   One receiver takes each job. The shop's order service needs a shipping
-  label printed for every order. It sends each print job to one named
-  queue, and one label printer reads it. The sender knows exactly where its message goes, only that receiver
-  gets it, and if the printer is away the queue keeps the jobs until it is
-  back.
+  label printed for every order. It publishes each print job to one topic.
+  One queue subscribes to that topic, and one label printer reads the queue.
+  Only that receiver gets the job, and if the printer is away the queue keeps
+  the jobs until it is back.
 
 objectives:
-  - See a sender address one queue by name, not a topic
+  - See a sender publish to a topic that one queue subscribes to, and one receiver read that queue
   - See jobs wait on the queue while the receiver is away, and arrive in order when it returns
   - Find the queue's limit, and the error the sender gets when it is reached
-  - See what the broker tells a sender that names a queue that does not exist
+  - See what the broker tells a sender whose topic no queue subscribes to
 
 pattern:
   what: >
-    A sender addresses one named destination, and exactly one receiver takes
-    each message from it.
+    Each message goes to one destination, and exactly one receiver takes it
+    from there.
   when: >
     A piece of work belongs to one known service: print a label, send an
     invoice.
   cost: >
-    Sender and receiver are tied by the destination's name, and another kind
-    of consumer needs another destination.
+    Each kind of consumer needs a queue of its own. And "one receiver" is
+    kept by how the broker is set up, not by the sender: nothing in the
+    message stops a second queue subscribing to the same topic.
   solace: >
-    A durable queue, addressed by its name, that keeps each message until
-    the receiver acknowledges it. Delivery is at least once: a message not
-    yet acknowledged when the receiver crashes is sent again.
+    A durable queue that subscribes to one topic and keeps each message
+    until the receiver acknowledges it. The sender publishes to the topic
+    and never names the queue: this is the recommended form. A sender can
+    also address a queue by its name, which ties it to that one queue.
+    Delivery is at least once: a message not yet acknowledged when the
+    receiver crashes is sent again.
   related: [publish-subscribe, competing-consumers, request-reply]
   guide: https://solace.com/event-driven-architecture-patterns/#point-to-point
 
@@ -46,9 +50,10 @@ cleanup:
 
 diagram:
   caption: >
-    The order service sends each label job to the queue q.p2p.labels by
-    name. The broker keeps it there until the label printer, the queue's
-    one reader, takes it. No other app sees the jobs.
+    The order service publishes each label job to the topic
+    p2p/label/requested. The queue q.p2p.labels subscribes to that
+    topic, and the broker keeps each job there until the label printer, the
+    queue's one reader, takes it. No other app sees the jobs.
   duration: 2.4
   liveWhen: orders
   nodes:
@@ -70,6 +75,7 @@ diagram:
       contains:
         - id: labels
           label: q.p2p.labels
+          depth: { queue: q.p2p.labels, unit: waiting }
       provides:
         - label: q.p2p.labels
           group: labels
@@ -93,11 +99,15 @@ diagram:
   flows:
     - from: orders
       to: broker
-      label: "#P2P/QUE/q.p2p.labels"
+      label: p2p/label/requested
       delay: 0
+    # Moves only while jobs are arriving on the queue, as the broker counts
+    # them: with the topic misspelt nothing reaches the queue, so nothing is
+    # drawn going to the printer.
     - from: broker
       to: printer
       via: labels
+      traffic: q.p2p.labels
       delay: 0.8
 
 actions:
@@ -108,8 +118,9 @@ actions:
     tf_dir: tf
     variant: primary
     description: >
-      Creates the queue q.p2p.labels (1 MB, no topic subscriptions), and the
-      client profile, ACL profile and usernames for this scenario.
+      Creates the queue q.p2p.labels (1 MB) with its one topic subscription,
+      p2p/label/requested, and the client profile, ACL profile and
+      usernames for this scenario.
 
   - id: build
     label: Build the apps
@@ -140,22 +151,22 @@ actions:
     long_running: true
     variant: primary
     description: >
-      Sends a 25 KB label job every half second to the queue q.p2p.labels,
-      by its network topic #P2P/QUE/q.p2p.labels, and waits for the broker
-      to accept each one.
+      Publishes a 25 KB label job every half second to the topic
+      p2p/label/requested, which the queue q.p2p.labels subscribes
+      to, and waits for the broker to accept each one.
 
   - id: sender-typo
-    label: Send to a misspelt queue
+    label: Publish to a misspelt topic
     kind: process
-    cmd: [bash, ../../apps/run.sh, p2p, send, --queue, q.p2p.lables]
+    cmd: [bash, ../../apps/run.sh, p2p, send, --topic, p2p/lable/requested]
     cwd: .
     long_running: true
     stands_for: sender
     variant: secondary
     failure_only: true
     description: >
-      The same order service, configured with the queue name misspelt as
-      q.p2p.lables.
+      The same order service, configured with the topic misspelt as
+      p2p/lable/requested ("lable").
 
   - id: stop-printer
     label: Take the printer offline
@@ -237,27 +248,27 @@ failure_modes:
           - log: printer
             has: ["printed label job", "GAP: jobs"]
 
-  - id: wrong-queue
-    title: The sender names the wrong queue
+  - id: wrong-topic
+    title: The sender gets the topic wrong
     breaks: >
-      The order service restarts with the queue name misspelt, q.p2p.lables,
-      and sends every job there.
+      The order service restarts with its topic misspelt,
+      p2p/lable/requested, and publishes every job there.
     watch: >
-      Every job is refused at once with "No Subscription Match": there is no
-      queue by that name, so nothing would take the job. The printer prints
-      what was already waiting, then nothing more. Reset restarts the order
-      service with the right name and jobs flow again.
+      Every job is refused at once with "No Subscription Match": no queue
+      subscribes to that topic, so nothing would take the job. The printer
+      prints what was already waiting, then nothing more. Reset restarts the
+      order service with the right topic and jobs flow again.
     why: >
-      In point-to-point the sender names the one destination. A guaranteed
-      message that reaches no queue is normally dropped without a word. This
-      scenario's client profile sets
-      reject_msg_to_sender_on_no_subscription_match_enabled, so the broker
-      refuses it back to the sender instead.
+      The sender does not name the queue, so the topic is the only thing
+      that ties it to its receiver. A guaranteed message that no queue takes
+      is normally dropped without a word. This scenario's client profile
+      sets reject_msg_to_sender_on_no_subscription_match_enabled, so the
+      broker refuses it back to the sender instead.
     real_world: >
-      A typo in configuration, a queue renamed on one side only, an
-      environment where the queue was never created. The sender is coupled
-      to the queue's name, which is the price of knowing exactly where a
-      message goes. Turn on the rejection so the mistake is loud.
+      A typo in configuration, a topic changed on one side only, an
+      environment where the queue or its subscription was never created.
+      Turn on the rejection so the mistake is loud, and keep topic names in
+      one agreed place.
     docs:
       - label: "Go API: publishing persistent messages"
         url: https://docs.solace.com/API/API-Developer-Guide-Go/Go-PM-Publish.htm
@@ -293,6 +304,12 @@ inspect:
     # msgSpoolUsage is in bytes, maxMsgSpoolUsage in MB.
     columns: [queueName, msgSpoolUsage, maxMsgSpoolUsage, maxMsgSpoolUsageExceededDiscardedMsgCount, lastSpooledMsgId, highestAckedMsgId]
     ui_hint: Manager → Queues
+    empty: The queue is not on the broker. Press Play, or run Apply configuration.
+  - label: What the queue subscribes to
+    kind: semp
+    path: /msgVpns/{vpn}/queues/q.p2p.labels/subscriptions
+    columns: [queueName, subscriptionTopic]
+    ui_hint: Manager → Queues → q.p2p.labels → Subscriptions
     empty: The queue is not on the broker. Press Play, or run Apply configuration.
   - label: Reader of q.p2p.labels
     kind: semp

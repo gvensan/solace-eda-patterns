@@ -1,0 +1,224 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Backpressure lets a consumer that cannot keep up slow the flow to it, instead of being flooded or losing work. The broker pushes events to consumers, so each consumer needs its own way to say: not so fast.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The cold store",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a refrigerated warehouse. Its Sensors report forty temperature readings a second.",
+        "Two consumers want the same readings for different reasons. The Reporter writes every reading to a compliance database, which slows down at times, and it must not lose any. It reads from a queue.",
+        "The Live Display shows the current temperatures, and only cares about the latest. It takes the readings direct, with no queue."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "reporter",
+          "display",
+          "sensors"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queue, starts the Reporter and the Live Display, and then the Sensors.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Every reading, in turn",
+      "highlight": [
+        ".dg-node[data-node=\"reporter\"]"
+      ],
+      "do": "Click logs on the Reporter node.",
+      "expect": {
+        "note": "The Reporter log is not open yet.",
+        "logsOpen": "reporter"
+      },
+      "say": [
+        "Click logs on the Reporter node. It writes each reading to the database and then acknowledges it."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Only the latest",
+      "highlight": [
+        ".dg-node[data-node=\"display\"]"
+      ],
+      "do": "Click logs on the Live Display node.",
+      "expect": {
+        "note": "The Live Display log is not open yet.",
+        "logsOpen": "display"
+      },
+      "say": [
+        "Now click logs on the Live Display node. It shows the latest reading. Its messaging library holds at most twenty readings for it at a time."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "A queue for one, none for the other",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the queue box inside the broker.",
+      "say": [
+        "Look at the broker. The queue stores a copy of each reading for the Reporter. While the Reporter keeps up, the number waiting stays near zero. The Live Display has no queue at all."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "reporter",
+          "display",
+          "sensors"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Slow the database",
+      "highlight": [
+        "#fmt-slow-database"
+      ],
+      "do": "Open the card The database slows down, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "slow-database",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The database slows down, and press Break it.",
+        "Each database write now takes ten times longer. The Reporter can write ten readings a second, while forty arrive."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The backlog moves to the queue",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]",
+        ".dg-node[data-node=\"reporter\"]"
+      ],
+      "do": "Read the Reporter log beside the diagram, and watch the number on the queue.",
+      "say": [
+        "Writes pile up inside the Reporter. At fifty pending, it says it has paused, and takes no more. The broker, in turn, stops sending once the Reporter holds one hundred readings it has not acknowledged.",
+        "Now watch the number on the queue climb. The Reporter's memory stays flat. The backlog is on the queue, where it is safe."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "slow-database",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Catch up, nothing missing",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "slow-database",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The database is back to normal speed. The Reporter resumes, works through the readings that waited on the queue, and says it has caught up. None is missing."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Slow the display",
+      "highlight": [
+        "#fmt-slow-display"
+      ],
+      "do": "Open the card The live display falls behind, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "slow-display",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the consumer with no queue. Open the card called The live display falls behind, and press Break it.",
+        "The Live Display now takes a quarter of a second to show each reading: four a second, while forty arrive."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Dropping on purpose",
+      "highlight": [
+        ".dg-node[data-node=\"display\"]",
+        ".dg-node[data-node=\"reporter\"]"
+      ],
+      "do": "Read the Live Display log beside the diagram.",
+      "say": [
+        "There is no queue, and no brake at the broker, for direct messages. The library's buffer of twenty fills, and it drops the oldest readings to make room. Every two seconds the Live Display says how many it dropped.",
+        "Yet the reading on show stays less than a second old. For a live display, that is the right trade. The Reporter, reading the same sensors through its queue, misses nothing."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "slow-display",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Back to normal",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "slow-display",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The Live Display is back to normal speed, and the drops stop."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is backpressure. You need it whenever consumers are slower than producers some of the time.",
+        "The cost is that something has to hold the backlog, or drop it. A slow consumer still falls behind. It just does so safely: a queue for work that must not be lost, a deliberate drop for data where only the latest matters.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

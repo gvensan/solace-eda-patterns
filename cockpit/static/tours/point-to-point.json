@@ -9,7 +9,7 @@
         ".pattern"
       ],
       "say": [
-        "Point-to-point messaging sends each message to one named destination, usually a queue, and each message is taken by exactly one receiver. The sender knows where its message goes, and the queue holds it until the receiver is ready.",
+        "Point-to-point messaging sends each message to one destination, usually a queue, and each message is taken by exactly one receiver. The queue holds the message until the receiver is ready. On Solace, the recommended form is a topic mapped to a queue: the sender publishes to a topic, one queue subscribes to it, and the sender never names the queue.",
         "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
       ]
     },
@@ -21,7 +21,7 @@
       ],
       "say": [
         "This is the shop's label printing. The Order Service needs a shipping label printed for every order, by the Label Printer. That is work for one known service, not news for whoever is interested.",
-        "So the Order Service sends each print job to the printer's queue, by name. The Label Printer is that queue's one reader. No other app sees the jobs."
+        "So the Order Service publishes each print job to one topic. One queue on the broker subscribes to that topic, and the Label Printer is that queue's one reader. No other app sees the jobs."
       ]
     },
     {
@@ -39,13 +39,13 @@
         ]
       },
       "say": [
-        "Press Play. It creates the queue on the broker, starts the Label Printer, and then the Order Service, which sends a job every half second.",
+        "Press Play. It creates the queue on the broker and subscribes it to the topic, starts the Label Printer, and then the Order Service, which publishes a job every half second.",
         "Press Continue when the dots on the diagram are moving."
       ]
     },
     {
       "kind": "do",
-      "title": "A sender that names its destination",
+      "title": "A sender that knows only the topic",
       "highlight": [
         ".dg-node[data-node=\"orders\"]"
       ],
@@ -55,8 +55,8 @@
         "logsOpen": "orders"
       },
       "say": [
-        "Click logs on the Order Service node. Each line is one label job sent. The job is addressed to the queue by its name, and the Order Service waits for the broker to accept it.",
-        "It does not wait for the printer. Once the broker has the job, it is kept."
+        "Click logs on the Order Service node. Each line is one label job. The Order Service published it to the topic shown on the arrow in the diagram, and waited for the broker to accept it.",
+        "It never names the queue, and it does not wait for the printer. That is the recommended form at work: the queue can change without touching the sender. A sender can also address a queue directly by its name, but then it is tied to that one queue."
       ]
     },
     {
@@ -82,7 +82,7 @@
       ],
       "do": "Look at the queue box inside the broker.",
       "say": [
-        "Look at the queue inside the broker. The number beside it is how many jobs are waiting. While the printer keeps up, it stays near zero.",
+        "Look at the queue inside the broker. It subscribes to the Order Service's topic, so every job lands on it. The number beside it is how many jobs are waiting. While the printer keeps up, it stays near zero.",
         "The broker keeps each job until the printer has taken it and acknowledged it. If the printer crashed before acknowledging a job, the broker would send that job again, so the printer must tolerate the occasional repeat."
       ],
       "expect": {
@@ -156,45 +156,45 @@
     },
     {
       "kind": "do",
-      "title": "Name the wrong queue",
+      "title": "Get the topic wrong",
       "highlight": [
-        "#fmt-wrong-queue"
+        "#fmt-wrong-topic"
       ],
-      "do": "Open the card The sender names the wrong queue, and press Break it.",
+      "do": "Open the card The sender gets the topic wrong, and press Break it.",
       "expect": {
         "note": "The card is not in effect yet. Open it and press Break it.",
         "card": {
-          "id": "wrong-queue",
+          "id": "wrong-topic",
           "state": "broken"
         }
       },
       "say": [
-        "Now the other side of naming a destination. Open the card called The sender names the wrong queue, and press Break it.",
-        "The Order Service restarts with the queue's name misspelt, and sends every job there."
+        "The topic is the only thing that ties this sender to its receiver. Open the card called The sender gets the topic wrong, and press Break it.",
+        "The Order Service restarts with its topic misspelt, and publishes every job there."
       ]
     },
     {
       "kind": "look",
-      "title": "A name nobody answers to",
+      "title": "A topic no queue subscribes to",
       "highlight": [
         ".dg-node[data-node=\"orders\"]"
       ],
       "do": "Read the Order Service log beside the diagram.",
       "say": [
-        "Every job is refused at once, with the words: No Subscription Match. There is no queue by that name, so nothing would take the job. The printer prints what was already waiting, and then nothing more.",
+        "Every job is refused at once, with the words: No Subscription Match. No queue subscribes to that topic, so nothing would take the job. The printer prints what was already waiting, and then nothing more.",
         "Such a message is normally dropped without a word. This broker is set to refuse it back to the sender, so you can see every job bounce."
       ],
       "expect": {
         "note": "The card is not in effect, so there is nothing to see yet.",
         "card": {
-          "id": "wrong-queue",
+          "id": "wrong-topic",
           "state": "broken"
         }
       }
     },
     {
       "kind": "do",
-      "title": "Put the name right",
+      "title": "Put the topic right",
       "highlight": [
         ".failbar"
       ],
@@ -202,12 +202,12 @@
       "expect": {
         "note": "The card is still in effect. Press Reset in the bar at the top.",
         "cardNot": {
-          "id": "wrong-queue",
+          "id": "wrong-topic",
           "state": "broken"
         }
       },
       "say": [
-        "Press Reset. The Order Service restarts with the right name, and jobs flow again."
+        "Press Reset. The Order Service restarts with the right topic, and jobs flow again."
       ]
     },
     {
@@ -218,7 +218,7 @@
       ],
       "say": [
         "That is point-to-point. Use it when a piece of work belongs to one known service: print a label, send an invoice.",
-        "The cost is coupling by name. The sender must know the destination, and another kind of consumer needs a destination of its own.",
+        "The cost is a queue for each kind of consumer. And one receiver is kept by how the broker is set up, not by the sender: a second queue subscribed to the same topic would get a copy of every job.",
         "Press Cleanup when you are done, or pick another pattern from the sidebar."
       ]
     }

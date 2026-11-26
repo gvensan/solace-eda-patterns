@@ -4,8 +4,9 @@
 solacebroker_msg_vpn_client_profile.p2p	{vpn}/cp-p2p
 solacebroker_msg_vpn_acl_profile.p2p	{vpn}/acl-p2p
 
-# The queue has no subscriptions: jobs reach it by name.
+# The queue, and its subscription to the topic label jobs are published to.
 solacebroker_msg_vpn_queue.labels	{vpn}/q.p2p.labels
+solacebroker_msg_vpn_queue_subscription.labels	{vpn}/q.p2p.labels/p2p%2Flabel%2Frequested
 
 # Client usernames
 solacebroker_msg_vpn_client_username.p2p["orders"]	{vpn}/svc-p2p-orders

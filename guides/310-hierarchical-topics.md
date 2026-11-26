@@ -18,6 +18,10 @@ and **Audit** teams, then the **Stores**, which publish four sales a second
 from twelve stores in three regions (store-001 to 004 in eu, 005 to 008 in
 us, 009 to 012 in apac) and four departments.
 
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
+
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).
 

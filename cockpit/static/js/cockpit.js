@@ -61,6 +61,7 @@
     refresh: document.getElementById("refresh"),
     sidebarToggle: document.getElementById("sidebar-toggle"),
     navSearch: document.getElementById("nav-search"),
+    navFold: document.getElementById("nav-fold"),
   };
 
   /* ------------------------------------------------------------ helpers */
@@ -1045,13 +1046,13 @@
      patterns, so the list reads as a shorter version of itself. Numbers
      keep their place in the full list. Collapsed, the box is hidden, so it
      filters nothing until the sidebar opens again. */
-  /* Temporary: only the first two categories are released. A later
+  /* Temporary: only the first four categories are released. A later
      category shows its heading in the sidebar with "coming soon" and none
      of its patterns, and no released page links to one. A held pattern still
      opens from its own address (#<id>), for whoever is working on it. To
-     release more, raise this to the next category's first order (400, 500,
+     release more, raise this to the next category's first order (600, 700,
      ...), or to Infinity for all of them. */
-  const RELEASED_BELOW = 300;
+  const RELEASED_BELOW = 500;
   const held = (scenario) => scenario.order >= RELEASED_BELOW;
 
   function navMatches(scenario) {
@@ -1061,20 +1062,60 @@
     return (!held(scenario) && scenario.title.toLowerCase().includes(q)) || (scenario.eyebrow || "").toLowerCase().includes(q);
   }
 
+  /* A category folds away under its heading: click the heading, or use the
+     button beside the search box for all of them at once. What is folded is
+     remembered. Two things show a folded category's patterns anyway: a
+     search, which must be able to find them, and the sidebar shrunk to
+     numbers, which has no headings to click. */
+  const foldKey = "eda.foldedGroups";
+  const folded = new Set();
+  try { for (const g of JSON.parse(localStorage.getItem(foldKey) || "[]")) folded.add(g); } catch (_) { /* private window */ }
+  const saveFolds = () => { try { localStorage.setItem(foldKey, JSON.stringify([...folded])); } catch (_) { /* private window */ } };
+  const releasedGroups = () => [...new Set(state.scenarios.filter((s) => !held(s)).map((s) => s.eyebrow))];
+  const foldsApply = () => !state.navQuery && !state.sidebarCollapsed;
+
+  function toggleGroup(name) {
+    if (folded.has(name)) folded.delete(name); else folded.add(name);
+    saveFolds();
+    renderNav();
+  }
+
+  function paintFoldAll() {
+    const groups = releasedGroups();
+    const allFolded = groups.length > 0 && groups.every((g) => folded.has(g));
+    el.navFold.textContent = allFolded ? "\u25be" : "\u25b4";
+    el.navFold.setAttribute("aria-label", allFolded ? "Expand all categories" : "Collapse all categories");
+    indicator(el.navFold, "nav-fold-all", allFolded
+      ? "Expand every category, to list all the patterns"
+      : "Collapse every category to its heading. Click a heading to open one");
+  }
+
   function renderNav() {
     let group = null;
     const shown = state.scenarios.filter(navMatches);
+    paintFoldAll();
     el.nav.replaceChildren(
       ...state.scenarios.flatMap((scenario, index) => {
         if (!shown.includes(scenario)) return [];
-        const heading = scenario.eyebrow && scenario.eyebrow !== group
-          ? h("div", { class: "nav-group", role: "heading", "aria-level": "2" },
-              h("span", { text: scenario.eyebrow }),
-              held(scenario) && h("span", { class: "nav-group__soon", text: "coming soon",
-                indicator: ["nav-coming-soon", `The ${scenario.eyebrow} are not released yet. They will appear here when they are`] }))
+        const name = scenario.eyebrow;
+        const isFolded = folded.has(name);
+        const heading = name && name !== group
+          ? held(scenario)
+            ? h("div", { class: "nav-group", role: "heading", "aria-level": "2" },
+                h("span", { text: name }),
+                h("span", { class: "nav-group__soon", text: "coming soon",
+                  indicator: ["nav-coming-soon", `The ${name} are not released yet. They will appear here when they are`] }))
+            : h("button", { class: "nav-group nav-group--fold", type: "button", "aria-expanded": String(!isFolded),
+                indicator: ["nav-group-fold", isFolded
+                  ? `Show the ${name}`
+                  : `Hide the ${name}, leaving the heading`],
+                onClick: () => toggleGroup(name) },
+                h("span", { class: "nav-group__chevron", "aria-hidden": "true", text: isFolded ? "\u25b8" : "\u25be" }),
+                h("span", { text: name }))
           : null;
-        group = scenario.eyebrow;
-        return [heading, !held(scenario) && navItem(scenario, index)].filter(Boolean);
+        group = name;
+        const hidden = held(scenario) || (isFolded && foldsApply());
+        return [heading, !hidden && navItem(scenario, index)].filter(Boolean);
       }),
       // Spread, so a list with matches adds nothing: replaceChildren writes
       // a bare null out as the word "null".
@@ -2097,6 +2138,9 @@
     closePanel();
     state.diagramState = null;
     state.activeId = scenarioId;
+    // Opened from a link or the address bar: its category must show it.
+    const opened = state.scenarios.find((s) => s.id === scenarioId);
+    if (opened && folded.delete(opened.eyebrow)) saveFolds();
     const scenario = state.scenarios.find((s) => s.id === scenarioId);
     renderNav();
     if (scenario) {
@@ -2352,6 +2396,12 @@
           : "This step only explains. Read it, then press Continue"] });
       const back = h("button", { class: "btn btn--ghost btn--sm", type: "button", text: "Back", disabled: stepAt === 0,
         onClick: () => goStep(stepAt - 1) });
+      const home = h("button", { class: "btn btn--ghost btn--sm tour__home", type: "button", disabled: stepAt === 0,
+        "aria-label": "Go to step 1",
+        indicator: ["tour-home", stepAt === 0
+          ? "You are on step 1, the start of the tour"
+          : "Go to step 1, the start of the tour. The scenario is left as it is: press Cleanup first if you want to start it from nothing"],
+        onClick: () => goStep(0) }, h("span", { class: "tour__home-icon", "aria-hidden": "true" }));
       const next = h("button", { class: "btn btn--primary btn--sm tour__next", type: "button", text: last ? "Finish" : "Continue",
         onClick: () => (last ? finishTour() : goStep(stepAt + 1)) });
       tourPane.replaceChildren(
@@ -2368,7 +2418,7 @@
             indicator: ["tour-check", met
               ? "The page shows what this step asked for"
               : "The page does not show what this step asked for yet. You can still press Continue, but the next step will describe something that is not there"] })),
-        h("div", { class: "tour__nav" }, back, next),
+        h("div", { class: "tour__nav" }, h("div", { class: "tour__nav-back" }, home, back), next),
         h("p", { class: "narration__credit", text: "Captions only for now. Voice comes later." }));
     }
 
@@ -2550,6 +2600,14 @@
 
     indicator(el.navSearch, "nav-search",
       "Type part of a pattern's name or category to shorten the list. Enter opens the first match; Escape clears");
+    el.navFold.addEventListener("click", () => {
+      const groups = releasedGroups();
+      const allFolded = groups.every((g) => folded.has(g));
+      folded.clear();
+      if (!allFolded) groups.forEach((g) => folded.add(g));
+      saveFolds();
+      renderNav();
+    });
     el.navSearch.addEventListener("input", () => {
       state.navQuery = el.navSearch.value.trim().toLowerCase();
       renderNav();
@@ -2560,7 +2618,9 @@
         state.navQuery = "";
         renderNav();
       } else if (e.key === "Enter") {
-        const first = state.scenarios.find(navMatches);
+        // Only a pattern the list shows: a held one matches on its
+        // category's name but is not listed, so it is not opened either.
+        const first = state.scenarios.find((s) => !held(s) && navMatches(s));
         if (first) select(first.id);
       }
     });

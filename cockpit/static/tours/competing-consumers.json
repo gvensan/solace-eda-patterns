@@ -1,0 +1,254 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "With competing consumers, several identical workers read one queue, and each message goes to one of them. So adding workers adds capacity.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The confirmation emails",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a shop. Every order needs a confirmation email, and at busy times one worker cannot send them fast enough.",
+        "So the jobs go on one shared queue, and several identical workers take from it. The broker gives each job to one worker. Checkout publishes six orders a second. Two workers start with Play. A third is waiting for you to start it."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "worker1",
+          "worker2",
+          "checkout"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the shared queue, starts Worker 1 and Worker 2, and then Checkout.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "One of the workers",
+      "highlight": [
+        ".dg-node[data-node=\"worker1\"]"
+      ],
+      "do": "Click logs on the Worker 1 node.",
+      "expect": {
+        "note": "The Worker 1 log is not open yet.",
+        "logsOpen": "worker1"
+      },
+      "say": [
+        "Click logs on the Worker 1 node. It sends one email at a time, and each takes a little under half a second. Worker 2 runs the same code and takes different jobs."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Not keeping up",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the number on the queue inside the broker for ten seconds.",
+      "say": [
+        "Watch the number on the queue in the broker. It is climbing. Two workers send about five emails a second between them, and Checkout confirms six orders a second. The backlog grows."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "worker1",
+          "worker2",
+          "checkout"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Add a worker",
+      "highlight": [
+        ".dg-node[data-node=\"worker3\"]"
+      ],
+      "do": "Click the Worker 3 node, and press Start in the panel that opens.",
+      "expect": {
+        "note": "Worker 3 is not running yet.",
+        "running": [
+          "worker3"
+        ]
+      },
+      "say": [
+        "Now add capacity. Click the Worker 3 node, and press Start in the panel that opens.",
+        "Nothing else changes. Worker 3 runs the same code, binds the same queue, and the broker starts sharing the jobs between three."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The backlog turns round",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]",
+        ".dg-node[data-node=\"worker3\"]"
+      ],
+      "do": "Watch the number on the queue again.",
+      "say": [
+        "Watch the number on the queue again. With three workers, emails go out faster than orders come in, and the backlog drains. That is the whole pattern: more workers, more capacity, with no change to the publisher or to the other workers."
+      ],
+      "expect": {
+        "note": "Worker 3 is not running.",
+        "running": [
+          "worker3"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Crash a worker",
+      "highlight": [
+        "#fmt-worker-crashes"
+      ],
+      "do": "Open the card A worker crashes, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "worker-crashes",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called A worker crashes, and press Break it.",
+        "One of the workers is killed while it holds jobs it has taken but not finished."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Its jobs go to the others",
+      "highlight": [
+        ".dg-node[data-node=\"worker1\"]",
+        ".dg-node[data-node=\"worker2\"]",
+        ".dg-node[data-node=\"worker3\"]"
+      ],
+      "do": "Read the other worker's log beside the diagram.",
+      "say": [
+        "The log beside the diagram belongs to another worker. Within a moment it sends the jobs the crashed worker was holding, marked redelivered. There are at most five, the queue's limit for each worker.",
+        "Nothing is lost, and every other job keeps flowing, only more slowly. One caution: a worker that crashed after sending an email and before acknowledging the job leaves that job to be sent again. It is one worker per delivery, not one email per order."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "worker-crashes",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Start it again",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The workers are not all back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "worker-crashes",
+          "state": "broken"
+        },
+        "running": [
+          "worker1",
+          "worker2"
+        ]
+      },
+      "say": [
+        "Press Reset. The crashed worker starts again and takes a share straight away. On a shared queue there is no standby."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Freeze a worker",
+      "highlight": [
+        "#fmt-worker-hangs"
+      ],
+      "do": "Open the card A worker hangs, and the others carry on, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "worker-hangs",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now a worker that hangs. Open the card called A worker hangs, and the others carry on, and press Break it.",
+        "One worker freezes. It stays connected, but stops sending emails and stops acknowledging."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Only its own jobs are stuck",
+      "highlight": [
+        ".dg-node[data-node=\"worker1\"]",
+        ".dg-node[data-node=\"worker2\"]",
+        ".dg-node[data-node=\"worker3\"]"
+      ],
+      "do": "Read the other worker's log beside the diagram, and look at the worker nodes.",
+      "say": [
+        "The other workers keep sending. Only the frozen worker's own jobs are stuck: the five it took before it froze. In the diagram it reads: active, not acking, and it gets no more jobs.",
+        "Compare the Exclusive Consumer pattern, where a hung consumer stops everything. Here the broker passes over a worker that is full, and gives the next job to one with room."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "worker-hangs",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Stop the frozen worker",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The workers are not all back yet. Reset takes a few seconds here.",
+        "cardNot": {
+          "id": "worker-hangs",
+          "state": "broken"
+        },
+        "running": [
+          "worker1",
+          "worker2"
+        ]
+      },
+      "say": [
+        "Press Reset. The frozen worker is stopped, as a health check would do, and after five seconds it is killed. Its five jobs go to another worker, marked redelivered, and it is started again."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is competing consumers. Use it when work items are independent and the load varies.",
+        "The cost is that there is no order across workers, and a crashed worker's unacknowledged jobs go to the others, so a job can be done twice.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

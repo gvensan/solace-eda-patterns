@@ -113,10 +113,12 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-ht-teams
   flows:
     - { from: stores, to: broker, label: ht/retail/<region>/<store>/<dept>/sale/v1/<sale>, delay: 0 }
-    - { from: broker, to: electronics, label: ".../*/*/electronics/sale/v1/>", delay: 0.8 }
-    - { from: broker, to: eu, label: ".../eu/>", delay: 0.9 }
-    - { from: broker, to: audit, label: "ht/retail/>", delay: 1.0 }
-    - { from: broker, to: eusales, label: ".../eu/*/sale/v1/>", delay: 1.1 }
+    # Each moves only while the broker is sending that team sales, so a
+    # subscription that matches nothing shows no dots.
+    - { from: broker, to: electronics, label: ".../*/*/electronics/sale/v1/>", delivered: ht-electronics, delay: 0.8 }
+    - { from: broker, to: eu, label: ".../eu/>", delivered: ht-eu, delay: 0.9 }
+    - { from: broker, to: audit, label: "ht/retail/>", delivered: ht-audit, delay: 1.0 }
+    - { from: broker, to: eusales, label: ".../eu/*/sale/v1/>", delivered: ht-eu-sales, delay: 1.1 }
 
 actions:
   - id: apply

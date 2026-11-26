@@ -15,7 +15,7 @@ resource "solacebroker_msg_vpn_client_profile" "p2p" {
 
   # A guaranteed message that no queue takes is normally dropped without a
   # word. With this on, the broker tells the sender instead, which is what a
-  # sender addressing one named queue wants to hear if the name is wrong.
+  # sender wants to hear if its topic is wrong, or the queue was never set up.
   reject_msg_to_sender_on_no_subscription_match_enabled = true
 
   max_connection_count_per_client_username = 10

@@ -12,7 +12,7 @@ summary: >
   in space and in time, and the cards show both.
 
 objectives:
-  - See a burst of 1,500 requests stored in seconds and booked over the next minute, with the on-sale page never slowed
+  - See a burst of 1,500 requests stored in seconds and booked over the next minute, without the on-sale page being slowed
   - See how far behind the workers fall and how long a request waits
   - See a burst bigger than the queue refused to the publisher, and what that costs
   - See requests go stale while they wait, and where they end up
@@ -217,6 +217,17 @@ actions:
       Takes every request left on q.sa.purchases without booking it, until
       the queue is empty, then exits.
 
+  - id: clear-dmq
+    label: Delete the expired requests on q.sa.purchases.dmq
+    kind: process
+    cmd: [bash, ./clear-dmq.sh]
+    cwd: .
+    variant: secondary
+    failure_only: true
+    description: >
+      Deletes every expired request on q.sa.purchases.dmq, the dead message
+      queue.
+
   - id: reconcile
     label: Reconcile with broker
     kind: process
@@ -301,7 +312,8 @@ failure_modes:
       each of those to q.sa.purchases.dmq: dots hop across in the diagram,
       labelled "expired", and the DMQ's count climbs. The workers book the
       ones that were still valid, each saying how long it waited. Reset
-      clears whatever is left on both queues.
+      clears whatever is left on q.sa.purchases and deletes the expired
+      requests on q.sa.purchases.dmq, so both counts go back to 0.
     why: >
       Absorbing a burst costs time: a request that waits is a request
       handled late. A time to live on the message says how late is too
@@ -328,6 +340,7 @@ failure_modes:
       - run: held-burst
     reset:
       - run: drain
+      - run: clear-dmq
     expect:
       break:
         within: 60
@@ -341,6 +354,8 @@ failure_modes:
         logs:
           - log: drain
             has: ["cleared \\d+ request\\(s\\)"]
+          - log: clear-dmq
+            has: ["OK: q.sa.purchases.dmq is empty"]
 
 inspect:
   - label: Queues

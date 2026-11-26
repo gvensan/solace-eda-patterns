@@ -1,0 +1,224 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Guaranteed delivery is two promises kept together. The broker confirms a message to its publisher once it has stored it, and deletes it only when the consumer acknowledges it. So nothing the broker accepted is lost on the way.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The loyalty programme",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a loyalty programme. Every purchase at the Tills earns points, and the Points Service awards them. Losing an award cheats a customer. Awarding it twice costs the business.",
+        "The Tills publish each purchase as a guaranteed message. The broker confirms it once it is stored on the queue. The Points Service awards the points, and only then acknowledges the purchase. It also remembers what it has awarded."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "points",
+          "tills"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queue, starts the Points Service, and then the Tills, which publish a purchase every half second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The first promise",
+      "highlight": [
+        ".dg-node[data-node=\"tills\"]"
+      ],
+      "do": "Click logs on the Tills node.",
+      "expect": {
+        "note": "The Tills log is not open yet.",
+        "logsOpen": "tills"
+      },
+      "say": [
+        "Click logs on the Tills node. Each line is one purchase confirmed by the broker. Until that confirmation arrives, the purchase is still the Tills' to keep and send again."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The second promise",
+      "highlight": [
+        ".dg-node[data-node=\"points\"]"
+      ],
+      "do": "Click logs on the Points Service node.",
+      "expect": {
+        "note": "The Points Service log is not open yet.",
+        "logsOpen": "points"
+      },
+      "say": [
+        "Now click logs on the Points Service node. For each purchase it writes the award to its record on disk, and then acknowledges the purchase. Only after that does the broker delete it."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The queue in between",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Look at the queue box inside the broker.",
+      "say": [
+        "Look at the queue in the broker. Each purchase waits there from the moment the broker confirms it until the Points Service acknowledges it. While the service keeps up, the number stays near zero."
+      ],
+      "expect": {
+        "note": "The apps are not both running. Press Play first.",
+        "running": [
+          "points",
+          "tills"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Stop at the worst moment",
+      "highlight": [
+        "#fmt-stop-before-ack"
+      ],
+      "do": "Open the card The points service stops after awarding, before acknowledging, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "stop-before-ack",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The points service stops after awarding, before acknowledging, and press Break it.",
+        "The Points Service is asked to stop itself right after its next award, before it acknowledges that purchase. That is the one moment that matters: between doing the work and saying it is done."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Done, but not acknowledged",
+      "highlight": [
+        ".dg-node[data-node=\"points\"]",
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Read the Points Service log beside the diagram.",
+      "say": [
+        "The Points Service writes one more award, says that the purchase is awarded but not acknowledged, and exits.",
+        "The broker still holds that purchase, because it was never acknowledged. As far as the broker knows, the work may not have been done."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "stop-before-ack",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Delivered again, awarded once",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The points service is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "stop-before-ack",
+          "state": "broken"
+        },
+        "running": [
+          "points"
+        ]
+      },
+      "say": [
+        "Press Reset. The service starts, and the broker delivers that purchase again, marked redelivered. The service finds it on its record, and says: already awarded, skipped.",
+        "Delivery is at least once. Redelivered only says the message was sent before, not that the work was done. So the consumer has to check, here by the purchase id."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The broker says no",
+      "highlight": [
+        "#fmt-broker-refuses"
+      ],
+      "do": "Open the card The queue stops taking purchases for a while, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "broker-refuses",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the publisher's side. Open the card called The queue stops taking purchases for a while, and press Break it.",
+        "The queue is told to take no new messages. Nothing is restarted."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Still the publisher's job",
+      "highlight": [
+        ".dg-node[data-node=\"tills\"]"
+      ],
+      "do": "Read the Tills log beside the diagram.",
+      "say": [
+        "Within a second the Tills' log shows the broker refusing a purchase. The Tills keep it for retry. New purchases wait in an outbox behind it, and the oldest is tried again every second.",
+        "A guaranteed message is the broker's responsibility only once the broker has confirmed it. Here the outbox is in memory, so it survives a refusal but not a till crash. A real till would keep it on disk."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "broker-refuses",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Send them again, in order",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "broker-refuses",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. The queue takes messages again. The Tills resend each purchase in order, and then say the outbox is empty. The Points Service awards every one."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is guaranteed delivery. Use it when losing an event costs money or trust: orders, payments, loyalty points.",
+        "The cost is that delivery is at least once. A consumer that stops before it acknowledges gets the message again, so it must recognise repeats.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

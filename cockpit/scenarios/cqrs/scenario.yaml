@@ -84,6 +84,8 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-checkout
     - id: account
       label: Account Page
+      # Asks by its own clock; the answers flow back to it.
+      initiates: true
       sublabel: asks every 2 s
       kind: app
       col: 0
@@ -150,7 +152,7 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-cqrs-view
   flows:
     - { id: place-order, from: checkout, to: broker, via: commands, label: place order, delay: 0 }
-    - { id: to-orders, from: broker, to: orders, via: commands, delay: 0.5 }
+    - { id: to-orders, from: broker, to: orders, via: commands, source: checkout, delay: 0.5 }
     - { id: order-placed, from: orders, to: broker, via: events, label: order placed, delay: 1.0 }
     - { id: to-summary, from: broker, to: summary, via: events, source: orders, delay: 1.5 }
     - { id: query, from: account, to: broker, label: query, delay: 0.2 }

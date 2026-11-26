@@ -1,0 +1,232 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "With an exclusive consumer, only one consumer receives a queue's messages at a time, in order. Others wait as standbys, and take over when it goes.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The ledger",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a ledger. It has to apply payment postings one at a time, in the order they were made. Two copies run, so that one can take over if the other fails. But they must never work at the same time.",
+        "An exclusive queue gives both. The Payments Service publishes postings onto one queue. Both ledgers are bound to it, but the broker delivers to only one of them. The other waits, connected and ready."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "ledgerA",
+          "ledgerB",
+          "payments"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queue, starts Ledger A and then Ledger B, and last the Payments Service, which publishes two postings a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The active ledger",
+      "highlight": [
+        ".dg-node[data-node=\"ledgerA\"]"
+      ],
+      "do": "Click logs on the Ledger A node.",
+      "expect": {
+        "note": "The Ledger A log is not open yet.",
+        "logsOpen": "ledgerA"
+      },
+      "say": [
+        "Click logs on the Ledger A node. The ledger that binds to the queue first is made active, and straight after Play that is Ledger A. It says so, and then applies each posting, checking that every sequence number follows the last."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The standby",
+      "highlight": [
+        ".dg-node[data-node=\"ledgerB\"]"
+      ],
+      "do": "Click logs on the Ledger B node.",
+      "expect": {
+        "note": "The Ledger B log is not open yet.",
+        "logsOpen": "ledgerB"
+      },
+      "say": [
+        "Now click logs on the Ledger B node. It bound second, so it says it is the standby, and then stays quiet. It is bound to the same queue and receives nothing."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Roles the broker decides",
+      "highlight": [
+        ".dg-node[data-node=\"ledgerA\"]",
+        ".dg-node[data-node=\"ledgerB\"]"
+      ],
+      "do": "Look at the two ledger nodes in the diagram.",
+      "say": [
+        "Look at the two ledgers in the diagram. One is marked as the active consumer. That label comes from the broker, not from the app. From here on, the cards speak of the active ledger and the standby, whichever instance holds each role."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "ledgerA",
+          "ledgerB",
+          "payments"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Crash the active ledger",
+      "highlight": [
+        "#fmt-active-crashes"
+      ],
+      "do": "Open the card The active ledger crashes, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "active-crashes",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The active ledger crashes, and press Break it.",
+        "The active ledger is killed while it is applying postings, with no chance to finish what it holds."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The standby takes over",
+      "highlight": [
+        ".dg-node[data-node=\"ledgerA\"]",
+        ".dg-node[data-node=\"ledgerB\"]"
+      ],
+      "do": "Read the standby's log beside the diagram.",
+      "say": [
+        "The log beside the diagram is the standby's. Within a moment it says it is active. It starts at the oldest posting the broker had no acknowledgement for, and the first few are marked redelivered.",
+        "Nothing is skipped. But a posting the crashed ledger had already applied can come again. That repeat is the duplicate a real ledger must recognise, and a real ledger also keeps its state where the standby can reach it."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "active-crashes",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "A new standby",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "Both ledgers are not running yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "active-crashes",
+          "state": "broken"
+        },
+        "running": [
+          "ledgerA",
+          "ledgerB"
+        ]
+      },
+      "say": [
+        "Press Reset. The crashed ledger starts again, and joins as the new standby. The broker does not hand the queue back."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Freeze the active ledger",
+      "highlight": [
+        "#fmt-active-stalls"
+      ],
+      "do": "Open the card The active ledger hangs, so nothing is consumed, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "active-stalls",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "A crash is the easy case. Open the card called The active ledger hangs, so nothing is consumed, and press Break it.",
+        "The active ledger freezes. It stops processing, but its connection stays open, as happens to a process stuck on a lock."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Connected is not the same as healthy",
+      "highlight": [
+        ".dg-node[data-node=\"ledgerA\"]",
+        ".dg-node[data-node=\"ledgerB\"]"
+      ],
+      "do": "Read the standby's log beside the diagram, and look at the two ledger nodes.",
+      "say": [
+        "Nobody is consuming now. The standby still says standby, and stays quiet. After a few seconds the frozen ledger's node reads: active, not acking.",
+        "The broker only knows whether a consumer is connected, not whether its code is healthy. The frozen ledger is still connected, so it stays the one active consumer, and the backlog grows behind it."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "active-stalls",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "What a health check does",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "Both ledgers are not running yet. Reset takes a few seconds here.",
+        "cardNot": {
+          "id": "active-stalls",
+          "state": "broken"
+        },
+        "running": [
+          "ledgerA",
+          "ledgerB"
+        ]
+      },
+      "say": [
+        "Press Reset. It stops the frozen ledger, as a health check would. The frozen ledger ignores a polite stop, so after five seconds it is killed. Only then does the standby turn active and work through the backlog."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is the exclusive consumer. Use it when order matters and the work must not run twice in parallel, but you still want failover.",
+        "The cost is one consumer's throughput. And a consumer that hangs without disconnecting keeps the queue to itself, so something outside has to notice and stop it.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

@@ -1,17 +1,17 @@
 # Point-to-Point
 
 The shop's order service needs a shipping label printed for every order. It
-does not broadcast "an order needs a label" for whoever is interested. It
-sends a print job to one place, the label printer's queue, and only the
-printer gets it.
+does not broadcast "an order needs a label" for whoever is interested. Each
+print job goes to one place, the label printer's queue, and only the printer
+gets it.
 
-That is point-to-point: **the sender names one destination, and one
-receiver takes each message from it.** If the receiver is away, the queue
-keeps the message until it comes back.
+That is point-to-point: **each message goes to one destination, and one
+receiver takes it from there.** If the receiver is away, the queue keeps the
+message until it comes back.
 
-Press **Play**. It creates the queue `q.p2p.labels`, starts the **Label
-Printer**, then the **Order Service**, which sends a 25 KB label job every
-half second.
+Press **Play**. It creates the queue `q.p2p.labels` and subscribes it to one
+topic, starts the **Label Printer**, then the **Order Service**, which
+publishes a 25 KB label job to that topic every half second.
 
 To be walked through this page step by step, press **Guided tour** in the
 top bar: it tells you what to do, waits while you do it, and explains what
@@ -23,8 +23,9 @@ If a mark on the page is unclear, point at it, or see
 ## How it differs from its neighbours
 
 - **Publish-Subscribe**: the sender publishes to a topic and every
-  subscriber gets a copy. Here the sender names one queue and nobody else
-  sees the job.
+  subscriber gets a copy. Here the sender also publishes to a topic, but
+  the broker is set up so that one queue takes it and one receiver reads
+  that queue. Nobody else sees the job.
 - **Competing Consumers**: several readers share one queue to go faster.
   Here there is one reader.
 - **Exclusive Consumer**: still one reader at a time, but with a standby
@@ -35,15 +36,20 @@ If a mark on the page is unclear, point at it, or see
 The Order Service's log shows each job and the broker accepting it. The Label
 Printer's log shows the same job numbers, in order.
 
-The sender addresses the queue itself. Its topic is the queue's network
-topic, `#P2P/QUE/q.p2p.labels`, which delivers to that queue and nothing
-else. In Solace Broker Manager, open **Queues**, then q.p2p.labels: its
-**Subscriptions** tab is empty. The queue has no topic subscriptions at all,
-yet it receives every job.
+The sender does not know the queue. It publishes to the topic
+`p2p/label/requested`, and the queue subscribes to that topic. In
+Solace Broker Manager, open **Queues**, then q.p2p.labels: its
+**Subscriptions** tab lists that one topic. **What the queue subscribes to**,
+under On the broker, shows the same.
 
-Many systems do point-to-point with an ordinary topic that exactly one
-queue subscribes to. That works too; addressing the queue by name just makes
-the "one destination" explicit.
+This is the form Solace recommends, because the sender is tied to a topic
+and not to a queue. The queue can be renamed, or a second queue added for
+another kind of consumer, without touching the sender.
+
+You can also send to a queue by its name. Every queue has a network topic,
+`#P2P/QUE/<queue>`, which delivers to that queue and nothing else, with no
+subscription needed. That works, but the sender is then tied to that one
+queue. Try this, below, shows it.
 
 ## On the broker
 
@@ -51,6 +57,8 @@ the "one destination" explicit.
   it keeps up, against its 1 MB limit (`maxMsgSpoolUsage`).
   `maxMsgSpoolUsageExceededDiscardedMsgCount` counts jobs refused because
   the queue was full.
+- **What the queue subscribes to**: the one topic that brings jobs to the
+  queue.
 - **Reader of q.p2p.labels**: the printer's connection to the queue, and the
   jobs it has acknowledged.
 - **Client profile**: `rejectMsgToSenderOnNoSubscriptionMatchEnabled` is the
@@ -71,13 +79,19 @@ explains the cause and where you would meet it in production.
    jobs back to the sender with `Spool Over Quota`. Reset starts the printer:
    it prints every job that waited, in order, then reports a `GAP` for the
    refused ones, which were never stored.
-2. **The sender names the wrong queue.** The Order Service restarts with the
-   queue name misspelt. Every job is refused with `No Subscription Match`:
-   there is no such queue. Without the client profile setting that makes the
-   broker say so, those jobs would vanish silently.
+2. **The sender gets the topic wrong.** The Order Service restarts with its
+   topic misspelt. Every job is refused with `No Subscription Match`: no
+   queue subscribes to that topic. Without the client profile setting that
+   makes the broker say so, those jobs would vanish silently.
 
 ## Try this
 
+- Send to the queue by name. Stop the **Order Service** node, then in a
+  terminal at the repository's root run
+  `bash cockpit/apps/run.sh p2p send --queue q.p2p.labels`. The Label
+  Printer's log shows the jobs arriving: they reach the same queue without
+  using its subscription. Stop it with Ctrl+C, then start the Order Service
+  again. A sender like this only works with a queue of exactly that name.
 - Stop the printer for ten seconds only, then start it again. Nothing is
   refused and nothing is missing: the queue absorbed the outage.
 - Under **On the broker**, watch `maxMsgSpoolUsageExceededDiscardedMsgCount`
@@ -92,8 +106,16 @@ explains the cause and where you would meet it in production.
   acknowledges it. The sender's publish is confirmed once the broker has
   stored the job, so the sender knows it is safe without knowing whether the
   printer is there.
-- The sender can address the queue by name, with its network topic
-  `#P2P/QUE/<queue>`, or publish to a topic the queue subscribes to.
+- The recommended form is a topic that one queue subscribes to: the sender
+  publishes to the topic and never names the queue. A sender can also
+  address a queue by name, with its network topic `#P2P/QUE/<queue>`.
+  Solace's own wording: "it's best to map a topic to a queue for more
+  flexibility"
+  ([Creating Your First Queue](https://docs.solace.com/Cloud/ggs_queue.htm)).
+- Nothing in the message makes it point-to-point. It is point-to-point
+  because one queue subscribes to the topic and one receiver reads the
+  queue. A second queue subscribed to the same topic would get a copy of
+  every job.
 - Delivery is at least once. If the printer crashed after printing a job but
   before acknowledging it, the broker would send that job again, so a real
   receiver must tolerate a repeat (here, it would print twice).

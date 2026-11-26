@@ -198,6 +198,200 @@
    }
   ]
  },
+ "competing-consumers": {
+  "src": "/static/audio/competing-consumers.mp3",
+  "duration": 93.7,
+  "key": "1e90dbe8ca99471a532318bd",
+  "sentences": [
+   {
+    "start": 0.0,
+    "end": 7.43,
+    "text": "Competing consumers is a pattern in which several identical workers read from one queue, and each message is given to exactly one of them."
+   },
+   {
+    "start": 8.13,
+    "end": 15.88,
+    "text": "The workers compete for the messages, so adding a worker adds capacity, and losing one only slows things down."
+   },
+   {
+    "start": 16.7,
+    "end": 19.82,
+    "text": "It fits work that comes in independent pieces."
+   },
+   {
+    "start": 20.2,
+    "end": 26.77,
+    "text": "An online shop is a good example: every order needs a confirmation email, and no email depends on any other."
+   },
+   {
+    "start": 27.47,
+    "end": 34.44,
+    "text": "At busy times one worker cannot send them fast enough, and a second copy that received every order would send every email twice."
+   },
+   {
+    "start": 34.68,
+    "end": 37.27,
+    "text": "Here, checkout publishes one job for each order."
+   },
+   {
+    "start": 37.55,
+    "end": 43.57,
+    "text": "The jobs all land on one shared queue, and the broker hands each job to one of the workers bound to it."
+   },
+   {
+    "start": 44.01,
+    "end": 45.8,
+    "text": "Every worker runs the same code."
+   },
+   {
+    "start": 46.05,
+    "end": 51.69,
+    "text": "Two workers start with Play, and between them they cannot quite keep up, so the backlog grows."
+   },
+   {
+    "start": 52.2,
+    "end": 55.0,
+    "text": "Start a third, and the backlog drains."
+   },
+   {
+    "start": 55.69,
+    "end": 57.09,
+    "text": "Nothing else has to change."
+   },
+   {
+    "start": 57.24,
+    "end": 58.24,
+    "text": "The price is order."
+   },
+   {
+    "start": 58.84,
+    "end": 62.51,
+    "text": "Jobs are handled in parallel, so nothing says which is finished first."
+   },
+   {
+    "start": 62.68,
+    "end": 72.86,
+    "text": "And delivery is at least once: a worker that crashes after sending an email, but before acknowledging the job, leaves that job to be done again by another worker."
+   },
+   {
+    "start": 73.38,
+    "end": 77.0,
+    "text": "The Break it cards show what the queue does when a worker fails."
+   },
+   {
+    "start": 77.44,
+    "end": 81.18,
+    "text": "Crash a worker, and watch its unfinished jobs go to the others."
+   },
+   {
+    "start": 81.78,
+    "end": 88.94,
+    "text": "Then make a worker hang without disconnecting, and see that only the few jobs it holds are stuck, while the others carry on."
+   },
+   {
+    "start": 89.45,
+    "end": 93.39,
+    "text": "Press Play, watch the queue grow, and then start the third worker."
+   }
+  ]
+ },
+ "consumer-groups": {
+  "src": "/static/audio/consumer-groups.mp3",
+  "duration": 88.7,
+  "key": "36fa15382e801f44fa905ba6",
+  "sentences": [
+   {
+    "start": 0.0,
+    "end": 6.99,
+    "text": "Consumer groups let several applications each receive every event, while the instances of each application share the work between them."
+   },
+   {
+    "start": 7.43,
+    "end": 12.82,
+    "text": "Each group gets its own copy of the stream, and inside a group each event goes to one member."
+   },
+   {
+    "start": 13.42,
+    "end": 16.0,
+    "text": "A product catalogue shows why both halves matter."
+   },
+   {
+    "start": 16.81,
+    "end": 19.03,
+    "text": "Every price change is needed by two teams."
+   },
+   {
+    "start": 19.35,
+    "end": 21.42,
+    "text": "Search must update the search index."
+   },
+   {
+    "start": 21.93,
+    "end": 25.15,
+    "text": "Alerts must email the customers who are watching that product."
+   },
+   {
+    "start": 25.75,
+    "end": 31.39,
+    "text": "Each team needs every price change, and each team runs more than one instance to keep up."
+   },
+   {
+    "start": 32.09,
+    "end": 34.37,
+    "text": "Solace has no consumer group object."
+   },
+   {
+    "start": 34.81,
+    "end": 38.89,
+    "text": "Here, each group is its own queue, subscribed to the same topic."
+   },
+   {
+    "start": 39.33,
+    "end": 44.63,
+    "text": "The catalogue publishes each price change once, and the broker stores a copy on each queue."
+   },
+   {
+    "start": 45.23,
+    "end": 48.16,
+    "text": "The members of a group bind to their group's queue and share it."
+   },
+   {
+    "start": 48.48,
+    "end": 56.4,
+    "text": "Each queue has two partitions, so a group of two splits the products between its members, and one product's changes stay in order."
+   },
+   {
+    "start": 57.01,
+    "end": 59.81,
+    "text": "The price is a queue for every group to size and look after."
+   },
+   {
+    "start": 60.42,
+    "end": 67.67,
+    "text": "And a group can only use as many members as its queue has partitions: one more than that binds without error, and then has nothing to do."
+   },
+   {
+    "start": 68.19,
+    "end": 70.61,
+    "text": "The Break it cards show both points."
+   },
+   {
+    "start": 71.12,
+    "end": 79.25,
+    "text": "Take the whole alerts group offline, and watch search carry on while the alerts queue holds what alerts will need, so alerts is late, not wrong."
+   },
+   {
+    "start": 79.76,
+    "end": 83.86,
+    "text": "Then add a third alerts member to a queue with two partitions, and see it stand by."
+   },
+   {
+    "start": 84.37,
+    "end": 88.38,
+    "text": "Press Play, and compare what the search members and the alerts member receive."
+   }
+  ]
+ },
  "cqrs": {
   "src": "/static/audio/cqrs.mp3",
   "duration": 129.3,
@@ -954,94 +1148,211 @@
    }
   ]
  },
- "point-to-point": {
-  "src": "/static/audio/point-to-point.mp3",
-  "duration": 91.1,
-  "key": "4738f05e0705f2e4002e1010",
+ "partitioning": {
+  "src": "/static/audio/partitioning.mp3",
+  "duration": 94.5,
+  "key": "e057f85ee725835717e4d01f",
   "sentences": [
    {
     "start": 0.0,
-    "end": 7.91,
-    "text": "Point-to-point messaging sends each message to one named destination, usually a queue, and each message is taken by exactly one receiver."
+    "end": 3.2,
+    "text": "Partitioning splits a stream of messages by a key."
    },
    {
-    "start": 8.51,
-    "end": 13.26,
-    "text": "The sender knows where its message goes, and the queue holds it until the receiver is ready."
+    "start": 3.45,
+    "end": 10.45,
+    "text": "Messages with the same key always go to the same partition, and each partition is read by one consumer at a time."
    },
    {
-    "start": 13.86,
-    "end": 16.59,
+    "start": 11.15,
+    "end": 15.77,
+    "text": "So everything about one key is handled in order, while different keys are handled in parallel."
+   },
+   {
+    "start": 16.37,
+    "end": 18.12,
+    "text": "Order fulfilment shows the need."
+   },
+   {
+    "start": 18.73,
+    "end": 28.79,
+    "text": "Each order moves through created, paid, packed, shipped and delivered, and those steps must be handled in that order: packing an order that has not been paid for is a real mistake."
+   },
+   {
+    "start": 29.75,
+    "end": 33.75,
+    "text": "But many orders are in flight at once, and one consumer is too slow."
+   },
+   {
+    "start": 34.03,
+    "end": 40.43,
+    "text": "Share the work without a key, and one order's steps would reach different consumers, in no particular order."
+   },
+   {
+    "start": 41.38,
+    "end": 46.21,
+    "text": "Here, the order service publishes each update with the order id as its partition key."
+   },
+   {
+    "start": 46.49,
+    "end": 49.47,
+    "text": "The queue has six partitions, drawn as lanes in the diagram."
+   },
+   {
+    "start": 49.8,
+    "end": 54.68,
+    "text": "The key picks the lane, and the broker gives each lane to one of three consumers, two each."
+   },
+   {
+    "start": 55.01,
+    "end": 58.76,
+    "text": "Several orders share a lane, and one order always stays in the same one."
+   },
+   {
+    "start": 59.36,
+    "end": 60.96,
+    "text": "The price comes in three parts."
+   },
+   {
+    "start": 60.99,
+    "end": 63.3,
+    "text": "A very busy key loads a single consumer."
+   },
+   {
+    "start": 63.54,
+    "end": 67.72,
+    "text": "Partitions move when consumers join or leave, so the owner of an order can change."
+   },
+   {
+    "start": 67.74,
+    "end": 71.27,
+    "text": "And a consumer beyond the number of partitions has nothing to do."
+   },
+   {
+    "start": 71.97,
+    "end": 76.94,
+    "text": "The Break it cards show the moves, and the one mistake that undoes the pattern."
+   },
+   {
+    "start": 77.45,
+    "end": 80.43,
+    "text": "Crash a consumer, and watch its lanes pass to the others."
+   },
+   {
+    "start": 81.04,
+    "end": 84.3,
+    "text": "Add a fourth consumer, and see one lane move to it."
+   },
+   {
+    "start": 85.0,
+    "end": 89.97,
+    "text": "Then publish without the key, and watch one order's updates scatter across consumers."
+   },
+   {
+    "start": 90.66,
+    "end": 94.23,
+    "text": "Press Play, pick one order's letter, and follow it down its lane."
+   }
+  ]
+ },
+ "point-to-point": {
+  "src": "/static/audio/point-to-point.mp3",
+  "duration": 116.7,
+  "key": "d291d62445ba1d7a026b2ca0",
+  "sentences": [
+   {
+    "start": 0.0,
+    "end": 7.73,
+    "text": "Point-to-point messaging sends each message to one destination, usually a queue, and each message is taken by exactly one receiver."
+   },
+   {
+    "start": 8.12,
+    "end": 10.73,
+    "text": "The queue holds the message until the receiver is ready."
+   },
+   {
+    "start": 11.54,
+    "end": 21.15,
+    "text": "On Solace, the recommended form is a topic mapped to a queue: the sender publishes to a topic, one queue subscribes to it, and the sender never names the queue."
+   },
+   {
+    "start": 21.85,
+    "end": 24.94,
     "text": "It fits work that belongs to one known service."
    },
    {
-    "start": 17.29,
-    "end": 24.82,
+    "start": 25.54,
+    "end": 33.15,
     "text": "Printing a shipping label is a good example: the order service needs a label printed for every order, by the label printer."
    },
    {
-    "start": 25.26,
-    "end": 28.49,
+    "start": 33.47,
+    "end": 36.9,
     "text": "Broadcast the request, and every listener might print one."
    },
    {
-    "start": 29.09,
-    "end": 35.49,
+    "start": 37.59,
+    "end": 44.98,
     "text": "Call the printer directly, and a printer that is offline means lost jobs, or an order service stuck waiting and retrying."
    },
    {
-    "start": 35.93,
-    "end": 40.17,
-    "text": "Here, the order service sends each label job to the printer's queue, by name."
+    "start": 45.58,
+    "end": 49.21,
+    "text": "Here, the order service publishes each label job to a topic."
    },
    {
-    "start": 40.98,
-    "end": 43.29,
-    "text": "The label printer is the queue's one reader."
+    "start": 49.82,
+    "end": 54.47,
+    "text": "One queue subscribes to that topic, and the label printer is the queue's one reader."
    },
    {
-    "start": 43.9,
-    "end": 52.07,
+    "start": 54.86,
+    "end": 59.85,
+    "text": "A sender can also address a queue directly by its name, but then it is tied to that one queue."
+   },
+   {
+    "start": 60.23,
+    "end": 69.15,
     "text": "The broker keeps each job on the queue until the printer has taken it and acknowledged it, so no job is lost just because the printer was busy, or away."
    },
    {
-    "start": 52.77,
-    "end": 58.85,
+    "start": 69.84,
+    "end": 76.96,
     "text": "If the printer crashed before acknowledging a job, the broker would send it again, so a job may occasionally arrive twice."
    },
    {
-    "start": 59.29,
-    "end": 61.02,
-    "text": "The price is coupling by name."
+    "start": 77.47,
+    "end": 80.22,
+    "text": "The price is a queue for each kind of consumer."
    },
    {
-    "start": 61.35,
-    "end": 67.93,
-    "text": "The sender must know the queue, and if another kind of consumer needs the same jobs, it needs a destination of its own."
+    "start": 80.55,
+    "end": 89.88,
+    "text": "And one receiver is kept by how the broker is set up, not by the sender: a second queue on the same topic would get a copy of every job."
    },
    {
-    "start": 68.53,
-    "end": 70.39,
+    "start": 90.49,
+    "end": 92.73,
     "text": "The Break it cards show both sides."
    },
    {
-    "start": 70.56,
-    "end": 76.29,
+    "start": 93.33,
+    "end": 99.47,
     "text": "Take the printer offline, and watch the queue hold the jobs, until it fills and the broker starts refusing new ones."
    },
    {
-    "start": 76.53,
-    "end": 78.48,
-    "text": "Then misspell the queue's name in the sender."
+    "start": 100.08,
+    "end": 104.45,
+    "text": "Then misspell the topic in the sender, so that no queue takes its jobs."
    },
    {
-    "start": 79.3,
-    "end": 86.55,
+    "start": 104.7,
+    "end": 111.95,
     "text": "Such a message is normally dropped without a word; this broker is set to refuse it back to the sender, so you can see every job bounce."
    },
    {
-    "start": 87.16,
-    "end": 90.79,
+    "start": 112.47,
+    "end": 116.38,
     "text": "Press Play, and watch the jobs pass through the queue to the printer."
    }
   ]
@@ -1237,6 +1548,103 @@
     "start": 85.1,
     "end": 88.75,
     "text": "Press Play, and compare the till's log with the pricing service's."
+   }
+  ]
+ },
+ "shock-absorber": {
+  "src": "/static/audio/shock-absorber.mp3",
+  "duration": 86.6,
+  "key": "f1ba6d18d3d653c80c77b155",
+  "sentences": [
+   {
+    "start": 0.0,
+    "end": 6.93,
+    "text": "A shock absorber is a queue placed between producers that send in bursts and consumers that work at a steady pace."
+   },
+   {
+    "start": 7.44,
+    "end": 12.7,
+    "text": "The queue takes the burst as fast as it arrives, and the consumers drain it at their own speed."
+   },
+   {
+    "start": 13.4,
+    "end": 15.76,
+    "text": "Concert ticket sales are a good example."
+   },
+   {
+    "start": 16.45,
+    "end": 19.05,
+    "text": "For most of the day, purchase requests trickle in."
+   },
+   {
+    "start": 19.23,
+    "end": 23.04,
+    "text": "When tickets go on sale, fifteen hundred arrive in a couple of seconds."
+   },
+   {
+    "start": 23.42,
+    "end": 27.1,
+    "text": "The booking workers, which reserve seats, can each handle about twenty a second."
+   },
+   {
+    "start": 27.7,
+    "end": 30.27,
+    "text": "Send the burst straight at them, and they are overwhelmed."
+   },
+   {
+    "start": 30.59,
+    "end": 33.75,
+    "text": "Size them for the burst, and they sit idle the rest of the day."
+   },
+   {
+    "start": 34.35,
+    "end": 40.3,
+    "text": "Here, the on-sale page publishes each purchase request to a queue, and the broker stores the burst in seconds."
+   },
+   {
+    "start": 40.81,
+    "end": 44.8,
+    "text": "Two booking workers share the queue and work through it at forty a second between them."
+   },
+   {
+    "start": 45.24,
+    "end": 50.57,
+    "text": "While the burst fits in the queue, the page is not slowed down, and the workers never see more than they can handle."
+   },
+   {
+    "start": 51.39,
+    "end": 54.46,
+    "text": "The price is that work waits, and a queue has limits."
+   },
+   {
+    "start": 55.16,
+    "end": 59.99,
+    "text": "It has a size: a burst bigger than the queue is refused, and the publisher is told."
+   },
+   {
+    "start": 60.5,
+    "end": 65.47,
+    "text": "And waiting costs time: a request that waits too long may no longer be worth handling."
+   },
+   {
+    "start": 65.85,
+    "end": 67.92,
+    "text": "The Break it cards show both limits."
+   },
+   {
+    "start": 68.16,
+    "end": 73.04,
+    "text": "Release four times the usual burst, and watch the broker refuse what does not fit."
+   },
+   {
+    "start": 73.73,
+    "end": 81.36,
+    "text": "Then give each request a seat hold of twenty seconds, and see the ones at the back expire while they wait, and move to a dead message queue."
+   },
+   {
+    "start": 82.18,
+    "end": 86.29,
+    "text": "Press Play, wait for the first burst, and watch the queue fill and drain."
    }
   ]
  }

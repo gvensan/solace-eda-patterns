@@ -6,8 +6,11 @@ packing an order that has not been paid for is a real mistake. Many orders
 are in flight at once, so one consumer is too slow and three share the work.
 
 That is partitioning: **messages with the same key always go to the same
-consumer, in order, while messages with different keys are handled in
-parallel.** Here the key is the order id.
+partition, and each partition has one consumer at a time, so they are
+handled in order, while messages with different keys are handled in
+parallel.** Here the key is the order id. The consumer that owns a
+partition can change when consumers join or leave, and several orders
+share each partition.
 
 Press **Play**. It creates the partitioned queue `q.part.orders` (six
 partitions), starts **Fulfilment 1**, **2** and **3**, then the **Order
@@ -20,6 +23,10 @@ two updates a second) is the easiest to follow: each lane carries one colour
 at a time. **Busy** (ten orders, five a second) is closer to real
 traffic: several keys share most partitions. Changing it restarts the order
 service, so orders in progress at that moment never finish.
+
+To be walked through this page step by step, press **Guided tour** in the
+top bar: it tells you what to do, waits while you do it, and explains what
+you see. Its second tab, **Quick overview**, is a short spoken version.
 
 If a mark on the page is unclear, point at it, or see
 [Reading the dashboard](000-reading-the-dashboard.md).

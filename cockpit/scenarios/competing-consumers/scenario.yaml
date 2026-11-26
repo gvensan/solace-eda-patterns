@@ -69,6 +69,7 @@ diagram:
       contains:
         - id: emails
           label: q.cc.emails
+          depth: { queue: q.cc.emails, unit: waiting }
       provides:
         - label: q.cc.emails
           group: emails

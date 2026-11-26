@@ -1,0 +1,231 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "Event filtering means each consumer receives only the events it wants. The filter can be on the topic, or on message properties when the topic cannot carry what the consumer filters on.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The factory",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is a factory. Its sensors publish readings on topics that name the site, the line and the kind of sensor. Each reading also carries a severity, as a message property, not in the topic.",
+        "Two desks want different slices. Berlin Temperatures wants only Berlin temperature readings. Its queue's subscription says so, and the broker sends it nothing else.",
+        "The Alarm Desk wants severity four and five from anywhere. Severity is not in the topic, so its queue takes every reading, and the desk reads it with a selector: severity four or more."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "berlin",
+          "alarms",
+          "sensors"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the two queues, starts both desks, and then the Sensors, which publish five readings a second.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Filtered by topic",
+      "highlight": [
+        ".dg-node[data-node=\"berlin\"]"
+      ],
+      "do": "Click logs on the Berlin Temperatures node.",
+      "expect": {
+        "note": "The Berlin Temperatures log is not open yet.",
+        "logsOpen": "berlin"
+      },
+      "say": [
+        "Click logs on the Berlin Temperatures node. Every line is a Berlin temperature reading. The desk does no filtering of its own. The topic subscription on its queue already did it."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Filtered by selector",
+      "highlight": [
+        ".dg-node[data-node=\"alarms\"]"
+      ],
+      "do": "Click logs on the Alarm Desk node.",
+      "expect": {
+        "note": "The Alarm Desk log is not open yet.",
+        "logsOpen": "alarms"
+      },
+      "say": [
+        "Now click logs on the Alarm Desk node. Every line is a reading with severity four or five, from any site. About one reading in twelve is an alarm."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "What each filter leaves behind",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Compare the numbers on the two queues inside the broker.",
+      "say": [
+        "Compare the two queues in the broker. Berlin's queue stays near zero: only wanted readings ever reach it, and the desk takes them all.",
+        "The alarm queue keeps growing. A selector filters at delivery, not at the queue's door. The queue takes every reading its subscription matches, and the selector only decides which of them this consumer is given. The rest stay on the queue."
+      ],
+      "expect": {
+        "note": "The apps are not all running. Press Play first.",
+        "running": [
+          "berlin",
+          "alarms",
+          "sensors"
+        ]
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Turn the readings up",
+      "highlight": [
+        "#fmt-leftovers-fill-queue"
+      ],
+      "do": "Open the card Unmatched readings fill the alarm queue, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "leftovers-fill-queue",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called Unmatched readings fill the alarm queue, and press Break it.",
+        "The Sensors switch to high resolution: ten times the readings, each far bigger. Almost none of them are alarms."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The leftovers fill the queue",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]",
+        ".dg-node[data-node=\"berlin\"]"
+      ],
+      "do": "Watch the alarm queue's number and the Sensors log beside the diagram, for about half a minute.",
+      "say": [
+        "The alarm queue now grows fast. Keep watching for about half a minute. When it reaches its size limit, the log beside the diagram shows readings refused, with the words: Spool Over Quota.",
+        "Every reading is refused, not only at the alarm queue. Berlin Temperatures stops receiving too, and an alarm sent now reaches nobody. Readings nobody wanted have used up the space."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "leftovers-fill-queue",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Clear it out",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The sensors are not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "leftovers-fill-queue",
+          "state": "broken"
+        },
+        "running": [
+          "sensors"
+        ]
+      },
+      "say": [
+        "Press Reset. The Sensors go back to normal, and everything waiting on the alarm queue is deleted: the readings the selector left behind, and any alarm that had not been delivered yet.",
+        "Had the severity been a level in the topic, the queue could have subscribed to alarms only, and nothing would have been left behind."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A typo in the selector",
+      "highlight": [
+        "#fmt-selector-typo"
+      ],
+      "do": "Open the card The alarm desk's selector has a typo, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "selector-typo",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "A selector has another weakness. Open the card called The alarm desk's selector has a typo, and press Break it.",
+        "The Alarm Desk is redeployed with a mistake in its selector."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "Found only at bind time",
+      "highlight": [
+        ".dg-node[data-node=\"alarms\"]"
+      ],
+      "do": "Read the Alarm Desk log beside the diagram.",
+      "say": [
+        "The Alarm Desk connects, and then cannot bind to its queue. Its log gives the broker's reason, Invalid Selector, and it exits.",
+        "A selector is a small expression that the broker evaluates for every message. To the application and its compiler it is only a string, so a mistake shows when the broker parses it, as the consumer binds."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "selector-typo",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Put the selector right",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The alarm desk is not back yet. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "selector-typo",
+          "state": "broken"
+        },
+        "running": [
+          "alarms"
+        ]
+      },
+      "say": [
+        "Press Reset. The Alarm Desk starts with the right selector, and takes the alarms that waited."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is event filtering. Use it when consumers want subsets of a large stream: one site, one kind of sensor, one severity.",
+        "Filter on the topic wherever the topic can carry it. A selector works for the rest, but it is evaluated for every message, and on Solace it leaves what it does not match on the queue.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

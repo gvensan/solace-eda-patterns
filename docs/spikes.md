@@ -258,7 +258,9 @@ scenarios.
 **Addressing a queue by name.** The Go API publishes to topics only
 (`Publish(msg, *resource.Topic, ...)`), but every queue has a network topic,
 `#P2P/QUE/<queue>`. Publishing a guaranteed message to it delivers to that
-queue, which needs no topic subscription. Point-to-Point uses this.
+queue, which needs no topic subscription. Point-to-Point was built on this;
+since 2026-11-26 it publishes to a topic the queue subscribes to, and offers
+this as a Try this.
 
 What the documentation says, and does not say:
 
@@ -959,3 +961,24 @@ started.
 `setup_broker.sh` and the CI workflow now pass both limits. Not yet
 confirmed in a Codespace.
 
+
+## 27. Diagram lines tied to what the broker counts
+
+Tested on 10.26.0, 2026-11-26, while auditing the 17 released scenarios for
+dots drawn on a line that carried nothing (or none on a line that did).
+
+- A queue's `spooledMsgCount` (monitor API) stops rising when nothing
+  reaches the queue: a misspelt topic (Point-to-Point), ingress turned off
+  (Guaranteed Delivery), a queue at its quota (Event Filtering). `traffic:`
+  on a flow uses it.
+- A client's `dataTxMsgCount` (`/msgVpns/{vpn}/clients/<name>`, monitor
+  API) counts the messages the broker sent it. For a direct subscriber
+  whose subscription matches nothing it stays where it is (Hierarchical
+  Topics, both cards). `delivered:` on a flow uses it.
+- A client's `dataRxMsgCount` counts the messages the broker received from
+  it, and keeps rising for a request nobody answers (Event-Carried State
+  Transfer: invoicing's lookup, retried every 2 seconds). `sent:` on a flow
+  uses it.
+- Each was checked live at Play and under the card, by reading which lines
+  the page animates. The ten released scenarios that use none of these
+  were not re-run.

@@ -94,6 +94,21 @@ def check(path: pathlib.Path) -> list[str]:
             bad.append(f"diagram flow {flow.get('from')!r} -> {flow.get('to')!r} traffic: "
                        f"{flow['traffic']!r} is not a queue in tf/imports.tsv")
 
+    # delivered: names the client a direct subscriber connects as, so the
+    # dashboard can ask the broker whether it is being sent anything.
+    client_names = set()
+    for a in actions.values():
+        cmd = [str(c) for c in a.get("cmd", [])]
+        client_names.update(cmd[i + 1] for i, c in enumerate(cmd[:-1]) if c == "--client-name")
+    for flow in spec.get("diagram", {}).get("flows", []):
+        for key in ("delivered", "sent"):
+            if flow.get(key) and flow[key] not in client_names:
+                bad.append(f"diagram flow {flow.get('from')!r} -> {flow.get('to')!r} {key}: "
+                           f"{flow[key]!r} is not a --client-name of any action")
+    for node in spec.get("diagram", {}).get("nodes", []):
+        if "initiates" in node and node["initiates"] is not True:
+            bad.append(f"diagram node {node['id']!r} initiates: must be true or left out")
+
     for a in actions.values():
         if a.get("stands_for") and a["stands_for"] not in actions:
             bad.append(f"action {a['id']!r} stands_for missing action {a['stands_for']!r}")

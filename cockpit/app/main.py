@@ -521,7 +521,8 @@ async def _box_state(nodes) -> dict:
     return dict(await asyncio.gather(*(one(b) for b in boxes))) if boxes else {}
 
 
-# When each queue's spooled count last rose, keyed by queue name: (count, time).
+# When each queue's spooled count (or each client's count of messages sent to
+# it, keyed "client:<name>") last rose: (count, time).
 _traffic_seen: dict = {}
 
 # A queue whose count has not risen for this long is carrying nothing.
@@ -533,8 +534,35 @@ async def _traffic_state(flows) -> dict:
     have arrived on it in the last TRAFFIC_SECONDS, from its cumulative
     spooled count. A flow tied to a queue moves only while this is true, so
     the picture follows what the broker actually received, not what an app
-    is assumed to send. None where the broker could not be asked."""
+    is assumed to send. None where the broker could not be asked.
+
+    A flow's `delivered: <client name>` is judged the same way from the
+    messages the broker has sent that client, under the key
+    "client:<name>": for a direct subscriber, which has no queue to count."""
     queues = {f["traffic"] for f in flows if f.get("traffic")}
+    clients = {f["delivered"] for f in flows if f.get("delivered")}
+    # `sent: <client name>` on a flow into the broker: the messages the
+    # broker has received from that client, under "sent:<name>".
+    senders = {f["sent"] for f in flows if f.get("sent")}
+
+    def moved(key, count):
+        if count is None:
+            return key, None
+        now = time.monotonic()
+        last = _traffic_seen.get(key)
+        if last is None or count != last[0]:
+            _traffic_seen[key] = (count, now if last is not None else now - TRAFFIC_SECONDS)
+            return key, last is not None and count > last[0]
+        return key, now - last[1] < TRAFFIC_SECONDS
+
+    async def one_client(name, prefix="client", field="dataTxMsgCount"):
+        key = f"{prefix}:{name}"
+        try:
+            data = await broker.semp_get(
+                f"/msgVpns/{{vpn}}/clients/{quote(name, safe='')}?select={field}", api="monitor")
+            return moved(key, data.get("data", {}).get(field))
+        except Exception:
+            return key, None
 
     async def one(queue):
         try:
@@ -543,16 +571,13 @@ async def _traffic_state(flows) -> dict:
             count = data.get("data", {}).get("spooledMsgCount")
         except Exception:
             return queue, None
-        if count is None:
-            return queue, None
-        now = time.monotonic()
-        last = _traffic_seen.get(queue)
-        if last is None or count != last[0]:
-            _traffic_seen[queue] = (count, now if last is not None else now - TRAFFIC_SECONDS)
-            return queue, last is not None and count > last[0]
-        return queue, now - last[1] < TRAFFIC_SECONDS
+        return moved(queue, count)
 
-    return dict(await asyncio.gather(*(one(q) for q in queues))) if queues else {}
+    if not queues and not clients and not senders:
+        return {}
+    return dict(await asyncio.gather(
+        *(one(q) for q in queues), *(one_client(c) for c in clients),
+        *(one_client(c, "sent", "dataRxMsgCount") for c in senders)))
 
 
 @app.put("/api/scenarios/{scenario_id}/settings/{name}")

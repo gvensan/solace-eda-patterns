@@ -1,0 +1,214 @@
+{
+  "title": "Guided tour",
+  "minutes": 10,
+  "steps": [
+    {
+      "kind": "listen",
+      "title": "The pattern",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "A shock absorber is a queue between bursty producers and steady consumers. It takes the burst at the speed the producer sends it, and the consumers drain it at their own pace.",
+        "This tour takes about ten minutes. Each step tells you what to do, waits while you do it, and then explains what you see. Press Continue when you are ready."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "The ticket sale",
+      "highlight": [
+        "#diagram-host"
+      ],
+      "say": [
+        "This is concert ticket sales. When tickets go on sale, fifteen hundred purchase requests arrive in a couple of seconds. Otherwise they trickle in.",
+        "Two booking workers reserve seats at a steady twenty a second each. The queue between the On-Sale Page and the workers is the shock absorber. It has limits, in space and in time, and the two cards show both."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Run it",
+      "highlight": [
+        "#tp-play"
+      ],
+      "do": "Press Play, at the top of the page under Run it.",
+      "expect": {
+        "note": "Not everything is running yet. Play takes a few seconds.",
+        "running": [
+          "booking1",
+          "booking2",
+          "onsale"
+        ]
+      },
+      "say": [
+        "Press Play. It creates the queue and its dead message queue, starts the two booking workers, and then the On-Sale Page.",
+        "Press Continue when the dots on the diagram are moving."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A burst arrives",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Under Step through it, press Fire a burst now. Or wait: a burst comes every minute.",
+      "say": [
+        "Now watch a burst. Under Step through it, press Fire a burst now, or wait for the next one. The number on the queue jumps to about fifteen hundred within a couple of seconds, and then falls steadily as the two workers book forty a second between them."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The producer's side",
+      "highlight": [
+        ".dg-node[data-node=\"onsale\"]"
+      ],
+      "do": "Click logs on the On-Sale Page node.",
+      "expect": {
+        "note": "The On-Sale Page log is not open yet.",
+        "logsOpen": "onsale"
+      },
+      "say": [
+        "Click logs on the On-Sale Page node. For a burst it says how quickly the requests were handed over, and a few seconds later that the broker confirmed every one: all stored, none refused. While the burst fits in the queue, the page is not slowed down."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "The consumer's side",
+      "highlight": [
+        ".dg-node[data-node=\"booking1\"]"
+      ],
+      "do": "Click logs on the Booking 1 node.",
+      "expect": {
+        "note": "The Booking 1 log is not open yet.",
+        "logsOpen": "booking1"
+      },
+      "say": [
+        "Now click logs on the Booking 1 node. It books at its own steady pace, and for a request that waited more than a few seconds it says how long. The workers never see more than they can handle."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "A burst too big for the queue",
+      "highlight": [
+        "#fmt-burst-too-big"
+      ],
+      "do": "Open the card The burst is bigger than the queue, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "burst-too-big",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now break it. Scroll to Break it, open the card called The burst is bigger than the queue, and press Break it.",
+        "A second on-sale page releases six thousand tickets at once: four times the burst the queue was sized for."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The limit in space",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]",
+        ".dg-node[data-node=\"onsale\"]"
+      ],
+      "do": "Read that page's log beside the diagram, and watch the number on the queue.",
+      "say": [
+        "The first few thousand requests are stored. Then the broker refuses the rest, one at a time, with the words: Spool Over Quota. The page sums up how many customers got no booking.",
+        "A queue absorbs a burst up to its size, and not beyond. Past that, the publisher is told, and has to decide what to do. The size of the absorber is a decision, made from the biggest burst you expect."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "burst-too-big",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Clear the backlog",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "burst-too-big",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. It clears the backlog, which would otherwise take the workers more than a minute."
+      ]
+    },
+    {
+      "kind": "do",
+      "title": "Requests that cannot wait",
+      "highlight": [
+        "#fmt-requests-expire"
+      ],
+      "do": "Open the card Requests go stale while they wait, and press Break it.",
+      "expect": {
+        "note": "The card is not in effect yet. Open it and press Break it.",
+        "card": {
+          "id": "requests-expire",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Now the second limit. Open the card called Requests go stale while they wait, and press Break it.",
+        "A second on-sale page releases fifteen hundred tickets whose seat holds lapse after twenty seconds."
+      ]
+    },
+    {
+      "kind": "look",
+      "title": "The limit in time",
+      "highlight": [
+        ".dg-node[data-node=\"broker\"]"
+      ],
+      "do": "Watch the two queues inside the broker for about half a minute.",
+      "say": [
+        "The burst takes the two workers about forty seconds to get through. So the requests at the back are still waiting when their twenty seconds run out. Watch for half a minute: the broker moves each of those to the dead message queue, and its number climbs.",
+        "Absorbing a burst costs time. A request that waits is a request handled late, and a time to live on the message says how late is too late."
+      ],
+      "expect": {
+        "note": "The card is not in effect, so there is nothing to see yet.",
+        "card": {
+          "id": "requests-expire",
+          "state": "broken"
+        }
+      }
+    },
+    {
+      "kind": "do",
+      "title": "Clear both queues",
+      "highlight": [
+        ".failbar"
+      ],
+      "do": "Press Reset, in the bar at the top of the page.",
+      "expect": {
+        "note": "The card is still in effect. Press Reset in the bar at the top.",
+        "cardNot": {
+          "id": "requests-expire",
+          "state": "broken"
+        }
+      },
+      "say": [
+        "Press Reset. It clears what is left on the purchase queue, and deletes the expired requests on the dead message queue. Both numbers go back to zero."
+      ]
+    },
+    {
+      "kind": "listen",
+      "title": "When to use it",
+      "highlight": [
+        ".pattern"
+      ],
+      "say": [
+        "That is the shock absorber. Use it when load arrives in spikes, such as a sale or a batch job, that the consumers could not take all at once.",
+        "The cost is that work waits. A burst bigger than the queue is refused, and some requests are stale by the time they are handled.",
+        "Press Cleanup when you are done, or pick another pattern from the sidebar."
+      ]
+    }
+  ]
+}

@@ -55,6 +55,8 @@ diagram:
   nodes:
     - id: till
       label: Till
+      # Asks by its own clock; the answers flow back to it.
+      initiates: true
       sublabel: asks a price a second
       kind: app
       col: 0
@@ -84,9 +86,9 @@ diagram:
           semp: /msgVpns/{vpn}/clientUsernames/svc-rr-pricing
   flows:
     - { from: till, to: broker, label: request, delay: 0 }
-    - { from: broker, to: pricing, label: rr/pricing/price/request/v1/<sku>, delay: 0.6 }
+    - { from: broker, to: pricing, label: rr/pricing/price/request/v1/<sku>, source: till, delay: 0.6 }
     - { from: pricing, to: broker, label: reply, delay: 1.2 }
-    - { from: broker, to: till, label: reply topic, delay: 1.8 }
+    - { from: broker, to: till, label: reply topic, source: pricing, delay: 1.8 }
 
 actions:
   - id: apply

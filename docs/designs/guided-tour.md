@@ -1,7 +1,8 @@
 # Guided tour: design note and first script
 
-Status, 2026-11-26: built for the eight released patterns (110 to 240),
-text only. Not voiced yet.
+Status, 2026-11-26: built for the seventeen released patterns (110 to
+440), text only. The tours are not voiced yet; every one of those patterns
+has a voiced Quick overview.
 
 What was built differs from the proposal below in three places:
 

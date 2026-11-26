@@ -278,7 +278,9 @@ failure_modes:
       of each price change on each. A queue keeps its messages until its
       own consumers take them, whatever happens to the other queue. That is
       what makes the groups independent: one can stop, slow down or fall
-      behind, and the other is not affected.
+      behind, and the other is not affected, as long as the backlog fits
+      in the stopped group's queue. They still share the publisher and the
+      broker's own limits.
     real_world: >
       A reporting team taking its consumers down for a deploy while the
       checkout team carries on. Each team's backlog is its own, and its own

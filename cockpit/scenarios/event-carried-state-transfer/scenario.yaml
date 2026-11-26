@@ -159,7 +159,9 @@ diagram:
     - { id: records, from: customers, to: broker, via: shipq, label: whole customer records, delay: 0.3 }
     - { id: to-shipping, from: broker, to: shipping, via: shipq, label: orders + records, labelAt: 0.45, delay: 0.8 }
     - { id: to-invoicing, from: broker, to: invoicing, via: invq, label: orders only, delay: 0.8 }
-    - { id: lookup, from: invoicing, to: broker, label: lookup, delay: 1.4 }
+    # Moves while invoicing is really asking: it keeps retrying a lookup
+    # while the customer service is down, though no new order reaches it.
+    - { id: lookup, from: invoicing, to: broker, label: lookup, sent: ecst-invoicing, delay: 1.4 }
     - { id: lookup-in, from: broker, to: customers, label: lookup, source: invoicing, delay: 1.9 }
   paths:
     - label: A customer changes, and the whole record travels
