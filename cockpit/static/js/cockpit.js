@@ -1849,12 +1849,15 @@
       // shrinks does not move the page. Each read follows the first changed
       // row, unless the pointer is on the table: then the reader is
       // scrolling it, and it stays where they left it.
-      const was = body.querySelector(".hold__scroll");
+      // Read before the swap: an element taken off the page reports 0.
+      const scrolledTo = body.querySelector(".hold__scroll")?.scrollTop || 0;
       const scroll = h("div", { class: "hold__scroll" }, table);
       body.replaceChildren(...[scroll, report.note && h("p", { class: "hold__note", text: report.note })].filter(Boolean));
-      if (was) scroll.scrollTop = was.scrollTop;
+      scroll.scrollTop = scrolledTo;
       const first = table.querySelector("tr.is-changed");
-      if (first && !(was && was.matches(":hover"))) {
+      // Asked of the body, which stays: the table under the pointer was just
+      // replaced, and a new element is not :hover until the pointer moves.
+      if (first && !body.matches(":hover")) {
         const head = table.querySelector("thead")?.offsetHeight || 0;
         const top = first.offsetTop - head;
         const bottom = first.offsetTop + first.offsetHeight;
