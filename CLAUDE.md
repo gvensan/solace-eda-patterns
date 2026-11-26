@@ -46,6 +46,7 @@ host with Go, a C toolchain, Terraform and Python (see "Local development").
 python3 cockpit/scripts/check_scenarios.py        # validate every scenario.yaml; run after any change
 ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py <id>   # Play, each Break it and Reset, Cleanup, Clear, Play again
 ${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/browser_pass.py <id>   # headless page pass: Play, cards, Cleanup, screenshots
+scripts/smoke.sh [<id>... | --all | --help]       # pre-push check: checker, then smoke on the released scenarios; CI does not run on push
 bash cockpit/apps/build.sh                        # rebuild the Go binary (run.sh also rebuilds when stale)
 ./dev.sh start | stop | restart | status | logs | check <id>   # on a host machine (see Local development)
 pkill -TERM -f "[u]vicorn cockpit.app"; sleep 4; bash cockpit/start_cockpit.sh   # restart inside a container
