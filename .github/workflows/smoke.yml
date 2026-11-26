@@ -6,13 +6,10 @@ name: Scenario check and smoke test
 # broker config and Play again, driven through the dashboard's API exactly as
 # smoke.py does on a developer machine.
 
-# Temporarily manual only: the smoke test is run locally before each push
-# (smoke.py --released). To run it here, use "Run workflow" on the Actions
-# tab. To have it run on every push again, restore the two triggers below.
 on:
-  # push:
-  #   branches: [main]
-  # pull_request:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
