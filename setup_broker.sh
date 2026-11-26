@@ -72,10 +72,14 @@ else
     # host.docker.internal lets the broker reach an app on this machine (or
     # in this Codespace), which is where a REST delivery point posts to.
     # Docker Desktop provides the name already; on Linux host-gateway does.
+    # The open-file limit is set here because the broker checks it at start
+    # and shuts down if the hard limit is too low. Docker's default differs
+    # by host: high on Docker Desktop, 65536 on a GitHub-hosted Linux machine.
     docker run -d -p "${SEMP_PORT}:8080" -p "${SMF_PORT}:55555" \
       -p "${MQTT_PORT}:1883" -p "${REST_PORT}:9000" "${EXTRA_PORTS[@]}" \
       --add-host=host.docker.internal:host-gateway \
       --shm-size=2g --restart unless-stopped \
+      --ulimit core=-1 --ulimit nofile=2448:1048576 \
       --env username_admin_globalaccesslevel=admin \
       --env "username_admin_password=${SEMP_PASSWORD}" \
       --name="$BROKER_NAME" "$BROKER_IMAGE"

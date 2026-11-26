@@ -937,3 +937,25 @@ Tested 2026-11-16 on the local broker, with the test-only
   counter's position. The counter stopped and started: flow 115 had acked
   129, the new flow 116 started from zero (45 after 8 s). The guide says
   the position is the queue itself.
+
+## 26. The broker's open-file limit, on a GitHub-hosted Linux machine
+
+2026-11-26. The first CI run of the smoke workflow failed at "Wait for the
+broker": the container had exited with code 2 about 15 seconds after it
+started.
+
+- The broker log on the runner (ubuntu-26.04, broker 10.26.0): "POST
+  Violation [022]:Required system resource missing, Hard resource limit
+  nofile 524288 is required, 65536 detected", then "Determining platform
+  type: [ FAIL ]" and "System shutdown complete".
+- Reproduced on a Mac with `--ulimit nofile=65536:65536`: the container
+  exits with code 2 and the same violation (there it asks for 1048576).
+- With `--ulimit core=-1 --ulimit nofile=2448:1048576` the broker starts
+  and SEMP answers 200 within a minute.
+- Docker Desktop on the Mac gives a container a hard limit of 1048576 by
+  default (`ulimit -Hn` inside the running broker), which is why the
+  missing flag never showed locally.
+
+`setup_broker.sh` and the CI workflow now pass both limits. Not yet
+confirmed in a Codespace.
+

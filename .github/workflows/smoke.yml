@@ -43,7 +43,10 @@ jobs:
         # Started first: it takes a minute or two to boot, which the other
         # setup steps use.
         run: |
+          # The same limits as setup_broker.sh: the broker shuts down at
+          # start if its hard open-file limit is below what it requires.
           docker run -d --name solace --shm-size=2g \
+            --ulimit core=-1 --ulimit nofile=2448:1048576 \
             -p 8080:8080 -p 55555:55555 \
             --env username_admin_globalaccesslevel=admin \
             --env username_admin_password=admin \
