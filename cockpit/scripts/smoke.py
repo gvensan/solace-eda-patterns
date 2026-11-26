@@ -23,6 +23,8 @@ Run with the dashboard's virtualenv, which has httpx and websockets:
 COCKPIT_URL overrides http://localhost:3000. --set <name>=<value> chooses a
 scenario setting (for example --set pace=busy) before Play; every scenario
 that has that setting runs with it, and it is put back to its default after.
+--released tests only the scenarios the sidebar lists (those below
+RELEASED_BELOW in cockpit/static/js/cockpit.js), which is what CI runs.
 
 Two things make a run meaningless, and fail it: another client changing
 the scenarios under test meanwhile (a Break it pressed in an open tab), or
@@ -38,6 +40,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import websockets
@@ -527,7 +530,17 @@ async def apply_settings(client, scenarios, chosen: dict, default: bool = False)
                     say(f"  {scenario['id']}: {name} = {value}")
 
 
-async def main(ids, chosen_settings) -> int:
+def released_below() -> float:
+    """The order below which a scenario is released, read from the page's
+    own constant so the sidebar and CI can never disagree."""
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "cockpit.js").read_text()
+    m = re.search(r"const RELEASED_BELOW = (\d+|Infinity);", js)
+    if not m:
+        raise SystemExit("--released: no RELEASED_BELOW constant in cockpit/static/js/cockpit.js")
+    return float("inf") if m.group(1) == "Infinity" else float(m.group(1))
+
+
+async def main(ids, chosen_settings, released=False) -> int:
     started = time.time()
     slept: list = []
     sleeper = asyncio.create_task(watch_for_sleep(slept))
@@ -538,6 +551,11 @@ async def main(ids, chosen_settings) -> int:
         missing = set(ids) - {s["id"] for s in chosen}
         for sid in sorted(missing):
             fail(f"no scenario {sid!r}")
+        if released:
+            below = released_below()
+            held = [s["id"] for s in chosen if s["order"] >= below]
+            chosen = [s for s in chosen if s["order"] < below]
+            say(f"Released scenarios only (order below {below:g}): {len(chosen)} tested, {len(held)} held back and skipped.")
         await apply_settings(client, chosen, chosen_settings)
         try:
             for scenario in chosen:
@@ -555,13 +573,15 @@ async def main(ids, chosen_settings) -> int:
 
 
 if __name__ == "__main__":
-    args, settings = [], {}
+    args, settings, released = [], {}, False
     argv = sys.argv[1:]
     while argv:
         arg = argv.pop(0)
         if arg == "--set" and argv:
             name, _, value = argv.pop(0).partition("=")
             settings[name] = value
+        elif arg == "--released":
+            released = True
         else:
             args.append(arg)
-    sys.exit(asyncio.run(main(args, settings)))
+    sys.exit(asyncio.run(main(args, settings, released)))

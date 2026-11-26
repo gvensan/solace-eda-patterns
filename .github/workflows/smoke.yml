@@ -1,6 +1,7 @@
 name: Scenario check and smoke test
 
-# Every scenario, end to end, on a real Standard edition broker: the checker,
+# Every released scenario (the categories the sidebar lists), end to end, on
+# a real Standard edition broker: the checker over all scenarios,
 # then Play, every Break it and Reset with its expect: block, Cleanup, Clear
 # broker config and Play again, driven through the dashboard's API exactly as
 # smoke.py does on a developer machine.
@@ -111,8 +112,11 @@ jobs:
       - name: Start the dashboard
         run: bash cockpit/start_cockpit.sh
 
-      - name: Smoke test every scenario
-        run: cockpit/.venv/bin/python cockpit/scripts/smoke.py
+      - name: Smoke test the released scenarios
+        # Only the categories the sidebar lists (RELEASED_BELOW in
+        # cockpit/static/js/cockpit.js). Raising that constant releases a
+        # category to attendees and to this test together.
+        run: cockpit/.venv/bin/python cockpit/scripts/smoke.py --released
 
       - name: Dashboard log
         if: always()

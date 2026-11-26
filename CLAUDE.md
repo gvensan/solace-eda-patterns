@@ -211,7 +211,9 @@ names and links); `grep -rn "<old-id>" cockpit guides README.md` finds them.
 4. `${COCKPIT_VENV:-cockpit/.venv}/bin/python cockpit/scripts/smoke.py <id>` reports 0
    problems. It runs Play, every Break it and Reset, Cleanup, Clear broker
    config and Play again from an empty broker, checks every `expect:` block,
-   and prints each card's log. CI runs the same on Linux for every push.
+   and prints each card's log. CI runs the same on Linux for every push,
+   for the released scenarios only (`smoke.py --released`, the ones below
+   `RELEASED_BELOW` in `cockpit/static/js/cockpit.js`).
 5. Read those logs too: `expect:` checks the words, a person checks that the
    failure and the recovery read the way the card describes.
 6. Look at the page in a browser. The diagram, the flowchart and the Break it
